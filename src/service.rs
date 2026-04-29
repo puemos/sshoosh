@@ -1,10 +1,15 @@
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
 use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::db::Database;
@@ -14,6 +19,7 @@ pub struct ServerState {
     pub db: Database,
     writer: WriteHandle,
     live_tx: broadcast::Sender<LiveEvent>,
+    active_connections: Arc<RwLock<HashMap<String, usize>>>,
 }
 
 #[derive(Clone)]
@@ -70,12 +76,60 @@ impl Role {
 }
 
 #[derive(Clone, Debug)]
+pub struct UserPresence {
+    pub username: String,
+    pub display_name: String,
+    pub last_seen_at: Option<String>,
+    pub connected: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresenceState {
+    Online,
+    Away,
+    Offline,
+}
+
+impl UserPresence {
+    pub fn state(&self) -> PresenceState {
+        if self.connected {
+            return PresenceState::Online;
+        }
+        let Some(last_seen_at) = self.last_seen_at.as_deref() else {
+            return PresenceState::Offline;
+        };
+        let Ok(last_seen_at) = time::OffsetDateTime::parse(
+            last_seen_at,
+            &time::format_description::well_known::Rfc3339,
+        ) else {
+            return PresenceState::Offline;
+        };
+        let age = time::OffsetDateTime::now_utc() - last_seen_at;
+        let age = age.whole_seconds().max(0);
+        if age <= 3600 {
+            PresenceState::Away
+        } else {
+            PresenceState::Offline
+        }
+    }
+
+    pub fn state_label(&self) -> &'static str {
+        match self.state() {
+            PresenceState::Online => "online",
+            PresenceState::Away => "away",
+            PresenceState::Offline => "offline",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Channel {
     pub id: String,
     pub slug: String,
     pub name: String,
     pub visibility: String,
     pub topic: Option<String>,
+    pub unread_count: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +142,8 @@ pub struct ThreadItem {
     pub comment_count: i64,
     pub last_comment_index: i64,
     pub unread_count: i64,
+    pub last_activity_at: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +152,7 @@ pub struct CommentItem {
     pub author: String,
     pub obj_index: i64,
     pub body: String,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +161,8 @@ pub struct Conversation {
     pub peer_username: String,
     pub last_message_index: i64,
     pub unread_count: i64,
+    pub last_activity_at: Option<String>,
+    pub last_message_preview: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -111,10 +170,13 @@ pub struct ConversationMessage {
     pub author: String,
     pub obj_index: i64,
     pub body: String,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
+    pub current_username: Option<String>,
+    pub users: Vec<UserPresence>,
     pub channels: Vec<Channel>,
     pub threads: Vec<ThreadItem>,
     pub comments: Vec<CommentItem>,
@@ -123,6 +185,54 @@ pub struct Snapshot {
     pub selected_channel_id: Option<String>,
     pub selected_thread_id: Option<String>,
     pub selected_conversation_id: Option<String>,
+}
+
+impl Snapshot {
+    pub fn online_user_count(&self) -> usize {
+        self.users
+            .iter()
+            .filter(|user| user.state() == PresenceState::Online)
+            .count()
+    }
+
+    pub fn presence_for(&self, username: &str) -> PresenceState {
+        self.users
+            .iter()
+            .find(|user| user.username.eq_ignore_ascii_case(username))
+            .map(UserPresence::state)
+            .unwrap_or(PresenceState::Offline)
+    }
+
+    pub fn total_unread(&self) -> i64 {
+        self.channels
+            .iter()
+            .map(|channel| channel.unread_count)
+            .sum::<i64>()
+            + self
+                .conversations
+                .iter()
+                .map(|conversation| conversation.unread_count)
+                .sum::<i64>()
+    }
+
+    pub fn channel_unread(&self, channel_id: &str) -> i64 {
+        self.channels
+            .iter()
+            .find(|channel| channel.id == channel_id)
+            .map(|channel| channel.unread_count)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NextUnread {
+    Thread {
+        channel_id: String,
+        thread_id: String,
+    },
+    Conversation {
+        conversation_id: String,
+    },
 }
 
 #[derive(Debug)]
@@ -182,6 +292,7 @@ impl ServerState {
             db: db.clone(),
             writer: WriteHandle { tx },
             live_tx,
+            active_connections: Arc::new(RwLock::new(HashMap::new())),
         };
         start_writer(db.write_pool().clone(), state.live_tx.clone(), rx);
         Ok(state)
@@ -328,6 +439,8 @@ impl ServerState {
         }
 
         let channels = load_channels(self.db.read_pool(), account_id).await?;
+        let active_account_ids = self.active_account_ids().await;
+        let users = load_user_presence(self.db.read_pool(), &active_account_ids).await?;
         let selected_channel_id = selected_channel_id
             .filter(|id| channels.iter().any(|channel| channel.id == *id))
             .map(ToOwned::to_owned)
@@ -364,6 +477,8 @@ impl ServerState {
             };
 
         Ok(Snapshot {
+            current_username: Some(account.username),
+            users,
             channels,
             threads,
             comments,
@@ -373,6 +488,85 @@ impl ServerState {
             selected_thread_id,
             selected_conversation_id,
         })
+    }
+
+    pub async fn touch_account(&self, account_id: &str) -> anyhow::Result<()> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let username: Option<String> = sqlx::query_scalar(
+            "SELECT username FROM accounts
+             WHERE id = ? AND activated_at IS NOT NULL AND disabled_at IS NULL",
+        )
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(username) = username else {
+            tx.commit().await?;
+            return Ok(());
+        };
+        let now = now();
+        sqlx::query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(&now)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+        let event = insert_event(
+            &mut tx,
+            None,
+            None,
+            None,
+            "presence.updated",
+            serde_json::json!({"account_id": account_id, "username": username}),
+        )
+        .await?;
+        tx.commit().await?;
+        publish(&self.live_tx, event);
+        Ok(())
+    }
+
+    pub async fn begin_account_session(&self, account_id: &str) -> anyhow::Result<()> {
+        {
+            let mut active_connections = self.active_connections.write().await;
+            *active_connections
+                .entry(account_id.to_string())
+                .or_default() += 1;
+        }
+        if let Err(err) = self.touch_account(account_id).await {
+            self.remove_account_session(account_id).await;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    pub async fn end_account_session(&self, account_id: &str) -> anyhow::Result<()> {
+        let disconnected = self.remove_account_session(account_id).await;
+        if disconnected {
+            self.touch_account(account_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn remove_account_session(&self, account_id: &str) -> bool {
+        let mut active_connections = self.active_connections.write().await;
+        let Some(count) = active_connections.get_mut(account_id) else {
+            return false;
+        };
+        if *count > 1 {
+            *count -= 1;
+            false
+        } else {
+            active_connections.remove(account_id);
+            true
+        }
+    }
+
+    async fn active_account_ids(&self) -> HashSet<String> {
+        self.active_connections
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect()
     }
 
     pub async fn create_invite(&self, actor_id: String) -> anyhow::Result<String> {
@@ -433,6 +627,142 @@ impl ServerState {
         body: String,
     ) -> anyhow::Result<()> {
         self.writer.send_dm(actor_id, conversation_id, body).await
+    }
+
+    pub async fn mark_thread_read(&self, account_id: &str, thread_id: &str) -> anyhow::Result<()> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let last_index: i64 =
+            sqlx::query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
+                .bind(thread_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        sqlx::query(
+            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
+             VALUES (?, ?, ?, NULL)
+             ON CONFLICT(thread_id, account_id)
+             DO UPDATE SET last_read_index = excluded.last_read_index, marked_unread_at = NULL",
+        )
+        .bind(thread_id)
+        .bind(account_id)
+        .bind(last_index)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn mark_thread_unread(
+        &self,
+        account_id: &str,
+        thread_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let last_index: i64 =
+            sqlx::query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
+                .bind(thread_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let unread_from = last_index.saturating_sub(1);
+        sqlx::query(
+            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(thread_id, account_id)
+             DO UPDATE SET last_read_index = excluded.last_read_index, marked_unread_at = excluded.marked_unread_at",
+        )
+        .bind(thread_id)
+        .bind(account_id)
+        .bind(unread_from)
+        .bind(now())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn mark_conversation_read(
+        &self,
+        account_id: &str,
+        conversation_id: &str,
+    ) -> anyhow::Result<()> {
+        let last_index: i64 =
+            sqlx::query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
+                .bind(conversation_id)
+                .fetch_one(self.db.read_pool())
+                .await?;
+        sqlx::query(
+            "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
+        )
+        .bind(last_index)
+        .bind(conversation_id)
+        .bind(account_id)
+        .execute(self.db.write_pool())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_conversation_unread(
+        &self,
+        account_id: &str,
+        conversation_id: &str,
+    ) -> anyhow::Result<()> {
+        let last_index: i64 =
+            sqlx::query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
+                .bind(conversation_id)
+                .fetch_one(self.db.read_pool())
+                .await?;
+        sqlx::query(
+            "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
+        )
+        .bind(last_index.saturating_sub(1))
+        .bind(conversation_id)
+        .bind(account_id)
+        .execute(self.db.write_pool())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn next_unread(&self, account_id: &str) -> anyhow::Result<Option<NextUnread>> {
+        if let Some(row) = sqlx::query(
+            "SELECT t.channel_id, t.id AS thread_id
+             FROM threads t
+             JOIN channels c ON c.id = t.channel_id
+             LEFT JOIN thread_reads r ON r.thread_id = t.id AND r.account_id = ?
+             WHERE t.deleted_at IS NULL
+               AND t.last_comment_index - COALESCE(r.last_read_index, 0) > 0
+               AND (
+                 c.visibility = 'public'
+                 OR EXISTS (
+                    SELECT 1 FROM channel_members m
+                    WHERE m.channel_id = c.id AND m.account_id = ?
+                 )
+               )
+             ORDER BY t.last_activity_at DESC
+             LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(account_id)
+        .fetch_optional(self.db.read_pool())
+        .await?
+        {
+            return Ok(Some(NextUnread::Thread {
+                channel_id: row.get("channel_id"),
+                thread_id: row.get("thread_id"),
+            }));
+        }
+
+        let conversation_id: Option<String> = sqlx::query_scalar(
+            "SELECT c.id
+             FROM conversations c
+             JOIN conversation_members me ON me.conversation_id = c.id AND me.account_id = ?
+             WHERE c.last_message_index - me.last_read_index > 0
+               AND c.archived_at IS NULL
+             ORDER BY c.last_activity_at DESC
+             LIMIT 1",
+        )
+        .bind(account_id)
+        .fetch_optional(self.db.read_pool())
+        .await?;
+        Ok(conversation_id.map(|conversation_id| NextUnread::Conversation { conversation_id }))
     }
 }
 
@@ -757,6 +1087,7 @@ async fn create_channel(
     let actor = load_account_tx(&mut tx, actor_id).await?;
     anyhow::ensure!(actor.activated, "Account is not activated");
     let slug = normalize_slug(name)?;
+    ensure_channel_name_available(&mut tx, &slug).await?;
     let now = now();
     let channel_id = id();
     sqlx::query(
@@ -852,10 +1183,17 @@ async fn create_thread(
     title: &str,
     body: &str,
 ) -> anyhow::Result<String> {
-    anyhow::ensure!(!title.trim().is_empty(), "Thread title is required");
+    let title = title.trim();
+    anyhow::ensure!(!title.is_empty(), "Thread title is required");
     anyhow::ensure!(!body.trim().is_empty(), "Thread body is required");
+    let title_key = normalize_name_key(title);
+    anyhow::ensure!(
+        !title_key.is_empty(),
+        "Thread title must contain letters or numbers"
+    );
     let mut tx = begin(pool).await?;
     ensure_can_view_channel(&mut tx, actor_id, channel_id).await?;
+    ensure_thread_name_available(&mut tx, channel_id, &title_key).await?;
     let now = now();
     let thread_id = id();
     sqlx::query(
@@ -866,7 +1204,7 @@ async fn create_thread(
     .bind(&thread_id)
     .bind(channel_id)
     .bind(actor_id)
-    .bind(title.trim())
+    .bind(title)
     .bind(body.trim())
     .bind(&now)
     .bind(&now)
@@ -888,7 +1226,7 @@ async fn create_thread(
         Some(&thread_id),
         None,
         "thread.created",
-        serde_json::json!({"thread_id": thread_id, "channel_id": channel_id, "title": title.trim()}),
+        serde_json::json!({"thread_id": thread_id, "channel_id": channel_id, "title": title}),
     )
     .await?;
     tx.commit().await?;
@@ -1110,15 +1448,121 @@ async fn send_dm(
     Ok(())
 }
 
+async fn ensure_channel_name_available(
+    tx: &mut Transaction<'_, Sqlite>,
+    slug: &str,
+) -> anyhow::Result<()> {
+    let existing_channel: Option<String> =
+        sqlx::query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
+            .bind(slug)
+            .fetch_optional(&mut **tx)
+            .await?;
+    anyhow::ensure!(
+        existing_channel.is_none(),
+        "A channel or thread named '{slug}' already exists"
+    );
+    anyhow::ensure!(
+        !active_thread_name_exists(tx, None, slug).await?,
+        "A channel or thread named '{slug}' already exists"
+    );
+    Ok(())
+}
+
+async fn ensure_thread_name_available(
+    tx: &mut Transaction<'_, Sqlite>,
+    channel_id: &str,
+    title_key: &str,
+) -> anyhow::Result<()> {
+    let existing_channel: Option<String> =
+        sqlx::query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
+            .bind(title_key)
+            .fetch_optional(&mut **tx)
+            .await?;
+    anyhow::ensure!(
+        existing_channel.is_none(),
+        "A channel or thread named '{title_key}' already exists"
+    );
+    anyhow::ensure!(
+        !active_thread_name_exists(tx, Some(channel_id), title_key).await?,
+        "A thread named '{title_key}' already exists in this channel"
+    );
+    Ok(())
+}
+
+async fn active_thread_name_exists(
+    tx: &mut Transaction<'_, Sqlite>,
+    channel_id: Option<&str>,
+    name_key: &str,
+) -> anyhow::Result<bool> {
+    let rows = if let Some(channel_id) = channel_id {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title
+             FROM threads
+             WHERE channel_id = ?
+               AND deleted_at IS NULL
+               AND archived_at IS NULL",
+        )
+        .bind(channel_id)
+        .fetch_all(&mut **tx)
+        .await?
+    } else {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title
+             FROM threads
+             WHERE deleted_at IS NULL
+               AND archived_at IS NULL",
+        )
+        .fetch_all(&mut **tx)
+        .await?
+    };
+    Ok(rows
+        .into_iter()
+        .any(|title| normalize_name_key(&title) == name_key))
+}
+
 async fn begin(pool: &SqlitePool) -> anyhow::Result<Transaction<'_, Sqlite>> {
     let tx = pool.begin().await?;
     Ok(tx)
 }
 
+async fn load_user_presence(
+    pool: &SqlitePool,
+    active_account_ids: &HashSet<String>,
+) -> anyhow::Result<Vec<UserPresence>> {
+    let rows = sqlx::query(
+        "SELECT id, username, display_name, last_seen_at
+         FROM accounts
+         WHERE activated_at IS NOT NULL AND disabled_at IS NULL
+         ORDER BY username",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let account_id: String = row.get("id");
+            UserPresence {
+                connected: active_account_ids.contains(&account_id),
+                username: row.get("username"),
+                display_name: row.get("display_name"),
+                last_seen_at: row.get("last_seen_at"),
+            }
+        })
+        .collect())
+}
+
 async fn load_channels(pool: &SqlitePool, account_id: &str) -> anyhow::Result<Vec<Channel>> {
     let rows = sqlx::query(
-        "SELECT c.id, c.slug, c.name, c.visibility, c.topic
+        "SELECT c.id, c.slug, c.name, c.visibility, c.topic,
+                COALESCE(SUM(
+                    CASE
+                      WHEN t.id IS NULL THEN 0
+                      ELSE MAX(t.last_comment_index - COALESCE(r.last_read_index, 0), 0)
+                    END
+                ), 0) AS unread_count
          FROM channels c
+         LEFT JOIN threads t ON t.channel_id = c.id AND t.deleted_at IS NULL
+         LEFT JOIN thread_reads r ON r.thread_id = t.id AND r.account_id = ?
          WHERE c.archived_at IS NULL
            AND (
              c.visibility = 'public'
@@ -1127,8 +1571,10 @@ async fn load_channels(pool: &SqlitePool, account_id: &str) -> anyhow::Result<Ve
                 WHERE m.channel_id = c.id AND m.account_id = ?
              )
            )
+         GROUP BY c.id, c.slug, c.name, c.visibility, c.topic
          ORDER BY CASE WHEN c.slug = 'general' THEN 0 ELSE 1 END, c.slug",
     )
+    .bind(account_id)
     .bind(account_id)
     .fetch_all(pool)
     .await?;
@@ -1140,6 +1586,7 @@ async fn load_channels(pool: &SqlitePool, account_id: &str) -> anyhow::Result<Ve
             name: row.get("name"),
             visibility: row.get("visibility"),
             topic: row.get("topic"),
+            unread_count: row.get("unread_count"),
         })
         .collect())
 }
@@ -1152,7 +1599,8 @@ async fn load_threads(
     let rows = sqlx::query(
         "SELECT t.id, t.channel_id, t.title, t.body, a.username AS author,
                 t.comment_count, t.last_comment_index,
-                MAX(t.last_comment_index - COALESCE(r.last_read_index, 0), 0) AS unread_count
+                MAX(t.last_comment_index - COALESCE(r.last_read_index, 0), 0) AS unread_count,
+                t.last_activity_at, t.created_at
          FROM threads t
          JOIN accounts a ON a.id = t.creator_account_id
          LEFT JOIN thread_reads r ON r.thread_id = t.id AND r.account_id = ?
@@ -1175,13 +1623,15 @@ async fn load_threads(
             comment_count: row.get("comment_count"),
             last_comment_index: row.get("last_comment_index"),
             unread_count: row.get("unread_count"),
+            last_activity_at: row.get("last_activity_at"),
+            created_at: row.get("created_at"),
         })
         .collect())
 }
 
 async fn load_comments(pool: &SqlitePool, thread_id: &str) -> anyhow::Result<Vec<CommentItem>> {
     let rows = sqlx::query(
-        "SELECT c.id, a.username AS author, c.obj_index, c.body
+        "SELECT c.id, a.username AS author, c.obj_index, c.body, c.created_at
          FROM comments c
          JOIN accounts a ON a.id = c.author_account_id
          WHERE c.thread_id = ? AND c.deleted_at IS NULL
@@ -1198,6 +1648,7 @@ async fn load_comments(pool: &SqlitePool, thread_id: &str) -> anyhow::Result<Vec
             author: row.get("author"),
             obj_index: row.get("obj_index"),
             body: row.get("body"),
+            created_at: row.get("created_at"),
         })
         .collect())
 }
@@ -1210,7 +1661,15 @@ async fn load_conversations(
         "SELECT c.id,
                 peer.username AS peer_username,
                 c.last_message_index,
-                MAX(c.last_message_index - me.last_read_index, 0) AS unread_count
+                MAX(c.last_message_index - me.last_read_index, 0) AS unread_count,
+                c.last_activity_at,
+                (
+                    SELECT body
+                    FROM conversation_messages latest
+                    WHERE latest.conversation_id = c.id AND latest.deleted_at IS NULL
+                    ORDER BY latest.obj_index DESC
+                    LIMIT 1
+                ) AS last_message_preview
          FROM conversations c
          JOIN conversation_members me ON me.conversation_id = c.id AND me.account_id = ?
          JOIN conversation_members other ON other.conversation_id = c.id AND other.account_id <> ?
@@ -1229,6 +1688,8 @@ async fn load_conversations(
             peer_username: row.get("peer_username"),
             last_message_index: row.get("last_message_index"),
             unread_count: row.get("unread_count"),
+            last_activity_at: row.get("last_activity_at"),
+            last_message_preview: row.get("last_message_preview"),
         })
         .collect())
 }
@@ -1238,7 +1699,7 @@ async fn load_conversation_messages(
     conversation_id: &str,
 ) -> anyhow::Result<Vec<ConversationMessage>> {
     let rows = sqlx::query(
-        "SELECT a.username AS author, m.obj_index, m.body
+        "SELECT a.username AS author, m.obj_index, m.body, m.created_at
          FROM conversation_messages m
          JOIN accounts a ON a.id = m.author_account_id
          WHERE m.conversation_id = ? AND m.deleted_at IS NULL
@@ -1254,6 +1715,7 @@ async fn load_conversation_messages(
             author: row.get("author"),
             obj_index: row.get("obj_index"),
             body: row.get("body"),
+            created_at: row.get("created_at"),
         })
         .collect())
 }
@@ -1384,6 +1846,15 @@ fn normalize_username(input: &str) -> anyhow::Result<String> {
 }
 
 fn normalize_slug(input: &str) -> anyhow::Result<String> {
+    let out = normalize_name_key(input);
+    anyhow::ensure!(
+        (2..=48).contains(&out.len()),
+        "Channel name must be 2-48 characters"
+    );
+    Ok(out)
+}
+
+fn normalize_name_key(input: &str) -> String {
     let mut out = String::new();
     for ch in input.trim().to_lowercase().chars() {
         if ch.is_ascii_alphanumeric() {
@@ -1392,12 +1863,7 @@ fn normalize_slug(input: &str) -> anyhow::Result<String> {
             out.push('-');
         }
     }
-    let out = out.trim_matches('-').to_string();
-    anyhow::ensure!(
-        (2..=48).contains(&out.len()),
-        "Channel name must be 2-48 characters"
-    );
-    Ok(out)
+    out.trim_matches('-').to_string()
 }
 
 fn id() -> String {
@@ -1426,4 +1892,28 @@ fn dm_key(a: &str, b: &str) -> String {
     let mut ids = [a.to_string(), b.to_string()];
     ids.sort();
     format!("{}:{}", ids[0], ids[1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_but_disconnected_presence_is_not_online() {
+        let recent = now();
+        let presence = UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: Some(recent.clone()),
+            connected: false,
+        };
+        assert_eq!(presence.state(), PresenceState::Away);
+
+        let presence = UserPresence {
+            connected: true,
+            last_seen_at: Some(recent),
+            ..presence
+        };
+        assert_eq!(presence.state(), PresenceState::Online);
+    }
 }

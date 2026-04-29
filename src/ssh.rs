@@ -24,14 +24,15 @@ use tokio::{
 use crate::{
     app::{Action, App},
     config::Config,
-    service::{Account, ServerState},
+    service::{Account, NextUnread, ServerState},
     terminal,
 };
 
 const INPUT_QUEUE_CAP: usize = 256;
 const WORLD_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_RENDER_GAP: Duration = Duration::from_millis(20);
-const EXIT_MESSAGE: &str = "\r\nBye from Sshoosh.\r\n";
+const PRESENCE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(45);
+const EXIT_MESSAGE: &str = "\r\nBye from sshoosh.\r\n";
 
 #[derive(Clone)]
 struct Server {
@@ -251,14 +252,28 @@ impl russh::server::Handler for ClientHandler {
         let state = self.state.clone();
         let signal = Arc::new(RenderSignal::new());
         self.render_signal = Some(signal.clone());
+        let account_id = {
+            let app = app.lock().await;
+            app.account.id.clone()
+        };
+        if let Err(err) = state.begin_account_session(&account_id).await {
+            tracing::debug!(error = ?err, "presence connect failed");
+        }
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(WORLD_TICK_INTERVAL);
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut last_render = Instant::now() - MIN_RENDER_GAP;
+            let mut last_presence_touch = Instant::now();
             loop {
                 tokio::select! {
                     _ = tick.tick() => {}
                     _ = signal.notify.notified() => {}
+                }
+                if last_presence_touch.elapsed() >= PRESENCE_HEARTBEAT_INTERVAL {
+                    if let Err(err) = state.touch_account(&account_id).await {
+                        tracing::debug!(error = ?err, "presence heartbeat failed");
+                    }
+                    last_presence_touch = Instant::now();
                 }
                 if last_render.elapsed() < MIN_RENDER_GAP {
                     tokio::time::sleep(MIN_RENDER_GAP - last_render.elapsed()).await;
@@ -279,6 +294,9 @@ impl russh::server::Handler for ClientHandler {
                         break;
                     }
                 }
+            }
+            if let Err(err) = state.end_account_session(&account_id).await {
+                tracing::debug!(error = ?err, "presence disconnect failed");
             }
         });
         Ok(())
@@ -353,22 +371,23 @@ async fn render_once(
     channel_id: ChannelId,
     signal: &RenderSignal,
 ) -> anyhow::Result<bool> {
-    let (actions, live_changed, running) = {
+    let (actions, needs_refresh, running) = {
         let mut app = app.lock().await;
         signal.dirty.store(false, Ordering::Release);
         while let Ok(data) = input_rx.try_recv() {
             app.handle_input(&data);
         }
         let live_changed = app.drain_live_events();
+        let refresh_requested = app.take_refresh_requested();
         let actions = app.take_actions();
-        (actions, live_changed, app.running)
+        (actions, live_changed || refresh_requested, app.running)
     };
 
     if !running {
         return Ok(true);
     }
 
-    if live_changed {
+    if needs_refresh {
         let mut app = app.lock().await;
         if let Err(err) = app.refresh().await {
             app.set_banner_err(format!("refresh failed: {err}"));
@@ -377,6 +396,17 @@ async fn render_once(
 
     for action in actions {
         process_action(state, app, action).await;
+    }
+
+    let needs_refresh = {
+        let mut app = app.lock().await;
+        app.drain_live_events() || app.take_refresh_requested()
+    };
+    if needs_refresh {
+        let mut app = app.lock().await;
+        if let Err(err) = app.refresh().await {
+            app.set_banner_err(format!("refresh failed: {err}"));
+        }
     }
 
     let frame = {
@@ -420,45 +450,127 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             .accept_invite(account_id, code, username)
             .await
             .map(|_| "Invite accepted".to_string()),
-        Action::CreateChannel { name, private } => state
-            .create_channel(account_id, name, private)
-            .await
-            .map(|_| "Channel created".to_string()),
-        Action::JoinChannel { slug } => state
-            .join_channel(account_id, slug)
-            .await
-            .map(|_| "Joined channel".to_string()),
+        Action::CreateChannel { name, private } => {
+            match state.create_channel(account_id, name, private).await {
+                Ok(channel_id) => {
+                    app.lock().await.select_channel(channel_id);
+                    Ok("Channel created".to_string())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        Action::JoinChannel { slug } => match state.join_channel(account_id, slug).await {
+            Ok(channel_id) => {
+                app.lock().await.select_channel(channel_id);
+                Ok("Joined channel".to_string())
+            }
+            Err(err) => Err(err),
+        },
         Action::CreateThread { title, body } => match channel_id {
-            Some(channel_id) => state
-                .create_thread(account_id, channel_id, title, body)
+            Some(channel_id) => match state
+                .create_thread(account_id, channel_id.clone(), title, body)
                 .await
-                .map(|_| "Thread created".to_string()),
+            {
+                Ok(thread_id) => {
+                    app.lock().await.select_thread(channel_id, thread_id);
+                    Ok("Thread created".to_string())
+                }
+                Err(err) => Err(err),
+            },
             None => Err(anyhow::anyhow!("No channel selected")),
         },
-        Action::AddComment { body } => match thread_id {
-            Some(thread_id) => state
+        Action::AddComment { body } => match (channel_id, thread_id) {
+            (Some(channel_id), Some(thread_id)) => {
+                match state.add_comment(account_id, thread_id.clone(), body).await {
+                    Ok(()) => {
+                        app.lock()
+                            .await
+                            .select_thread_at_bottom(channel_id, thread_id);
+                        Ok("Comment added".to_string())
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            (None, Some(thread_id)) => state
                 .add_comment(account_id, thread_id, body)
                 .await
                 .map(|_| "Comment added".to_string()),
-            None => Err(anyhow::anyhow!(
-                "No thread selected; use /thread title | body"
-            )),
+            (_, None) => Err(anyhow::anyhow!("No thread selected; use /thread title")),
         },
-        Action::OpenDm { target } => state
-            .open_dm(account_id, target)
-            .await
-            .map(|_| "DM opened".to_string()),
+        Action::OpenDm { target } => match state.open_dm(account_id, target).await {
+            Ok(conversation_id) => {
+                app.lock().await.select_conversation(conversation_id);
+                Ok("DM opened".to_string())
+            }
+            Err(err) => Err(err),
+        },
         Action::SendDm { body } => match conversation_id {
-            Some(conversation_id) => state
-                .send_dm(account_id, conversation_id, body)
-                .await
-                .map(|_| "Message sent".to_string()),
+            Some(conversation_id) => {
+                match state
+                    .send_dm(account_id, conversation_id.clone(), body)
+                    .await
+                {
+                    Ok(()) => {
+                        app.lock()
+                            .await
+                            .select_conversation_at_bottom(conversation_id);
+                        Ok("Message sent".to_string())
+                    }
+                    Err(err) => Err(err),
+                }
+            }
             None => Err(anyhow::anyhow!("No DM selected; use /dm @user")),
+        },
+        Action::MarkThreadRead => match thread_id {
+            Some(thread_id) => state
+                .mark_thread_read(&account_id, &thread_id)
+                .await
+                .map(|_| "Marked read".to_string()),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::MarkThreadUnread => match thread_id {
+            Some(thread_id) => state
+                .mark_thread_unread(&account_id, &thread_id)
+                .await
+                .map(|_| "Marked unread".to_string()),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::MarkDmRead => match conversation_id {
+            Some(conversation_id) => state
+                .mark_conversation_read(&account_id, &conversation_id)
+                .await
+                .map(|_| "DM marked read".to_string()),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::MarkDmUnread => match conversation_id {
+            Some(conversation_id) => state
+                .mark_conversation_unread(&account_id, &conversation_id)
+                .await
+                .map(|_| "DM marked unread".to_string()),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::NextUnread => match state.next_unread(&account_id).await {
+            Ok(Some(NextUnread::Thread {
+                channel_id,
+                thread_id,
+            })) => {
+                let mut app = app.lock().await;
+                app.select_thread(channel_id, thread_id);
+                Ok("Moved to next unread thread".to_string())
+            }
+            Ok(Some(NextUnread::Conversation { conversation_id })) => {
+                let mut app = app.lock().await;
+                app.select_conversation(conversation_id);
+                Ok("Moved to next unread DM".to_string())
+            }
+            Ok(None) => Ok("No unread activity".to_string()),
+            Err(err) => Err(err),
         },
     };
 
     let mut app = app.lock().await;
     match result {
+        Ok(message) if message.starts_with("Invite code:") => app.set_banner_modal_ok(message),
         Ok(message) => app.set_banner_ok(message),
         Err(err) => app.set_banner_err(err.to_string()),
     }

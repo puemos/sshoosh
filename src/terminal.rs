@@ -5,6 +5,7 @@ use std::{
 
 use crossterm::{
     cursor,
+    event::{DisableMouseCapture, EnableMouseCapture},
     terminal::{self, ClearType},
 };
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
@@ -52,6 +53,7 @@ pub fn enter_alt_screen() -> Vec<u8> {
     crossterm::execute!(
         buf,
         terminal::EnterAlternateScreen,
+        EnableMouseCapture,
         cursor::Hide,
         terminal::Clear(ClearType::All)
     )
@@ -63,7 +65,28 @@ pub fn enter_alt_screen() -> Vec<u8> {
 pub fn leave_alt_screen() -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(b"\x1b[?2004l\x1b]111\x1b\\");
-    crossterm::execute!(buf, cursor::Show, terminal::LeaveAlternateScreen)
-        .expect("write terminal leave sequence");
+    crossterm::execute!(
+        buf,
+        DisableMouseCapture,
+        cursor::Show,
+        terminal::LeaveAlternateScreen
+    )
+    .expect("write terminal leave sequence");
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alt_screen_sequences_toggle_mouse_reporting() {
+        let enter = String::from_utf8_lossy(&enter_alt_screen()).into_owned();
+        let leave = String::from_utf8_lossy(&leave_alt_screen()).into_owned();
+
+        assert!(enter.contains("\x1b[?1006h"));
+        assert!(enter.contains("\x1b[?2004h"));
+        assert!(leave.contains("\x1b[?1006l"));
+        assert!(leave.contains("\x1b[?2004l"));
+    }
 }
