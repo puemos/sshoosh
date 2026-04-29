@@ -83,6 +83,7 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
         .await
         .expect("snapshot");
     assert!(snapshot.channels.iter().any(|c| c.slug == "engineering"));
+    assert!(snapshot.users.iter().any(|user| user.username == "alice"));
     assert_eq!(snapshot.threads[0].title, "Deploy checklist");
     assert_eq!(snapshot.comments[0].body, "Looks good.");
 
@@ -104,6 +105,68 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
         .expect("dm snapshot");
     assert_eq!(dm_snapshot.conversations[0].peer_username, owner.username);
     assert_eq!(dm_snapshot.conversation_messages[0].body, "Private hello");
+}
+
+#[tokio::test]
+async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
+    let (_config, state) = test_state("duplicate-names").await;
+    let owner = state
+        .ensure_account_for_key("owner", "SHA256:owner", "ssh-ed25519 owner")
+        .await
+        .expect("owner");
+
+    let channel_id = state
+        .create_channel(owner.id.clone(), "engineering".to_string(), false)
+        .await
+        .expect("channel");
+    state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "Deploy checklist".to_string(),
+            "Cut release and verify backup.".to_string(),
+        )
+        .await
+        .expect("thread");
+
+    let duplicate_thread = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "deploy-checklist".to_string(),
+            "Same normalized title.".to_string(),
+        )
+        .await
+        .expect_err("duplicate thread");
+    assert!(
+        duplicate_thread.to_string().contains("already exists"),
+        "{duplicate_thread:?}"
+    );
+
+    let duplicate_channel = state
+        .create_channel(owner.id.clone(), "Deploy checklist".to_string(), false)
+        .await
+        .expect_err("channel conflicts with thread");
+    assert!(
+        duplicate_channel.to_string().contains("already exists"),
+        "{duplicate_channel:?}"
+    );
+
+    let channel_conflict_thread = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id,
+            "engineering".to_string(),
+            "Conflicts with channel name.".to_string(),
+        )
+        .await
+        .expect_err("thread conflicts with channel");
+    assert!(
+        channel_conflict_thread
+            .to_string()
+            .contains("already exists"),
+        "{channel_conflict_thread:?}"
+    );
 }
 
 struct TestClient;
@@ -162,15 +225,42 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("pty");
     channel.request_shell(true).await.expect("shell");
 
-    let first = read_until(&mut channel, "Threads").await;
+    let first = read_until(&mut channel, "Channels").await;
     assert!(first.contains("Channels"), "{first:?}");
+    assert!(first.contains("\x1b[?1006h"), "{first:?}");
 
     session
-        .data(channel.id(), b"/thread hello | world\r".to_vec())
+        .data(channel.id(), b"\x1b[<0;86;31M".to_vec())
         .await
-        .expect("send input");
-    let output = read_until(&mut channel, "Thread created").await;
-    assert!(output.contains("hello"), "{output:?}");
+        .expect("click help keybar");
+    let help_output = read_until(&mut channel, "Keyboard").await;
+    assert!(help_output.contains("Keyboard"), "{help_output:?}");
+    session
+        .data(channel.id(), b"\x1b".to_vec())
+        .await
+        .expect("dismiss help");
+
+    session
+        .data(channel.id(), b"/\r".to_vec())
+        .await
+        .expect("send invite shortcut");
+    let invite_output = read_until(&mut channel, "Enter or Esc closes").await;
+    assert!(invite_output.contains("Invite code"), "{invite_output:?}");
+    session
+        .data(channel.id(), b"\x1b".to_vec())
+        .await
+        .expect("dismiss invite modal");
+
+    session
+        .data(channel.id(), b"\x1b[<0;75;31M".to_vec())
+        .await
+        .expect("click command keybar");
+    session
+        .data(channel.id(), b"thread mouse | click\r".to_vec())
+        .await
+        .expect("send mouse-driven input");
+    let output = read_until(&mut channel, "click").await;
+    assert!(output.contains("mouse"), "{output:?}");
 
     let owner_id: String = sqlx::query_scalar("SELECT id FROM accounts WHERE username = 'owner'")
         .fetch_one(state_for_assert.db.read_pool())
@@ -180,8 +270,8 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .snapshot(&owner_id, None, None, None)
         .await
         .expect("stored snapshot");
-    assert_eq!(stored.threads[0].title, "hello");
-    assert_eq!(stored.threads[0].body, "world");
+    assert_eq!(stored.threads[0].title, "mouse");
+    assert_eq!(stored.threads[0].body, "click");
 
     let _ = session
         .disconnect(Disconnect::ByApplication, "", "en")
@@ -191,7 +281,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
 
 async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, needle: &str) -> String {
     let mut output = Vec::new();
-    timeout(Duration::from_secs(5), async {
+    let result = timeout(Duration::from_secs(5), async {
         loop {
             let Some(msg) = channel.wait().await else {
                 break;
@@ -208,7 +298,12 @@ async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, needle: &s
             }
         }
     })
-    .await
-    .expect("timed out waiting for ssh output");
+    .await;
+    if result.is_err() {
+        panic!(
+            "timed out waiting for ssh output containing {needle:?}: {:?}",
+            String::from_utf8_lossy(&output)
+        );
+    }
     String::from_utf8_lossy(&output).into_owned()
 }
