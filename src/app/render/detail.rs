@@ -18,7 +18,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let message_width = message_content_width(area);
     let title = selected
         .map(|thread| thread.title.as_str())
-        .unwrap_or("No thread selected");
+        .unwrap_or("Thread");
     draw_detail_header(frame, area, title, ui);
     let messages_area = pane_scroll_area(area);
     let mut link_hits = Vec::new();
@@ -91,13 +91,14 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             }
         }
     } else {
-        items.push(ListItem::new(vec![
-            Line::from("No thread selected."),
-            Line::from(Span::styled(
-                "Create one with /thread new title",
-                theme::muted(),
-            )),
-        ]));
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_thread_lines(snapshot),
+        );
+        return;
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
@@ -121,10 +122,14 @@ pub(crate) fn draw_search_detail(
     let messages_area = pane_scroll_area(area);
     let mut items = Vec::new();
     if snapshot.search_results.is_empty() {
-        items.push(ListItem::new(vec![
-            Line::from("No results."),
-            Line::from(Span::styled("Use /search query", theme::muted())),
-        ]));
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_search_lines(snapshot.search_query.as_deref()),
+        );
+        return;
     } else {
         for (idx, result) in snapshot.search_results.iter().enumerate() {
             let selected = idx == ui.search_selected;
@@ -288,6 +293,10 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
     let mut content_row = 0u16;
+    let selected = snapshot
+        .selected_conversation_id
+        .as_ref()
+        .and_then(|id| snapshot.conversations.iter().find(|dm| &dm.id == id));
     if snapshot.conversation_messages_has_more {
         append_plain_item(
             &mut items,
@@ -296,13 +305,14 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         );
     }
     if snapshot.conversation_messages.is_empty() {
-        items.push(ListItem::new(vec![
-            Line::from("No messages yet."),
-            Line::from(Span::styled(
-                "Type a message or use /dm open @user",
-                theme::muted(),
-            )),
-        ]));
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_dm_lines(selected.is_some()),
+        );
+        return;
     } else {
         for (idx, message) in snapshot.conversation_messages.iter().enumerate() {
             if idx > 0 {
@@ -327,4 +337,91 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
 
 pub(crate) fn history_prompt(text: &'static str) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(text, theme::muted())))
+}
+
+fn render_empty_state(
+    frame: &mut Frame,
+    area: Rect,
+    state: &mut ScrollViewState,
+    lines: Vec<Line<'static>>,
+) {
+    if area.is_empty() {
+        return;
+    }
+    state.set_offset(Position { x: 0, y: 0 });
+    let height = (lines.len() as u16).min(area.height);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height) / 3);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme::panel())
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
+        Rect::new(area.x, y, area.width, height),
+    );
+}
+
+fn empty_thread_lines(snapshot: &Snapshot) -> Vec<Line<'static>> {
+    if snapshot.channels.is_empty() {
+        return empty_state_lines(
+            "No channels yet",
+            "Create a place for the first thread",
+            "/channel new name",
+        );
+    }
+    if snapshot.threads.is_empty() {
+        return empty_state_lines(
+            "No threads in this channel",
+            "Start the conversation here",
+            "/thread new title",
+        );
+    }
+    empty_state_lines(
+        "Select a thread",
+        "Browse threads on the left",
+        "/thread new title",
+    )
+}
+
+fn empty_search_lines(query: Option<&str>) -> Vec<Line<'static>> {
+    if query.is_some_and(|value| !value.trim().is_empty()) {
+        return empty_state_lines("No results", "Try different terms", "/search query");
+    }
+    empty_state_lines(
+        "Search messages",
+        "Find threads, comments, and DMs",
+        "/search query",
+    )
+}
+
+fn empty_dm_lines(has_selected_dm: bool) -> Vec<Line<'static>> {
+    if has_selected_dm {
+        return empty_state_lines(
+            "No messages yet",
+            "Type below to start the DM",
+            "/dm open @user",
+        );
+    }
+    empty_state_lines(
+        "Select a DM",
+        "Open an existing conversation",
+        "/dm open @user",
+    )
+}
+
+fn empty_state_lines(
+    title: &'static str,
+    detail: &'static str,
+    command: &'static str,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(title, theme::title())),
+        Line::from(""),
+        Line::from(Span::styled(detail, theme::muted())),
+        Line::from(vec![
+            Span::styled("Use ", theme::muted()),
+            Span::styled(command, theme::accent()),
+        ]),
+    ]
 }
