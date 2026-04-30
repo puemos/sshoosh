@@ -17,6 +17,8 @@ use ratatui::{
 
 const MOUSE_ENABLE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
 const MOUSE_DISABLE: &[u8] = b"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
+const NOTIFICATION_TITLE_LIMIT: usize = 80;
+const NOTIFICATION_BODY_LIMIT: usize = 240;
 
 #[derive(Clone, Default)]
 pub struct SharedBuffer {
@@ -118,6 +120,39 @@ pub fn osc8_hyperlink_at(rect: Rect, url: &str, text: &str, style: Style) -> Vec
     .into_bytes()
 }
 
+pub fn desktop_notification(title: &str, body: &str, id: &str) -> Vec<u8> {
+    let title = sanitize_notification_text(title, NOTIFICATION_TITLE_LIMIT);
+    let body = sanitize_notification_text(body, NOTIFICATION_BODY_LIMIT);
+    if title.is_empty() && body.is_empty() {
+        return b"\x07".to_vec();
+    }
+    let title = if title.is_empty() {
+        "sshoosh".to_string()
+    } else {
+        title
+    };
+    let notification_id = sanitize_notification_id(id);
+    let mut output = Vec::new();
+
+    output.extend(
+        format!(
+            "\x1b]99;i={notification_id}:e=1:d=0:p=title;{}\x1b\\",
+            STANDARD.encode(&title)
+        )
+        .into_bytes(),
+    );
+    output.extend(
+        format!(
+            "\x1b]99;i={notification_id}:e=1:d=1:p=body;{}\x1b\\",
+            STANDARD.encode(&body)
+        )
+        .into_bytes(),
+    );
+    output.extend(format!("\x1b]9;{}: {}\x1b\\", title, body).into_bytes());
+    output.push(0x07);
+    output
+}
+
 fn sanitize_osc8(value: &str) -> String {
     value
         .chars()
@@ -130,6 +165,34 @@ fn sanitize_visible_text(value: &str) -> String {
         .chars()
         .filter(|ch| !ch.is_control())
         .collect::<String>()
+}
+
+fn sanitize_notification_text(value: &str, limit: usize) -> String {
+    let mut out = value
+        .chars()
+        .filter_map(|ch| {
+            if ch == '\n' || ch == '\r' || ch == '\t' {
+                Some(' ')
+            } else if ch.is_control() || matches!(ch, '\u{1b}' | '\u{7}') {
+                None
+            } else {
+                Some(ch)
+            }
+        })
+        .collect::<String>();
+    while out.contains("  ") {
+        out = out.replace("  ", " ");
+    }
+    out.trim().chars().take(limit).collect()
+}
+
+fn sanitize_notification_id(id: &str) -> String {
+    let id = id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_'))
+        .take(64)
+        .collect::<String>();
+    if id.is_empty() { "sshoosh" } else { &id }.to_string()
 }
 
 fn style_sgr(style: Style) -> String {
@@ -239,5 +302,32 @@ mod tests {
         assert!(output.contains("38;2;1;2;3"));
         assert!(output.contains(";4m"));
         assert!(output.contains("\x1b]8;;https://example.com/\x1b\\exam\x1b]8;;\x1b\\"));
+    }
+
+    #[test]
+    fn desktop_notification_emits_terminal_protocols_and_bell() {
+        let output =
+            String::from_utf8_lossy(&desktop_notification("New DM", "Hello Alice", "notif-1"))
+                .into_owned();
+
+        assert!(output.contains("\x1b]99;i=notif-1:e=1:d=0:p=title;TmV3IERN\x1b\\"));
+        assert!(output.contains("\x1b]99;i=notif-1:e=1:d=1:p=body;SGVsbG8gQWxpY2U=\x1b\\"));
+        assert!(output.contains("\x1b]9;New DM: Hello Alice\x1b\\"));
+        assert!(output.ends_with('\u{7}'));
+    }
+
+    #[test]
+    fn desktop_notification_sanitizes_and_truncates_payload() {
+        let output = String::from_utf8_lossy(&desktop_notification(
+            "Title\u{1b}\nNext",
+            &"x".repeat(300),
+            "bad;id!",
+        ))
+        .into_owned();
+
+        assert!(output.contains("i=badid"));
+        assert!(!output.contains("Title\u{1b}"));
+        assert!(output.contains("\x1b]9;Title Next: "));
+        assert!(!output.contains(&"x".repeat(241)));
     }
 }

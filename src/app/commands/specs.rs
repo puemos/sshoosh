@@ -339,6 +339,12 @@ pub(crate) const NOTIFICATION_SUBCOMMANDS: &[SubcommandSpec] = &[
         description: "Mark one or all notifications read",
         args: "[notification-id]",
     },
+    SubcommandSpec {
+        name: "terminal",
+        aliases: &[],
+        description: "Manage terminal system notifications",
+        args: "on|off|status",
+    },
 ];
 
 pub(crate) const AUDIT_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {

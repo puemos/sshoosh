@@ -149,6 +149,8 @@ Bare URLs and Markdown links render as OSC8 terminal hyperlinks where supported.
 
 V1 creates durable in-app notifications for `@username` mentions, new DMs, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires. Use `/notification list`, `/notification mentions`, and `/notification read` in the TUI or `sshoosh notifications ...` from the CLI.
 
+Terminal system notifications are opt-in per account. Use `/notification terminal on`, `/notification terminal off`, or `/notification terminal status` in the TUI. sshoosh sends terminal notification escape sequences to the SSH client and falls back to the terminal bell where desktop notifications are unsupported.
+
 ## Backup and Export
 
 Use SQLite backups for operational recovery and exports for portable archives:

@@ -113,9 +113,9 @@ impl Default for CommandRegistry {
                 },
                 CommandSpec {
                     name: "notification",
-                    aliases: &[],
+                    aliases: &["notify"],
                     description: "Manage notifications",
-                    args: "list|mentions|read",
+                    args: "list|mentions|read|terminal",
                     shortcut: None,
                     category: "Notifications",
                 },

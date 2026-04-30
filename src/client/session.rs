@@ -477,6 +477,20 @@ impl ClientSession {
         self.state.list_notifications(account_id, limit).await
     }
 
+    pub async fn terminal_notifications_enabled(&self, account_id: &str) -> anyhow::Result<bool> {
+        self.state.terminal_notifications_enabled(account_id).await
+    }
+
+    pub async fn set_terminal_notifications(
+        &self,
+        account_id: &str,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        self.state
+            .set_terminal_notifications(account_id, enabled)
+            .await
+    }
+
     pub async fn mark_notification_read(
         &self,
         account_id: &str,

@@ -1,5 +1,35 @@
 use super::*;
 impl ServerState {
+    pub async fn terminal_notifications_enabled(&self, account_id: &str) -> anyhow::Result<bool> {
+        let settings = account_settings(self.db.read_pool(), account_id).await?;
+        Ok(settings
+            .get("terminal_notifications")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false))
+    }
+
+    pub async fn set_terminal_notifications(
+        &self,
+        account_id: &str,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        let mut settings = account_settings(self.db.read_pool(), account_id).await?;
+        let object = settings
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("account settings must be a JSON object"))?;
+        object.insert(
+            "terminal_notifications".to_string(),
+            serde_json::Value::Bool(enabled),
+        );
+        sqlx::query("UPDATE accounts SET settings_json = ?, updated_at = ? WHERE id = ?")
+            .bind(serde_json::to_string(&settings)?)
+            .bind(now())
+            .bind(account_id)
+            .execute(self.db.write_pool())
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_notifications(
         &self,
         account_id: &str,
@@ -160,5 +190,88 @@ impl ServerState {
         .await?;
         tx.commit().await?;
         Ok(())
+    }
+}
+
+async fn account_settings(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let settings_json: String = sqlx::query_scalar(
+        "SELECT settings_json FROM accounts WHERE id = ? AND disabled_at IS NULL",
+    )
+    .bind(account_id)
+    .fetch_one(pool)
+    .await?;
+    let settings = serde_json::from_str(&settings_json)
+        .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+    Ok(if settings.is_object() {
+        settings
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    })
+}
+
+#[cfg(test)]
+mod terminal_notification_settings_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn terminal_notifications_default_false_and_preserve_other_settings() {
+        let db_path = std::env::temp_dir().join(format!(
+            "sshoosh-notification-settings-{}.sqlite",
+            Uuid::now_v7()
+        ));
+        let db = Database::connect(&db_path).await.expect("connect db");
+        db.init().await.expect("init db");
+        let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
+        let account = state
+            .ensure_account_for_key(
+                &format!("owner+{token}"),
+                "SHA256:terminal-settings",
+                "ssh-ed25519 terminal-settings",
+            )
+            .await
+            .expect("account");
+
+        assert!(
+            !state
+                .terminal_notifications_enabled(&account.id)
+                .await
+                .expect("default setting")
+        );
+
+        sqlx::query("UPDATE accounts SET settings_json = ? WHERE id = ?")
+            .bind(r#"{"theme":"dark"}"#)
+            .bind(&account.id)
+            .execute(state.db.write_pool())
+            .await
+            .expect("seed setting");
+
+        state
+            .set_terminal_notifications(&account.id, true)
+            .await
+            .expect("enable setting");
+
+        assert!(
+            state
+                .terminal_notifications_enabled(&account.id)
+                .await
+                .expect("enabled setting")
+        );
+        let settings_json: String =
+            sqlx::query_scalar("SELECT settings_json FROM accounts WHERE id = ?")
+                .bind(&account.id)
+                .fetch_one(state.db.read_pool())
+                .await
+                .expect("settings json");
+        let settings: serde_json::Value =
+            serde_json::from_str(&settings_json).expect("valid settings");
+        assert_eq!(settings["theme"], "dark");
+        assert_eq!(settings["terminal_notifications"], true);
     }
 }

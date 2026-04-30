@@ -52,6 +52,7 @@ mod cases {
             "/mentions",
             "/notifications",
             "/notification",
+            "/notify",
             "/notification-read",
             "/audit",
         ] {
@@ -180,6 +181,18 @@ mod cases {
             ),
             ("/more", Action::LoadMore),
             ("/older", Action::LoadOlder),
+            (
+                "/notification terminal on",
+                Action::SetTerminalNotifications { enabled: true },
+            ),
+            (
+                "/notification terminal off",
+                Action::SetTerminalNotifications { enabled: false },
+            ),
+            (
+                "/notify terminal status",
+                Action::ShowTerminalNotificationsStatus,
+            ),
         ];
         for (line, action) in cases {
             assert_eq!(registry.parse_action(line).unwrap(), Some(action), "{line}");

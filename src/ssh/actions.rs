@@ -417,6 +417,26 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             .mark_notification_read(&account_id, notification_id.as_deref())
             .await
             .map(|_| ActionResult::message("Notifications marked read")),
+        Action::SetTerminalNotifications { enabled } => session
+            .set_terminal_notifications(&account_id, enabled)
+            .await
+            .map(|_| {
+                if enabled {
+                    ActionResult::message("Terminal notifications enabled")
+                } else {
+                    ActionResult::message("Terminal notifications disabled")
+                }
+            }),
+        Action::ShowTerminalNotificationsStatus => session
+            .terminal_notifications_enabled(&account_id)
+            .await
+            .map(|enabled| {
+                if enabled {
+                    ActionResult::message("Terminal notifications are enabled")
+                } else {
+                    ActionResult::message("Terminal notifications are disabled")
+                }
+            }),
         Action::ListAudit => session
             .list_audit(&account_id, 100)
             .await

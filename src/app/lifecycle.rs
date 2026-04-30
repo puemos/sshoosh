@@ -12,6 +12,7 @@ impl App {
         let snapshot = client
             .snapshot(None, None, None, DEFAULT_HISTORY_LIMIT)
             .await?;
+        let seen_notification_ids = notification_ids(&snapshot.notifications);
         let account = client.account().clone();
         let mut ui = UiState::default();
         ui.sync_route_from_snapshot(&snapshot);
@@ -34,6 +35,8 @@ impl App {
             emitted_pointer_shape: PointerShape::Default,
             history_limit: DEFAULT_HISTORY_LIMIT,
             search_limit: DEFAULT_SEARCH_LIMIT,
+            seen_notification_ids,
+            pending_terminal_notifications: VecDeque::new(),
         })
     }
 
@@ -57,6 +60,11 @@ impl App {
                 self.history_limit,
             )
             .await?;
+        let terminal_notifications_enabled = self
+            .client
+            .terminal_notifications_enabled(&self.account.id)
+            .await?;
+        self.queue_new_terminal_notifications(terminal_notifications_enabled);
         if self.ui.route == Route::Search {
             self.snapshot.search_query = search_query;
             self.snapshot.search_results = search_results;
@@ -238,4 +246,28 @@ impl App {
                 .min(self.snapshot.search_results.len().saturating_sub(1));
         }
     }
+
+    fn queue_new_terminal_notifications(&mut self, enabled: bool) {
+        for notification in &self.snapshot.notifications {
+            if notification.read_at.is_none()
+                && enabled
+                && !self.seen_notification_ids.contains(&notification.id)
+            {
+                self.pending_terminal_notifications
+                    .push_back(TerminalNotification {
+                        id: notification.id.clone(),
+                        title: notification.title.clone(),
+                        body: notification.body.clone(),
+                    });
+            }
+            self.seen_notification_ids.insert(notification.id.clone());
+        }
+    }
+}
+
+fn notification_ids(notifications: &[NotificationSummary]) -> HashSet<String> {
+    notifications
+        .iter()
+        .map(|notification| notification.id.clone())
+        .collect()
 }

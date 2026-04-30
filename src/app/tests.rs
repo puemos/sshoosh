@@ -370,4 +370,73 @@ mod cases {
         assert_eq!(cursor_for_display_position("abcdef", 3, 1, 2), 5);
         assert_eq!(cursor_for_display_position("abc", 20, 3, 0), 3);
     }
+
+    #[tokio::test]
+    async fn terminal_notifications_only_emit_for_new_unread_notifications() {
+        let db_path = temp_path("terminal-notifications").with_extension("sqlite");
+        let db = Database::connect(&db_path).await.expect("connect db");
+        db.init().await.expect("init db");
+        let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
+        let owner = state
+            .ensure_account_for_key(
+                &format!("owner+{token}"),
+                "SHA256:terminal-owner",
+                "ssh-ed25519 terminal-owner",
+            )
+            .await
+            .expect("owner");
+        let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+        let alice = state
+            .ensure_account_for_key(
+                &format!("alice+{invite}"),
+                "SHA256:terminal-alice",
+                "ssh-ed25519 terminal-alice",
+            )
+            .await
+            .expect("alice");
+        let general_id = state
+            .snapshot(&owner.id, None, None, None)
+            .await
+            .expect("owner snapshot")
+            .selected_channel_id
+            .expect("general channel");
+        let thread_id = state
+            .create_thread(owner.id.clone(), general_id, "Release notes".to_string())
+            .await
+            .expect("thread");
+        state
+            .add_comment(
+                owner.id.clone(),
+                thread_id.clone(),
+                "old note for @alice".to_string(),
+            )
+            .await
+            .expect("old mention");
+        state
+            .set_terminal_notifications(&alice.id, true)
+            .await
+            .expect("enable terminal notifications");
+
+        let mut app = App::new(alice.clone(), state.clone(), 100, 30)
+            .await
+            .expect("app");
+        let initial = String::from_utf8_lossy(&app.render().expect("initial render")).into_owned();
+        assert!(!initial.contains("\x1b]99;"));
+
+        state
+            .add_comment(owner.id, thread_id, "new note for @alice".to_string())
+            .await
+            .expect("new mention");
+        app.refresh().await.expect("refresh");
+        let output = String::from_utf8_lossy(&app.render().expect("render")).into_owned();
+        assert!(output.contains("\x1b]99;"));
+        assert!(output.contains("new note for @alice"));
+
+        let second = String::from_utf8_lossy(&app.render().expect("second render")).into_owned();
+        assert!(!second.contains("\x1b]99;"));
+    }
 }

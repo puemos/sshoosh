@@ -221,7 +221,22 @@ pub(crate) fn parse_notification_command(input: &str) -> Result<Action, String> 
         "read" | "mark-read" => Ok(Action::MarkNotificationRead {
             notification_id: optional_arg(rest),
         }),
+        "terminal" => parse_terminal_notification_command(rest),
         "" => Err("Notification subcommand is required".to_string()),
+        _ => Err(format!("Unknown subcommand: {name}")),
+    }
+}
+
+fn parse_terminal_notification_command(input: &str) -> Result<Action, String> {
+    let (name, rest) = split_word(input);
+    if !rest.is_empty() {
+        return Err("Unknown terminal notification argument".to_string());
+    }
+    match name {
+        "on" | "enable" => Ok(Action::SetTerminalNotifications { enabled: true }),
+        "off" | "disable" => Ok(Action::SetTerminalNotifications { enabled: false }),
+        "status" => Ok(Action::ShowTerminalNotificationsStatus),
+        "" => Err("Terminal notification subcommand is required".to_string()),
         _ => Err(format!("Unknown subcommand: {name}")),
     }
 }

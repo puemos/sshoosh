@@ -143,6 +143,10 @@ pub enum Action {
     MarkNotificationRead {
         notification_id: Option<String>,
     },
+    SetTerminalNotifications {
+        enabled: bool,
+    },
+    ShowTerminalNotificationsStatus,
     ListAudit,
     Search {
         query: String,

@@ -88,6 +88,8 @@ Private channels require owner/admin management through the CLI or TUI commands:
 
 `sshoosh` creates durable in-app notifications for `@username` mentions, new direct messages, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires.
 
+Terminal system notifications are opt-in per account. Use `/notification terminal on`, `/notification terminal off`, or `/notification terminal status` in the TUI. sshoosh sends terminal notification escape sequences to the SSH client and falls back to the terminal bell where desktop notifications are unsupported.
+
 ## Backup, Export, And systemd
 
 Use SQLite backups for operational recovery and exports for portable archives:
