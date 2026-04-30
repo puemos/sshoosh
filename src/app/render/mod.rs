@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Position, Rect, Size},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
+    widgets::{Block, Clear, List, ListItem, Paragraph, Wrap},
 };
 use time::{OffsetDateTime, macros::format_description};
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};

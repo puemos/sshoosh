@@ -31,6 +31,9 @@ pub fn draw(
     draw_bottombar(frame, shell[3], snapshot, ui);
     draw_pane_divider_intersections(frame, area, shell[1], shell[3], bottom_separator_color(ui));
     draw_banner(frame, area, ui);
+    if ui.startup_splash_active() {
+        draw_startup_splash(frame, area, ui);
+    }
 
     match ui.mode {
         UiMode::Palette => draw_palette(frame, area, centered(area, 72, 18), ui),

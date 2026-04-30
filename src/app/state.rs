@@ -42,10 +42,12 @@ pub struct UiState {
     pub threads_collapsed: bool,
     pub workspace_scroll: ScrollViewState,
     pub detail_scroll: ScrollViewState,
+    pub help_scroll: ScrollViewState,
     pub composer: ComposerState,
     pub palette: PaletteState,
     pub prompt: PromptState,
     pub banner: Option<Banner>,
+    pub startup_splash_until: Option<Instant>,
     pub comment_menu: Option<CommentMenuState>,
     pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
@@ -63,10 +65,12 @@ impl Default for UiState {
             threads_collapsed: false,
             workspace_scroll: ScrollViewState::default(),
             detail_scroll: ScrollViewState::default(),
+            help_scroll: ScrollViewState::default(),
             composer: ComposerState::default(),
             palette: PaletteState::default(),
             prompt: PromptState::default(),
             banner: None,
+            startup_splash_until: None,
             comment_menu: None,
             comment_delete: None,
             search_selected: 0,
@@ -74,6 +78,26 @@ impl Default for UiState {
             link_overlays: Vec::new(),
             selection: SelectionState::default(),
         }
+    }
+}
+
+impl UiState {
+    pub fn show_startup_splash(&mut self, duration: Duration) {
+        self.startup_splash_until = Some(Instant::now() + duration);
+    }
+
+    pub fn dismiss_startup_splash(&mut self) {
+        self.startup_splash_until = None;
+    }
+
+    pub fn startup_splash_active(&mut self) -> bool {
+        let active = self
+            .startup_splash_until
+            .is_some_and(|until| Instant::now() < until);
+        if !active {
+            self.startup_splash_until = None;
+        }
+        active
     }
 }
 
@@ -205,6 +229,7 @@ pub enum HitTarget {
     ComposerInput { scroll_y: u16 },
     AutocompleteScroll,
     AutocompleteRow(usize),
+    HelpScroll,
     PaletteBackdrop,
     PaletteInput,
     PaletteResults,

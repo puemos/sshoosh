@@ -1,15 +1,21 @@
 use super::*;
+
 pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::PaletteBackdrop);
-    frame.render_widget(Clear, area);
+    let inner = elevated_panel(frame, area, "Command palette");
+    if inner.width == 0 || inner.height < 3 {
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(3)])
-        .split(area);
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(inner);
     frame.render_widget(
-        Paragraph::new(format!("> {}", ui.palette.query))
-            .style(theme::panel())
-            .block(panel(" Command palette ", true)),
+        Paragraph::new(format!("> {}", ui.palette.query)).style(theme::elevated_panel()),
         chunks[0],
     );
     ui.hit_map.push(chunks[0], HitTarget::PaletteInput);
@@ -25,7 +31,7 @@ pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &
             let style = if selected {
                 theme::selection()
             } else {
-                theme::panel()
+                theme::elevated_panel()
             };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{:<24}", item.label), style),
@@ -36,13 +42,12 @@ pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &
             ]))
         })
         .collect();
-    frame.render_widget(List::new(items).block(panel(" Results ", true)), chunks[1]);
-    let rows = Rect::new(
-        chunks[1].x.saturating_add(1),
-        chunks[1].y.saturating_add(1),
-        chunks[1].width.saturating_sub(2),
-        chunks[1].height.saturating_sub(2),
+    frame.render_widget(
+        Paragraph::new("Results").style(theme::elevated_accent()),
+        chunks[1],
     );
+    frame.render_widget(List::new(items).style(theme::elevated_panel()), chunks[2]);
+    let rows = chunks[2];
     ui.hit_map.push(rows, HitTarget::PaletteResults);
     for row in 0..ui.palette.filtered.len().min(rows.height as usize) {
         ui.hit_map.push(
@@ -54,18 +59,13 @@ pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &
 
 pub(crate) fn draw_prompt(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::PromptBackdrop);
-    frame.render_widget(Clear, area);
+    let inner = elevated_panel(frame, area, &ui.prompt.title);
     let text = if ui.prompt.input.is_empty() {
         format!("{}{}", ui.prompt.prefix, ui.prompt.placeholder)
     } else {
         format!("{}{}", ui.prompt.prefix, ui.prompt.input)
     };
-    frame.render_widget(
-        Paragraph::new(text)
-            .style(theme::panel())
-            .block(panel(&format!(" {} ", ui.prompt.title), true)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(text).style(theme::elevated_panel()), inner);
     ui.hit_map.push(area, HitTarget::PromptInput);
 }
 
@@ -77,44 +77,38 @@ pub(crate) fn draw_help(
     ui: &mut UiState,
 ) {
     ui.hit_map.push(full_area, HitTarget::HelpBackdrop);
-    frame.render_widget(Clear, area);
-    let block = panel(" Help ", true).padding(Padding::uniform(1));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = elevated_panel(frame, area, "Help");
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
-    if inner.width >= 72 {
-        let left_width = ((inner.width as u32 * 38) / 100).clamp(36, 40) as u16;
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(left_width),
-                Constraint::Length(2),
-                Constraint::Min(30),
-            ])
-            .split(inner);
-        frame.render_widget(
-            Paragraph::new(help_keyboard_lines(chunks[0].width as usize)).style(theme::panel()),
-            chunks[0],
-        );
-        frame.render_widget(
-            Paragraph::new(help_command_lines(commands, chunks[2].width as usize))
-                .style(theme::panel()),
-            chunks[2],
-        );
-        return;
-    }
-
     let mut lines = help_keyboard_lines(inner.width as usize);
-    lines.push(Line::from(""));
     lines.extend(help_command_lines(commands, inner.width as usize));
-    frame.render_widget(Paragraph::new(lines).style(theme::panel()), inner);
+    ui.hit_map.push(inner, HitTarget::HelpScroll);
+    render_help_scroll(frame, inner, lines, &mut ui.help_scroll);
 }
 
 pub(crate) fn help_modal_area(area: Rect) -> Rect {
-    centered(area, 104, 24)
+    centered(area, 104, 30)
+}
+
+fn render_help_scroll(
+    frame: &mut Frame,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+    state: &mut ScrollViewState,
+) {
+    let content_height = lines.len().max(1).min(u16::MAX as usize) as u16;
+    let mut scroll_view = ScrollView::new(Size::new(area.width, content_height))
+        .vertical_scrollbar_visibility(ScrollbarVisibility::Automatic)
+        .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
+    scroll_view.render_widget(
+        List::new(lines.into_iter().map(ListItem::new).collect::<Vec<_>>())
+            .style(theme::elevated_panel())
+            .highlight_style(theme::elevated_panel()),
+        Rect::new(0, 0, area.width, content_height),
+    );
+    frame.render_stateful_widget(scroll_view, area, state);
 }
 
 fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
@@ -131,10 +125,12 @@ fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
         ("", "Ctrl-X E", "edit latest message/comment here"),
         ("System", "Ctrl-P", "command palette"),
         ("", "Esc", "close overlay or mode"),
-        ("", "q", "quit"),
-        ("", "Ctrl-C", "disconnect"),
+        ("", "q / Ctrl-C", "quit / disconnect"),
     ];
-    let mut lines = vec![Line::from(Span::styled("Keyboard", theme::accent()))];
+    let mut lines = vec![Line::from(Span::styled(
+        "Keyboard",
+        theme::elevated_accent(),
+    ))];
     for (group, key, description) in rows {
         lines.push(help_shortcut_line(width, group, key, description));
     }
@@ -157,12 +153,12 @@ fn help_shortcut_line(
             Span::raw(" "),
             Span::styled(
                 pad_or_truncate(key, key_width),
-                theme::muted().add_modifier(Modifier::BOLD),
+                theme::elevated_muted().add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(
                 pad_or_truncate(description, description_width),
-                theme::panel(),
+                theme::elevated_panel(),
             ),
         ]);
     }
@@ -172,18 +168,21 @@ fn help_shortcut_line(
     Line::from(vec![
         Span::styled(
             pad_or_truncate(key, key_width),
-            theme::muted().add_modifier(Modifier::BOLD),
+            theme::elevated_muted().add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(
             pad_or_truncate(description, description_width),
-            theme::panel(),
+            theme::elevated_panel(),
         ),
     ])
 }
 
 fn help_command_lines(commands: &[CommandSpec], width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled("Slash commands", theme::accent()))];
+    let mut lines = vec![Line::from(Span::styled(
+        "Slash commands",
+        theme::elevated_accent(),
+    ))];
     for (category, specs) in command_groups(commands) {
         for (idx, spec) in specs.into_iter().enumerate() {
             lines.push(help_command_line(
@@ -241,51 +240,50 @@ fn help_command_line(width: usize, category: &'static str, spec: &CommandSpec) -
     }
     spans.push(Span::styled(
         pad_or_truncate(&format!("/{}", spec.name), command_width),
-        theme::title(),
+        theme::elevated_title(),
     ));
     spans.push(Span::raw(" "));
     if args_width > 0 {
         spans.push(Span::styled(
             pad_or_truncate(spec.args, args_width),
-            theme::muted(),
+            theme::elevated_muted(),
         ));
         spans.push(Span::raw(" "));
     }
     if shortcut_width > 0 {
         spans.push(Span::styled(
             pad_or_truncate(spec.shortcut.unwrap_or_default(), shortcut_width),
-            theme::muted().add_modifier(Modifier::BOLD),
+            theme::elevated_muted().add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
     }
     spans.push(Span::styled(
         pad_or_truncate(spec.description, description_width),
-        theme::panel(),
+        theme::elevated_panel(),
     ));
     Line::from(spans)
 }
 
 fn help_group_style(value: &str) -> Style {
     if value.is_empty() {
-        theme::muted()
+        theme::elevated_muted()
     } else {
-        theme::accent()
+        theme::elevated_accent()
     }
 }
 
 pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::ConfirmQuitBackdrop);
-    frame.render_widget(Clear, area);
+    let inner = elevated_panel(frame, area, "Quit");
     frame.render_widget(
         Paragraph::new("Disconnect from sshoosh?  y / n")
             .alignment(Alignment::Center)
-            .style(theme::panel())
-            .block(panel(" Quit ", true)),
-        area,
+            .style(theme::elevated_panel()),
+        inner,
     );
     let text = "Disconnect from sshoosh?  y / n";
-    let text_x = area.x + area.width.saturating_sub(text.chars().count() as u16) / 2;
-    let text_y = area.y.saturating_add(1);
+    let text_x = inner.x + inner.width.saturating_sub(text.chars().count() as u16) / 2;
+    let text_y = inner.y;
     ui.hit_map.push(area, HitTarget::ConfirmQuitNo);
     if let Some(y_pos) = text.find('y') {
         ui.hit_map.push(
@@ -308,15 +306,19 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
     let Some(menu) = ui.comment_menu else {
         return;
     };
-    if area.width < 12 || area.height < 4 {
+    if area.width < 14 || area.height < 5 {
         return;
     }
 
     ui.hit_map.push(area, HitTarget::CommentMenuBackdrop);
-    let width = 14.min(area.width);
-    let height = 4.min(area.height);
-    let max_x = area.x.saturating_add(area.width.saturating_sub(width));
-    let max_y = area.y.saturating_add(area.height.saturating_sub(height));
+    let width = 16.min(area.width);
+    let height = 5.min(area.height);
+    let max_x = area
+        .x
+        .saturating_add(area.width.saturating_sub(width.saturating_add(1)));
+    let max_y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height.saturating_add(1)));
     let rect = Rect::new(
         menu.x.clamp(area.x, max_x),
         menu.y.clamp(area.y, max_y),
@@ -328,23 +330,20 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
         ("Delete", HitTarget::CommentMenuDelete(menu.target)),
     ];
 
-    frame.render_widget(Clear, rect);
+    let row_area = elevated_panel(frame, rect, "Message");
     frame.render_widget(
         List::new(
             rows.iter()
-                .map(|(label, _)| ListItem::new(Line::from(*label)))
+                .map(|(label, _)| {
+                    ListItem::new(Line::from(Span::styled(
+                        label.to_string(),
+                        theme::elevated_panel(),
+                    )))
+                })
                 .collect::<Vec<_>>(),
         )
-        .style(theme::panel())
-        .block(panel(" Message ", true)),
-        rect,
-    );
-
-    let row_area = Rect::new(
-        rect.x.saturating_add(1),
-        rect.y.saturating_add(1),
-        rect.width.saturating_sub(2),
-        rect.height.saturating_sub(2),
+        .style(theme::elevated_panel()),
+        row_area,
     );
     for (idx, (_, target)) in rows.into_iter().enumerate() {
         if idx as u16 >= row_area.height {
@@ -370,21 +369,23 @@ pub(crate) fn draw_comment_delete_confirm(frame: &mut Frame, area: Rect, ui: &mu
     let noun = confirm.target.noun();
     let index = confirm.target.index();
     let text = format!("Delete {noun} #{index}?  y / n");
-    frame.render_widget(Clear, modal);
+    let inner = elevated_panel(frame, modal, &format!("Delete {noun}"));
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(text.clone()),
             Line::from(""),
-            Line::from(Span::styled("This cannot be undone.", theme::muted())),
+            Line::from(Span::styled(
+                "This cannot be undone.",
+                theme::elevated_muted(),
+            )),
         ])
         .alignment(Alignment::Center)
-        .style(theme::panel())
-        .block(panel(&format!(" Delete {noun} "), true).padding(Padding::uniform(1))),
-        modal,
+        .style(theme::elevated_panel()),
+        inner,
     );
 
-    let text_x = modal.x + modal.width.saturating_sub(text.chars().count() as u16) / 2;
-    let text_y = modal.y.saturating_add(2);
+    let text_x = inner.x + inner.width.saturating_sub(text.chars().count() as u16) / 2;
+    let text_y = inner.y;
     if let Some(y_pos) = text.find('y') {
         ui.hit_map.push(
             Rect::new(text_x + y_pos as u16, text_y, 1, 1),
@@ -455,24 +456,17 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
         theme::OK
     };
 
-    frame.render_widget(Clear, rect);
+    let inner = elevated_panel(frame, rect, "");
     frame.render_widget(
         Paragraph::new(banner.text.clone())
             .style(
                 Style::default()
                     .fg(color)
-                    .bg(theme::BG)
+                    .bg(theme::ELEVATED_PANEL)
                     .add_modifier(Modifier::BOLD),
             )
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(color).bg(theme::BG))
-                    .style(Style::default().fg(color).bg(theme::BG))
-                    .padding(Padding::horizontal(1)),
-            )
             .wrap(Wrap { trim: true }),
-        rect,
+        inner,
     );
 }
 
@@ -496,12 +490,15 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
                 Line::from(""),
                 Line::from(Span::styled(
                     code.trim().to_string(),
-                    Style::default().fg(theme::OK).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::OK)
+                        .bg(theme::ELEVATED_PANEL)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
                     "c copies, Enter or Esc closes",
-                    theme::accent(),
+                    theme::elevated_accent(),
                 )),
             ],
         )
@@ -512,14 +509,13 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
         )
     };
     ui.hit_map.push(modal, HitTarget::BannerModal);
-    frame.render_widget(Clear, modal);
+    let inner = elevated_panel(frame, modal, title);
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
-            .style(theme::panel())
-            .block(panel(title, true).padding(Padding::uniform(1)))
+            .style(theme::elevated_panel())
             .wrap(Wrap { trim: true }),
-        modal,
+        inner,
     );
 }
 
@@ -540,7 +536,8 @@ pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, u
         desired_width,
         desired_height.clamp(5, available_height),
     );
-    let content_width = modal.width.saturating_sub(4) as usize;
+    let inner = elevated_panel(frame, modal, &list.title);
+    let content_width = inner.width as usize;
     let mut widths = list_column_widths(list, content_width);
     if widths.is_empty() {
         widths.push(content_width.max(1));
@@ -549,21 +546,19 @@ pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, u
     ui.hit_map.push(modal, HitTarget::BannerModal);
     let mut lines = Vec::new();
     if list.rows.is_empty() {
-        lines.push(Line::from(Span::styled(list.empty.clone(), theme::muted())));
+        lines.push(Line::from(Span::styled(
+            list.empty.clone(),
+            theme::elevated_muted(),
+        )));
     } else {
         lines.push(list_modal_line(&list.columns, &widths, true));
-        let visible_rows = modal.height.saturating_sub(5) as usize;
+        let visible_rows = inner.height.saturating_sub(1) as usize;
         for (idx, row) in list.rows.iter().take(visible_rows).enumerate() {
             lines.push(list_modal_line(row, &widths, false));
             if list.row_actions.get(idx).is_some_and(Option::is_some) {
-                let y = modal.y.saturating_add(2).saturating_add(idx as u16);
+                let y = inner.y.saturating_add(1).saturating_add(idx as u16);
                 ui.hit_map.push(
-                    Rect::new(
-                        modal.x.saturating_add(2),
-                        y,
-                        modal.width.saturating_sub(4),
-                        1,
-                    ),
+                    Rect::new(inner.x, y, inner.width, 1),
                     HitTarget::ListModalRow(idx),
                 );
             }
@@ -571,18 +566,12 @@ pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, u
         if list.rows.len() > visible_rows {
             lines.push(Line::from(Span::styled(
                 format!("{} more rows", list.rows.len() - visible_rows),
-                theme::muted(),
+                theme::elevated_muted(),
             )));
         }
     }
 
-    frame.render_widget(Clear, modal);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .style(theme::panel())
-            .block(panel(&format!(" {} ", list.title), true).padding(Padding::uniform(1))),
-        modal,
-    );
+    frame.render_widget(Paragraph::new(lines).style(theme::elevated_panel()), inner);
 }
 
 fn list_modal_width(list: &ListModal) -> u16 {
@@ -639,7 +628,7 @@ fn list_modal_line(values: &[String], widths: &[usize], header: bool) -> Line<'s
         let value = values.get(idx).cloned().unwrap_or_default();
         let text = pad_or_truncate(&value, *width);
         let style = if header {
-            theme::muted().add_modifier(Modifier::BOLD)
+            theme::elevated_muted().add_modifier(Modifier::BOLD)
         } else {
             list_cell_style(&value)
         };
@@ -650,10 +639,12 @@ fn list_modal_line(values: &[String], widths: &[usize], header: bool) -> Line<'s
 
 fn list_cell_style(value: &str) -> Style {
     match value {
-        "open" | "active" | "enabled" | "joined" | "read" | "accepted" => theme::accent(),
-        "pending" | "joinable" | "unread" => theme::unread(),
-        "revoked" | "disabled" | "archived" => Style::default().fg(theme::ERROR).bg(theme::PANEL),
-        _ => theme::panel(),
+        "open" | "active" | "enabled" | "joined" | "read" | "accepted" => theme::elevated_accent(),
+        "pending" | "joinable" | "unread" => theme::elevated_unread(),
+        "revoked" | "disabled" | "archived" => {
+            Style::default().fg(theme::ERROR).bg(theme::ELEVATED_PANEL)
+        }
+        _ => theme::elevated_panel(),
     }
 }
 
@@ -668,12 +659,45 @@ fn pad_or_truncate(value: &str, width: usize) -> String {
     format!("{value:<width$}")
 }
 
-pub(crate) fn panel(title: &str, active: bool) -> Block<'_> {
-    Block::default()
-        .title(title.to_string())
-        .borders(Borders::ALL)
-        .border_style(theme::border(active))
-        .style(theme::panel())
+pub(crate) fn elevated_panel(frame: &mut Frame, area: Rect, title: &str) -> Rect {
+    elevated_surface(frame, area);
+    let title = title.trim();
+    if !title.is_empty() && area.width > 4 && area.height > 2 {
+        let title_area = Rect::new(
+            area.x.saturating_add(2),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(4),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(title.to_string()).style(theme::elevated_accent()),
+            title_area,
+        );
+    }
+    elevated_inner(area, !title.is_empty())
+}
+
+fn elevated_surface(frame: &mut Frame, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::default().style(theme::elevated_panel()), area);
+}
+
+fn elevated_inner(area: Rect, has_title: bool) -> Rect {
+    let horizontal_padding = 2.min(area.width);
+    let top_padding = if has_title { 2 } else { 1 }.min(area.height);
+    let remaining_height = area.height.saturating_sub(top_padding);
+    let bottom_padding = 1.min(remaining_height.saturating_sub(1));
+    Rect::new(
+        area.x.saturating_add(horizontal_padding),
+        area.y.saturating_add(top_padding),
+        area.width
+            .saturating_sub(horizontal_padding.saturating_mul(2)),
+        remaining_height.saturating_sub(bottom_padding),
+    )
 }
 
 pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {

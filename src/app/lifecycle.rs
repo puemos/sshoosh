@@ -16,6 +16,9 @@ impl App {
         let account = client.account().clone();
         let mut ui = UiState::default();
         ui.sync_route_from_snapshot(&snapshot);
+        if account.activated {
+            ui.show_startup_splash(Duration::from_millis(2400));
+        }
         Ok(Self {
             running: true,
             terminal,

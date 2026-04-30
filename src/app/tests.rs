@@ -39,6 +39,7 @@ mod cases {
             .await
             .expect("account");
         let mut app = App::new(account, state, 100, 30).await.expect("app");
+        app.ui.dismiss_startup_splash();
         app.snapshot = snapshot();
         app.ui.route = Route::Channel("general".to_string());
         app

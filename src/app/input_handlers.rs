@@ -11,6 +11,8 @@ impl App {
     }
 
     pub(crate) fn handle_key(&mut self, key: Key) {
+        self.ui.dismiss_startup_splash();
+
         if let Key::Mouse(mouse) = key {
             self.handle_mouse(mouse);
             return;
@@ -70,6 +72,8 @@ impl App {
     }
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) {
+        self.ui.dismiss_startup_splash();
+
         if self
             .ui
             .banner
@@ -151,6 +155,16 @@ impl App {
                         self.ui.palette.previous();
                     } else {
                         self.ui.palette.next();
+                    }
+                }
+            }
+            HitTarget::HelpScroll => {
+                let steps = delta.unsigned_abs().max(1);
+                for _ in 0..steps {
+                    if delta < 0 {
+                        self.ui.help_scroll.scroll_up();
+                    } else {
+                        self.ui.help_scroll.scroll_down();
                     }
                 }
             }
@@ -249,7 +263,7 @@ impl App {
                     let _ = self.accept_autocomplete_tab();
                 }
             }
-            HitTarget::AutocompleteScroll => {}
+            HitTarget::AutocompleteScroll | HitTarget::HelpScroll => {}
             HitTarget::PaletteRow(row) => {
                 if row < self.ui.palette.filtered.len() {
                     self.ui.palette.selected = row;
@@ -320,7 +334,7 @@ impl App {
         match action {
             BottomBarAction::ToggleDetail => self.toggle_workspace_detail(),
             BottomBarAction::OpenCommand => self.enter_compose("/"),
-            BottomBarAction::OpenHelp => self.ui.mode = UiMode::Help,
+            BottomBarAction::OpenHelp => self.open_help(),
             BottomBarAction::OpenQuit => self.ui.mode = UiMode::ConfirmQuit,
             BottomBarAction::SubmitComposer => self.submit_composer(),
             BottomBarAction::AcceptAutocomplete => {
@@ -364,7 +378,7 @@ impl App {
     pub(crate) fn handle_normal_key(&mut self, key: Key) {
         match key {
             Key::Char('q') => self.ui.mode = UiMode::ConfirmQuit,
-            Key::Char('?') | Key::CtrlSeq('x', 'h') => self.ui.mode = UiMode::Help,
+            Key::Char('?') | Key::CtrlSeq('x', 'h') => self.open_help(),
             Key::Ctrl('p') | Key::CtrlSeq('x', 'p') => self.open_palette(),
             Key::Tab | Key::BackTab => self.toggle_workspace_detail(),
             Key::Left | Key::Char('h') => self.navigate_left(),
@@ -510,11 +524,17 @@ impl App {
     }
 
     pub(crate) fn handle_help_key(&mut self, key: Key) {
-        if matches!(
-            key,
-            Key::Esc | Key::Enter | Key::ShiftEnter | Key::Char('?') | Key::Char('q')
-        ) {
-            self.ui.mode = UiMode::Normal;
+        match key {
+            Key::Esc | Key::Enter | Key::ShiftEnter | Key::Char('?') | Key::Char('q') => {
+                self.ui.mode = UiMode::Normal;
+            }
+            Key::Down | Key::Char('j') => self.ui.help_scroll.scroll_down(),
+            Key::Up | Key::Char('k') => self.ui.help_scroll.scroll_up(),
+            Key::PageDown => self.ui.help_scroll.scroll_page_down(),
+            Key::PageUp => self.ui.help_scroll.scroll_page_up(),
+            Key::Home | Key::Char('g') => self.ui.help_scroll.scroll_to_top(),
+            Key::End | Key::Char('G') => self.ui.help_scroll.scroll_to_bottom(),
+            _ => {}
         }
     }
 

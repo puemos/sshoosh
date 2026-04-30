@@ -6,7 +6,10 @@ mod state;
 mod theme;
 pub use action::{Action, SourceTarget};
 
-use std::collections::{HashSet, VecDeque};
+use std::{
+    collections::{HashSet, VecDeque},
+    time::Duration,
+};
 
 use ratatui::layout::{Position, Rect};
 

@@ -22,6 +22,11 @@ impl App {
         self.rebuild_palette();
     }
 
+    pub(crate) fn open_help(&mut self) {
+        self.ui.mode = UiMode::Help;
+        self.ui.help_scroll.scroll_to_top();
+    }
+
     pub(crate) fn rebuild_palette(&mut self) {
         self.ui.palette.items = self.commands.palette_items(&self.snapshot);
         let query = self.ui.palette.query.clone();
@@ -68,6 +73,7 @@ impl App {
                 self.ui.threads_collapsed = false;
                 self.refresh_requested = true;
             }
+            CommandExecutor::Mode(UiMode::Help) => self.open_help(),
             CommandExecutor::Mode(mode) => self.ui.mode = mode,
             CommandExecutor::Quit => self.ui.mode = UiMode::ConfirmQuit,
         }
@@ -156,7 +162,7 @@ impl App {
             .next()
             .unwrap_or_default();
         if matches!(command, "help" | "?") {
-            self.ui.mode = UiMode::Help;
+            self.open_help();
             return;
         }
         if matches!(command, "quit" | "q") {

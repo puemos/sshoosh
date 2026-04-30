@@ -8,6 +8,7 @@ mod cases {
         backend::TestBackend,
         buffer::{Buffer, Cell},
     };
+    use std::time::{Duration, Instant};
 
     use crate::{
         app::state,
@@ -327,6 +328,43 @@ mod cases {
     }
 
     #[test]
+    fn startup_splash_renders_for_active_sessions() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let mut ui = UiState::default();
+        ui.startup_splash_until = Some(Instant::now() + Duration::from_secs(1));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+
+        assert!(rendered.contains("█"));
+        assert!(rendered.contains("SSH workspace chat"));
+        assert_eq!(
+            buffer.cell((0, 0)).expect("full screen splash").bg,
+            theme::ELEVATED_PANEL
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::BannerModal))
+        );
+    }
+
+    #[test]
     fn list_modal_renders_invites_as_aligned_rows() {
         let width = 100;
         let height = 30;
@@ -550,7 +588,7 @@ mod cases {
     }
 
     #[test]
-    fn toast_banner_renders_box_at_bottom_right_without_covering_topbar() {
+    fn toast_banner_renders_elevated_panel_at_bottom_right_without_covering_topbar() {
         let width = 100;
         let height = 30;
         let backend = TestBackend::new(width, height);
@@ -583,9 +621,9 @@ mod cases {
 
         let top_left = buffer
             .cell((text_x.saturating_sub(2), text_y.saturating_sub(1)))
-            .expect("toast top-left border");
-        assert_eq!(top_left.symbol(), "┌");
-        assert_eq!(top_left.fg, theme::OK);
+            .expect("toast surface");
+        assert_eq!(top_left.symbol(), " ");
+        assert_eq!(top_left.bg, theme::ELEVATED_PANEL);
     }
 
     #[test]
@@ -611,14 +649,15 @@ mod cases {
         let buffer = terminal.backend().buffer();
         let (text_x, text_y) = position_for_text(buffer, width, height, "refresh failed").unwrap();
         let text = buffer.cell((text_x, text_y)).expect("toast text");
-        let border = buffer
+        let surface = buffer
             .cell((text_x.saturating_sub(2), text_y.saturating_sub(1)))
-            .expect("toast border");
+            .expect("toast surface");
 
         assert_eq!(text.fg, theme::ERROR);
+        assert_eq!(text.bg, theme::ELEVATED_PANEL);
         assert!(text.modifier.contains(Modifier::BOLD));
-        assert_eq!(border.symbol(), "┌");
-        assert_eq!(border.fg, theme::ERROR);
+        assert_eq!(surface.symbol(), " ");
+        assert_eq!(surface.bg, theme::ELEVATED_PANEL);
     }
 
     #[test]
@@ -1148,10 +1187,44 @@ mod cases {
 
         assert!(rendered.contains("Keyboard"));
         assert!(rendered.contains("Slash commands"));
-        assert!(rendered.contains("/channel"));
+        assert!(rendered.contains("/invite"));
         assert!(!rendered.contains("membersManage"));
         assert!(!rendered.contains("idManage"));
         assert!(!rendered.contains("readOpen"));
+    }
+
+    #[test]
+    fn help_overlay_scrolls_command_reference() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+        ui.mode = UiMode::Help;
+        ui.help_scroll.set_offset(Position { x: 0, y: 2 });
+        let registry = crate::app::commands::CommandRegistry::default();
+
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..height)
+            .map(|y| row_text(buffer, width, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("/channel"));
+        assert!(rendered.contains("Manage channels"));
     }
 
     #[test]

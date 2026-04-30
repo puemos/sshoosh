@@ -6,6 +6,7 @@ pub const TOPBAR: Color = BG;
 pub const TOPBAR_DARK: Color = BG;
 pub const COMPOSER: Color = Color::Rgb(41, 44, 47); // #292C2F
 pub const PANEL: Color = BG;
+pub const ELEVATED_PANEL: Color = COMPOSER;
 pub const CARD: Color = BG;
 pub const BORDER: Color = Color::Rgb(70, 73, 73); // #464949
 pub const MUTED: Color = Color::Rgb(133, 146, 137); // #859289
@@ -25,6 +26,10 @@ pub fn panel() -> Style {
     Style::default().fg(TEXT).bg(PANEL)
 }
 
+pub fn elevated_panel() -> Style {
+    Style::default().fg(TEXT).bg(ELEVATED_PANEL)
+}
+
 pub fn topbar() -> Style {
     Style::default().fg(MUTED).bg(TOPBAR)
 }
@@ -37,12 +42,6 @@ pub fn composer() -> Style {
     Style::default().fg(TEXT).bg(COMPOSER)
 }
 
-pub fn border(active: bool) -> Style {
-    Style::default()
-        .fg(if active { ACCENT } else { BORDER })
-        .bg(PANEL)
-}
-
 pub fn title() -> Style {
     Style::default()
         .fg(TEXT)
@@ -52,6 +51,10 @@ pub fn title() -> Style {
 
 pub fn muted() -> Style {
     Style::default().fg(MUTED).bg(PANEL)
+}
+
+pub fn elevated_muted() -> Style {
+    Style::default().fg(MUTED).bg(ELEVATED_PANEL)
 }
 
 pub fn section_header(active: bool) -> Style {
@@ -68,10 +71,31 @@ pub fn accent() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+pub fn elevated_accent() -> Style {
+    Style::default()
+        .fg(ACCENT)
+        .bg(ELEVATED_PANEL)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn unread() -> Style {
     Style::default()
         .fg(WARN)
         .bg(PANEL)
+        .add_modifier(Modifier::BOLD)
+}
+
+pub fn elevated_title() -> Style {
+    Style::default()
+        .fg(TEXT)
+        .bg(ELEVATED_PANEL)
+        .add_modifier(Modifier::BOLD)
+}
+
+pub fn elevated_unread() -> Style {
+    Style::default()
+        .fg(WARN)
+        .bg(ELEVATED_PANEL)
         .add_modifier(Modifier::BOLD)
 }
 

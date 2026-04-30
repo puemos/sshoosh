@@ -14,8 +14,8 @@ pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
 }
 
 pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
-    let modal = centered(area, 72, 18);
-    let block = panel(" sshoosh setup ", true);
+    let modal = centered(area, 76, 21);
+    let inner = elevated_panel(frame, modal, "sshoosh setup");
     let suggested_username = account
         .pending_username
         .as_deref()
@@ -25,55 +25,87 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
         Line::from(""),
         Line::from(Span::styled(
             "This SSH key is not activated yet.",
-            theme::unread(),
+            theme::elevated_unread(),
         )),
         Line::from(""),
         Line::from("Enter the bootstrap token or ask an owner/admin for an invite code."),
         Line::from("Type the secret and press Enter, or use: /join SECRET username"),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Suggested username: ", theme::muted()),
-            Span::styled(suggested_username.to_string(), theme::accent()),
+            Span::styled("Suggested username: ", theme::elevated_muted()),
+            Span::styled(suggested_username.to_string(), theme::elevated_accent()),
         ]),
         Line::from(""),
         Line::from(format!("> {}", ui.composer.buffer)),
     ]);
     frame.render_widget(
         Paragraph::new(text)
-            .style(theme::panel())
-            .block(block.padding(Padding::uniform(1)))
+            .style(theme::elevated_panel())
             .wrap(Wrap { trim: true }),
-        modal,
+        inner,
     );
-    let input = Rect::new(
-        modal.x.saturating_add(2),
-        modal.y.saturating_add(14),
-        modal.width.saturating_sub(4),
-        1,
-    );
+    let input = Rect::new(inner.x, inner.y.saturating_add(14), inner.width, 1);
     ui.hit_map
         .push(input, HitTarget::ComposerInput { scroll_y: 0 });
 }
 
+pub(crate) fn draw_startup_splash(frame: &mut Frame, area: Rect, ui: &mut UiState) {
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::default().style(theme::elevated_panel()), area);
+    ui.hit_map.push(area, HitTarget::BannerModal);
+
+    let mut text = sshoosh_logo_lines();
+    text.extend([
+        Line::from(""),
+        Line::from(Span::styled(
+            "SSH workspace chat, served as a terminal.",
+            theme::elevated_muted(),
+        )),
+    ]);
+    let splash_height = text.len() as u16;
+    let inner = Rect::new(
+        area.x,
+        area.y
+            .saturating_add(area.height.saturating_sub(splash_height) / 2),
+        area.width,
+        splash_height.min(area.height),
+    );
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(theme::elevated_panel())
+            .alignment(Alignment::Center),
+        inner,
+    );
+}
+
 pub(crate) fn sshoosh_logo_lines() -> Vec<Line<'static>> {
-    vec![
-        Line::from(Span::styled(
-            r"  ___ ___ _  _  ___   ___  ___ _  _ ",
-            theme::accent(),
-        )),
-        Line::from(Span::styled(
-            r" / __/ __| || |/ _ \ / _ \/ __| || |",
-            theme::accent(),
-        )),
-        Line::from(Span::styled(
-            r" \__ \__ \ __ | (_) | (_) \__ \ __ |",
-            theme::accent(),
-        )),
-        Line::from(Span::styled(
-            r" |___/___/_||_|\___/ \___/|___/_||_|",
-            theme::accent(),
-        )),
-    ]
+    const LOGO: &[&str] = &[
+        "                       _##                              _##",
+        "                      ###^                             _###",
+        "     _________________###____ _______  _______ ________####___",
+        "    _###^^^^####^^^^####^#######^^#######^#######^^^^^###^^###^",
+        "    ####### ^######_### _######^ #######  ###^#######_##^ _###",
+        "   _____###_____######^ #######__#######_####_____###### _###",
+        "  ###################^ ####_#######_#######_#######_###  ###",
+        " ###################^ ^###############################  ###^",
+    ];
+    LOGO.iter().map(|line| pixel_logo_line(line)).collect()
+}
+
+fn pixel_logo_line(pattern: &'static str) -> Line<'static> {
+    let fill = Style::default()
+        .fg(theme::SUBTLE)
+        .add_modifier(Modifier::BOLD);
+    let spans = pattern
+        .chars()
+        .map(|ch| match ch {
+            '#' => Span::styled("█", fill),
+            '^' => Span::styled("▀", fill),
+            '_' => Span::styled("▄", fill),
+            _ => Span::raw(" "),
+        })
+        .collect::<Vec<_>>();
+    Line::from(spans)
 }
 
 pub(crate) fn draw_topbar(

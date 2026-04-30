@@ -197,7 +197,7 @@ pub(crate) fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {
 
 pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut UiState) {
     let visible_count = ui.composer.autocomplete.items.len().min(8);
-    let height = visible_count as u16 + 2;
+    let height = visible_count as u16 + 3;
     let visible_items = &ui.composer.autocomplete.items[..visible_count];
     let label_width = visible_items
         .iter()
@@ -232,7 +232,7 @@ pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut
             let style = if idx == ui.composer.autocomplete.selected {
                 theme::selection()
             } else {
-                theme::panel()
+                theme::elevated_panel()
             };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{:<label_width$}", item.label), style),
@@ -241,14 +241,8 @@ pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut
             ]))
         })
         .collect();
-    frame.render_widget(Clear, area);
-    frame.render_widget(List::new(items).block(panel(" Commands ", true)), area);
-    let rows = Rect::new(
-        area.x.saturating_add(1),
-        area.y.saturating_add(1),
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(2),
-    );
+    let rows = elevated_panel(frame, area, "Commands");
+    frame.render_widget(List::new(items).style(theme::elevated_panel()), rows);
     ui.hit_map.push(rows, HitTarget::AutocompleteScroll);
     for idx in 0..ui.composer.autocomplete.items.len().min(8) {
         ui.hit_map.push(
