@@ -111,9 +111,17 @@ input {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
   color: var(--fg);
   font-weight: 700;
   text-decoration: none;
+}
+
+.brand img {
+  width: 92px;
+  height: auto;
+  object-fit: contain;
 }
 
 .topline nav {
@@ -151,6 +159,12 @@ input {
   max-width: 620px;
   margin: 0 auto;
   padding-top: 56px;
+}
+
+.hero-logo {
+  display: block;
+  width: min(100%, 500px);
+  margin: 0 0 24px;
 }
 
 .eyebrow,
@@ -318,11 +332,19 @@ html[data-theme="dark"] .astro-code span {
 }
 
 .sidebar-title {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 12px;
   color: var(--fg);
   font-weight: 700;
   text-decoration: none;
+}
+
+.sidebar-title img {
+  width: 78px;
+  height: auto;
+  object-fit: contain;
 }
 
 .nav-section {

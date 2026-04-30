@@ -32,10 +32,15 @@ pub(crate) async fn load_notifications(
 ) -> anyhow::Result<Vec<NotificationSummary>> {
     let limit = limit.clamp(1, 200);
     let rows = query(
-        "SELECT n.id, n.kind, actor.username AS actor_username, n.title, n.body,
-                n.created_at, n.read_at
+        "SELECT n.id, n.kind, actor.username AS actor_username,
+                n.channel_id, c.slug AS channel_slug,
+                n.thread_id, t.title AS thread_title,
+                n.conversation_id,
+                n.title, n.body, n.created_at, n.read_at
          FROM notifications n
          LEFT JOIN accounts actor ON actor.id = n.actor_account_id
+         LEFT JOIN channels c ON c.id = n.channel_id
+         LEFT JOIN threads t ON t.id = n.thread_id
          WHERE n.account_id = ?
          ORDER BY n.created_at DESC
          LIMIT ?",
@@ -50,6 +55,11 @@ pub(crate) async fn load_notifications(
             id: row.get("id"),
             kind: row.get("kind"),
             actor_username: row.get("actor_username"),
+            channel_id: row.get("channel_id"),
+            channel_slug: row.get("channel_slug"),
+            thread_id: row.get("thread_id"),
+            thread_title: row.get("thread_title"),
+            conversation_id: row.get("conversation_id"),
             title: row.get("title"),
             body: row.get("body"),
             created_at: row.get("created_at"),

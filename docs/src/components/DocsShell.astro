@@ -20,7 +20,10 @@ const href = (path: string) => `${base}${path}`;
 >
   <div class="docs-layout">
     <aside class="sidebar" aria-label="Documentation navigation">
-      <a class="sidebar-title" href={href('docs/')}>sshoosh docs</a>
+      <a class="sidebar-title" href={href('docs/')}>
+        <img src={href('assets/sshoosh-logo.svg')} alt="" aria-hidden="true" />
+        <span>sshoosh docs</span>
+      </a>
       <section class="nav-section">
         <h2>Start</h2>
         <a href={href('docs/')} aria-current="page">Overview</a>

@@ -14,13 +14,15 @@ pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
 }
 
 pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
-    let modal = centered(area, 72, 13);
+    let modal = centered(area, 72, 18);
     let block = panel(" sshoosh setup ", true);
     let suggested_username = account
         .pending_username
         .as_deref()
         .unwrap_or(&account.username);
-    let text = vec![
+    let mut text = sshoosh_logo_lines();
+    text.extend([
+        Line::from(""),
         Line::from(Span::styled(
             "This SSH key is not activated yet.",
             theme::unread(),
@@ -35,7 +37,7 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
         ]),
         Line::from(""),
         Line::from(format!("> {}", ui.composer.buffer)),
-    ];
+    ]);
     frame.render_widget(
         Paragraph::new(text)
             .style(theme::panel())
@@ -45,7 +47,7 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
     );
     let input = Rect::new(
         modal.x.saturating_add(2),
-        modal.y.saturating_add(9),
+        modal.y.saturating_add(14),
         modal.width.saturating_sub(4),
         1,
     );
@@ -53,50 +55,216 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
         .push(input, HitTarget::ComposerInput { scroll_y: 0 });
 }
 
+pub(crate) fn sshoosh_logo_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            r"  ___ ___ _  _  ___   ___  ___ _  _ ",
+            theme::accent(),
+        )),
+        Line::from(Span::styled(
+            r" / __/ __| || |/ _ \ / _ \/ __| || |",
+            theme::accent(),
+        )),
+        Line::from(Span::styled(
+            r" \__ \__ \ __ | (_) | (_) \__ \ __ |",
+            theme::accent(),
+        )),
+        Line::from(Span::styled(
+            r" |___/___/_||_|\___/ \___/|___/_||_|",
+            theme::accent(),
+        )),
+    ]
+}
+
 pub(crate) fn draw_topbar(
     frame: &mut Frame,
     area: Rect,
     account: &Account,
     snapshot: &Snapshot,
-    ui: &UiState,
+    ui: &mut UiState,
 ) {
-    let active = active_label(snapshot, ui);
+    if area.is_empty() {
+        return;
+    }
+    frame.render_widget(Block::default().style(theme::topbar()), area);
+    let logo = "sshoosh";
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            logo,
+            theme::topbar_tab()
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::ITALIC),
+        )))
+        .style(theme::topbar()),
+        Rect::new(area.x, area.y, logo.chars().count() as u16, 1),
+    );
+
     let unread = snapshot.total_unread();
-    let line = Line::from(vec![
-        Span::styled(" sshoosh", theme::topbar_tab().add_modifier(Modifier::BOLD)),
-        Span::styled(
-            format!(" {active}"),
+    let unread_text = format!(" unread:{unread}");
+    let notifications_text = format!(" notifications:{}", snapshot.notification_unread_count);
+    let mentions_text = format!(" mentions:{}", snapshot.mention_unread_count);
+    let online_text = format!("  {} online", snapshot.online_user_count());
+    let account_text = format!("  {} ({})", account.username, account.role.as_str());
+    let logo_width = char_width(logo);
+    let max_cluster_width = (area.width as usize).saturating_sub(logo_width.saturating_add(1));
+    if max_cluster_width == 0 {
+        return;
+    }
+    let active_full = active_label(snapshot, ui);
+    let active_full_width = char_width(&active_full).saturating_add(1);
+    let mut show_notifications = true;
+    let mut show_mentions = true;
+    let mut show_online = true;
+    let mut show_account = true;
+    let mut fixed_width = topbar_fixed_width(
+        &unread_text,
+        show_notifications.then_some(notifications_text.as_str()),
+        show_mentions.then_some(mentions_text.as_str()),
+        show_online.then_some(online_text.as_str()),
+        show_account.then_some(account_text.as_str()),
+    );
+    if fixed_width.saturating_add(active_full_width) > max_cluster_width {
+        show_account = false;
+        fixed_width = topbar_fixed_width(
+            &unread_text,
+            show_notifications.then_some(notifications_text.as_str()),
+            show_mentions.then_some(mentions_text.as_str()),
+            show_online.then_some(online_text.as_str()),
+            show_account.then_some(account_text.as_str()),
+        );
+    }
+    if fixed_width.saturating_add(active_full_width) > max_cluster_width {
+        show_online = false;
+        fixed_width = topbar_fixed_width(
+            &unread_text,
+            show_notifications.then_some(notifications_text.as_str()),
+            show_mentions.then_some(mentions_text.as_str()),
+            show_online.then_some(online_text.as_str()),
+            show_account.then_some(account_text.as_str()),
+        );
+    }
+    if snapshot.notification_unread_count == 0
+        && fixed_width.saturating_add(active_full_width) > max_cluster_width
+    {
+        show_notifications = false;
+        fixed_width = topbar_fixed_width(
+            &unread_text,
+            show_notifications.then_some(notifications_text.as_str()),
+            show_mentions.then_some(mentions_text.as_str()),
+            show_online.then_some(online_text.as_str()),
+            show_account.then_some(account_text.as_str()),
+        );
+    }
+    if snapshot.mention_unread_count == 0
+        && fixed_width.saturating_add(active_full_width) > max_cluster_width
+    {
+        show_mentions = false;
+        fixed_width = topbar_fixed_width(
+            &unread_text,
+            show_notifications.then_some(notifications_text.as_str()),
+            show_mentions.then_some(mentions_text.as_str()),
+            show_online.then_some(online_text.as_str()),
+            show_account.then_some(account_text.as_str()),
+        );
+    }
+    let active_budget = max_cluster_width.saturating_sub(fixed_width);
+    let active = if active_budget > 1 {
+        format!(
+            " {}",
+            truncate_text(active_full, active_budget.saturating_sub(1))
+        )
+    } else {
+        String::new()
+    };
+    let cluster_width = char_width(&active)
+        .saturating_add(fixed_width)
+        .min(max_cluster_width);
+    let cluster_x = area
+        .x
+        .saturating_add(area.width.saturating_sub(cluster_width as u16));
+
+    let mut spans = Vec::new();
+    if !active.is_empty() {
+        spans.push(Span::styled(
+            active.clone(),
             theme::topbar().fg(theme::TEXT).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" unread:{unread}"),
-            theme::topbar().fg(if unread > 0 {
-                theme::WARN
-            } else {
-                theme::MUTED
-            }),
-        ),
-        Span::styled(
-            format!(
-                "  notifications:{} mentions:{}",
-                snapshot.notification_unread_count, snapshot.mention_unread_count
-            ),
+        ));
+    }
+    spans.push(Span::styled(
+        unread_text.clone(),
+        theme::topbar().fg(if unread > 0 {
+            theme::WARN
+        } else {
+            theme::MUTED
+        }),
+    ));
+    let mut cursor_x = cluster_x
+        .saturating_add(char_width(&active) as u16)
+        .saturating_add(char_width(&unread_text) as u16);
+    if show_notifications {
+        spans.push(Span::styled(
+            notifications_text.clone(),
             theme::topbar().fg(if snapshot.notification_unread_count > 0 {
                 theme::WARN
             } else {
                 theme::MUTED
             }),
-        ),
-        Span::styled(
-            format!("  {} online", snapshot.online_user_count()),
+        ));
+        ui.hit_map.push(
+            Rect::new(cursor_x, area.y, char_width(&notifications_text) as u16, 1),
+            HitTarget::TopbarNotifications,
+        );
+        cursor_x = cursor_x.saturating_add(char_width(&notifications_text) as u16);
+    }
+    if show_mentions {
+        spans.push(Span::styled(
+            mentions_text.clone(),
+            theme::topbar().fg(if snapshot.mention_unread_count > 0 {
+                theme::WARN
+            } else {
+                theme::MUTED
+            }),
+        ));
+        ui.hit_map.push(
+            Rect::new(cursor_x, area.y, char_width(&mentions_text) as u16, 1),
+            HitTarget::TopbarMentions,
+        );
+    }
+    if show_online {
+        spans.push(Span::styled(
+            online_text.clone(),
             theme::topbar().fg(theme::MUTED),
-        ),
-        Span::styled(
-            format!("  {} ({})", account.username, account.role.as_str()),
+        ));
+    }
+    if show_account {
+        spans.push(Span::styled(
+            account_text.clone(),
             theme::topbar().fg(theme::MUTED),
-        ),
-    ]);
-    frame.render_widget(Paragraph::new(line).style(theme::topbar()), area);
+        ));
+    }
+
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(theme::topbar()),
+        Rect::new(cluster_x, area.y, cluster_width as u16, 1),
+    );
+}
+
+fn char_width(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn topbar_fixed_width(
+    unread: &str,
+    notifications: Option<&str>,
+    mentions: Option<&str>,
+    online: Option<&str>,
+    account: Option<&str>,
+) -> usize {
+    char_width(unread)
+        + notifications.map(char_width).unwrap_or_default()
+        + mentions.map(char_width).unwrap_or_default()
+        + online.map(char_width).unwrap_or_default()
+        + account.map(char_width).unwrap_or_default()
 }
 
 pub(crate) fn draw_horizontal_divider(frame: &mut Frame, area: Rect, color: ratatui::style::Color) {

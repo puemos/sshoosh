@@ -77,6 +77,15 @@ impl App {
             .is_some_and(|banner| banner.modal_active())
         {
             self.ui.selection.clear();
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                && let Some(region) = self.ui.hit_map.hit(mouse.column, mouse.row)
+                && matches!(
+                    region.target,
+                    HitTarget::ListModalRow(_) | HitTarget::BannerModal
+                )
+            {
+                self.handle_mouse_click(region, mouse);
+            }
             return;
         }
 
@@ -107,7 +116,11 @@ impl App {
     pub(crate) fn update_pointer_shape(&mut self, mouse: MouseEvent) {
         self.desired_pointer_shape = match self.ui.hit_map.hit(mouse.column, mouse.row) {
             Some(HitRegion {
-                target: HitTarget::MessageLink(_),
+                target:
+                    HitTarget::MessageLink(_)
+                    | HitTarget::TopbarNotifications
+                    | HitTarget::TopbarMentions
+                    | HitTarget::ListModalRow(_),
                 ..
             }) => PointerShape::Pointer,
             _ => PointerShape::Default,
@@ -201,6 +214,8 @@ impl App {
 
     pub(crate) fn handle_mouse_click(&mut self, region: HitRegion, mouse: MouseEvent) {
         match region.target {
+            HitTarget::TopbarNotifications => self.actions.push(Action::ListNotifications),
+            HitTarget::TopbarMentions => self.actions.push(Action::ListMentions),
             HitTarget::WorkspaceChannel(channel_id) => self.select_channel(channel_id),
             HitTarget::WorkspaceThread(thread_id) => {
                 if let Some(channel_id) = self
@@ -247,6 +262,20 @@ impl App {
             }
             HitTarget::PromptInput => {}
             HitTarget::BannerModal => {}
+            HitTarget::ListModalRow(row) => {
+                let action = self
+                    .ui
+                    .banner
+                    .as_ref()
+                    .and_then(|banner| banner.list.as_ref())
+                    .and_then(|list| list.row_actions.get(row))
+                    .cloned()
+                    .flatten();
+                if let Some(ListModalAction::OpenSource(target)) = action {
+                    self.ui.banner = None;
+                    self.actions.push(Action::OpenSourceTarget { target });
+                }
+            }
             HitTarget::ConfirmQuitYes => self.running = false,
             HitTarget::ConfirmQuitNo | HitTarget::ConfirmQuitBackdrop => {
                 self.ui.mode = UiMode::Normal;

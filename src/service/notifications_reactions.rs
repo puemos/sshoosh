@@ -73,11 +73,15 @@ impl ServerState {
         let limit = limit.clamp(1, 200);
         let rows = query(
             "SELECT m.id, actor.username AS actor_username, m.source_kind,
+                    m.channel_id, c.slug AS channel_slug,
+                    m.thread_id, t.title AS thread_title,
+                    m.conversation_id,
                     COALESCE(t.title, 'DM') AS title,
                     COALESCE(cm.body, dm.body, t.body, '') AS body,
                     m.created_at, m.read_at
              FROM mentions m
              JOIN accounts actor ON actor.id = m.actor_account_id
+             LEFT JOIN channels c ON c.id = m.channel_id
              LEFT JOIN threads t ON t.id = m.thread_id
              LEFT JOIN comments cm ON cm.id = m.source_id AND m.source_kind = 'comment'
              LEFT JOIN conversation_messages dm ON dm.id = m.source_id AND m.source_kind = 'dm'
@@ -95,6 +99,11 @@ impl ServerState {
                 id: row.get("id"),
                 actor_username: row.get("actor_username"),
                 source_kind: row.get("source_kind"),
+                channel_id: row.get("channel_id"),
+                channel_slug: row.get("channel_slug"),
+                thread_id: row.get("thread_id"),
+                thread_title: row.get("thread_title"),
+                conversation_id: row.get("conversation_id"),
                 title: row.get("title"),
                 body: row.get("body"),
                 created_at: row.get("created_at"),

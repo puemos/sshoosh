@@ -413,6 +413,9 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             .list_notifications(&account_id, 50)
             .await
             .map(|rows| ActionResult::List(notifications_modal(&rows))),
+        Action::OpenSourceTarget { target } => {
+            open_source_target(app, &session, &account_id, target).await
+        }
         Action::MarkNotificationRead { notification_id } => session
             .mark_notification_read(&account_id, notification_id.as_deref())
             .await
@@ -508,6 +511,43 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
     }
 }
 
+async fn open_source_target(
+    app: &Arc<Mutex<App>>,
+    session: &ClientSession,
+    account_id: &str,
+    target: SourceTarget,
+) -> anyhow::Result<ActionResult> {
+    if let Some(conversation_id) = target.conversation_id {
+        app.lock().await.select_conversation(conversation_id);
+        return Ok(ActionResult::message("Opened source"));
+    }
+
+    let Some(mut channel_id) = target.channel_id else {
+        anyhow::bail!("Source channel is unavailable");
+    };
+
+    let already_joined = {
+        let app = app.lock().await;
+        app.has_channel(&channel_id)
+    };
+    if !already_joined {
+        let slug = target
+            .channel_slug
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Source channel is unavailable"))?;
+        channel_id = session
+            .join_channel(account_id.to_string(), slug.to_string())
+            .await?;
+    }
+
+    if let Some(thread_id) = target.thread_id {
+        app.lock().await.select_thread(channel_id, thread_id);
+    } else {
+        app.lock().await.select_channel(channel_id);
+    }
+    Ok(ActionResult::message("Opened source"))
+}
+
 async fn react_or_unreact(
     session: &ClientSession,
     account_id: &str,
@@ -557,6 +597,7 @@ fn accounts_modal(rows: &[AccountSummary]) -> ListModal {
                 ])
             })
             .collect(),
+        row_actions: Vec::new(),
         empty: "No users found.".to_string(),
     }
 }
@@ -576,6 +617,7 @@ fn keys_modal(title: &str, rows: &[SshKeySummary]) -> ListModal {
                 ])
             })
             .collect(),
+        row_actions: Vec::new(),
         empty: "No SSH keys found.".to_string(),
     }
 }
@@ -596,6 +638,7 @@ fn invites_modal(rows: &[InviteSummary]) -> ListModal {
                 ])
             })
             .collect(),
+        row_actions: Vec::new(),
         empty: "No invites found.".to_string(),
     }
 }
@@ -618,6 +661,7 @@ fn channel_members_modal(slug: &str, rows: &[ChannelMemberSummary]) -> ListModal
                 ])
             })
             .collect(),
+        row_actions: Vec::new(),
         empty: "No channel members found.".to_string(),
     }
 }
@@ -638,6 +682,7 @@ fn channels_modal(rows: &[ChannelDirectoryItem]) -> ListModal {
                 ])
             })
             .collect(),
+        row_actions: Vec::new(),
         empty: "No channels found.".to_string(),
     }
 }
@@ -652,12 +697,17 @@ fn mentions_modal(rows: &[MentionSummary]) -> ListModal {
                 row_values([
                     short_id(&row.id).to_string(),
                     format!("@{}", row.actor_username),
-                    row.source_kind.clone(),
+                    source_label(
+                        row.channel_slug.as_deref(),
+                        row.thread_title.as_deref(),
+                        row.conversation_id.as_deref(),
+                    ),
                     read_state(row.read_at.as_deref()).to_string(),
                     row.body.replace('\n', " "),
                 ])
             })
             .collect(),
+        row_actions: rows.iter().map(|row| source_row_action(row)).collect(),
         empty: "No mentions found.".to_string(),
     }
 }
@@ -665,7 +715,7 @@ fn mentions_modal(rows: &[MentionSummary]) -> ListModal {
 fn notifications_modal(rows: &[NotificationSummary]) -> ListModal {
     ListModal {
         title: "Notifications".to_string(),
-        columns: columns(["id", "kind", "actor", "state", "body"]),
+        columns: columns(["id", "kind", "actor", "source", "state", "body"]),
         rows: rows
             .iter()
             .map(|row| {
@@ -676,12 +726,88 @@ fn notifications_modal(rows: &[NotificationSummary]) -> ListModal {
                         .as_ref()
                         .map(|username| format!("@{username}"))
                         .unwrap_or_else(|| "-".to_string()),
+                    source_label(
+                        row.channel_slug.as_deref(),
+                        row.thread_title.as_deref(),
+                        row.conversation_id.as_deref(),
+                    ),
                     read_state(row.read_at.as_deref()).to_string(),
                     row.body.replace('\n', " "),
                 ])
             })
             .collect(),
+        row_actions: rows.iter().map(|row| source_row_action(row)).collect(),
         empty: "No notifications found.".to_string(),
+    }
+}
+
+trait SourceRow {
+    fn channel_id(&self) -> Option<&str>;
+    fn channel_slug(&self) -> Option<&str>;
+    fn thread_id(&self) -> Option<&str>;
+    fn conversation_id(&self) -> Option<&str>;
+}
+
+impl SourceRow for MentionSummary {
+    fn channel_id(&self) -> Option<&str> {
+        self.channel_id.as_deref()
+    }
+
+    fn channel_slug(&self) -> Option<&str> {
+        self.channel_slug.as_deref()
+    }
+
+    fn thread_id(&self) -> Option<&str> {
+        self.thread_id.as_deref()
+    }
+
+    fn conversation_id(&self) -> Option<&str> {
+        self.conversation_id.as_deref()
+    }
+}
+
+impl SourceRow for NotificationSummary {
+    fn channel_id(&self) -> Option<&str> {
+        self.channel_id.as_deref()
+    }
+
+    fn channel_slug(&self) -> Option<&str> {
+        self.channel_slug.as_deref()
+    }
+
+    fn thread_id(&self) -> Option<&str> {
+        self.thread_id.as_deref()
+    }
+
+    fn conversation_id(&self) -> Option<&str> {
+        self.conversation_id.as_deref()
+    }
+}
+
+fn source_row_action(row: &impl SourceRow) -> Option<ListModalAction> {
+    if row.conversation_id().is_none() && row.channel_id().is_none() {
+        return None;
+    }
+    Some(ListModalAction::OpenSource(SourceTarget {
+        channel_id: row.channel_id().map(ToOwned::to_owned),
+        channel_slug: row.channel_slug().map(ToOwned::to_owned),
+        thread_id: row.thread_id().map(ToOwned::to_owned),
+        conversation_id: row.conversation_id().map(ToOwned::to_owned),
+    }))
+}
+
+fn source_label(
+    channel_slug: Option<&str>,
+    thread_title: Option<&str>,
+    conversation_id: Option<&str>,
+) -> String {
+    if conversation_id.is_some() {
+        return "DM".to_string();
+    }
+    match (channel_slug, thread_title) {
+        (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+        (Some(slug), None) => format!("#{slug}"),
+        _ => "-".to_string(),
     }
 }
 
@@ -771,6 +897,73 @@ mod tests {
             vec!["019ddd09", "member", "@shyalter", "open", "-"]
         );
         assert_eq!(modal.rows[1][3], "accepted");
+        assert!(modal.row_actions.is_empty());
         assert_eq!(modal.empty, "No invites found.");
+    }
+
+    #[test]
+    fn notifications_modal_includes_source_and_row_action() {
+        let rows = vec![NotificationSummary {
+            id: "019ddd09abcdef".to_string(),
+            kind: "mention".to_string(),
+            actor_username: Some("alice".to_string()),
+            channel_id: Some("channel".to_string()),
+            channel_slug: Some("project-jojo".to_string()),
+            thread_id: Some("thread".to_string()),
+            thread_title: Some("updates".to_string()),
+            conversation_id: None,
+            title: "Mention".to_string(),
+            body: "ping".to_string(),
+            created_at: "2026-04-30T10:00:00Z".to_string(),
+            read_at: None,
+        }];
+
+        let modal = notifications_modal(&rows);
+
+        assert_eq!(
+            modal.columns,
+            vec!["id", "kind", "actor", "source", "state", "body"]
+        );
+        assert_eq!(modal.rows[0][3], "#project-jojo / updates");
+        assert_eq!(
+            modal.row_actions[0],
+            Some(ListModalAction::OpenSource(SourceTarget {
+                channel_id: Some("channel".to_string()),
+                channel_slug: Some("project-jojo".to_string()),
+                thread_id: Some("thread".to_string()),
+                conversation_id: None,
+            }))
+        );
+    }
+
+    #[test]
+    fn mentions_modal_renders_dm_source() {
+        let rows = vec![MentionSummary {
+            id: "019ddd09abcdef".to_string(),
+            actor_username: "alice".to_string(),
+            source_kind: "dm".to_string(),
+            channel_id: None,
+            channel_slug: None,
+            thread_id: None,
+            thread_title: None,
+            conversation_id: Some("dm".to_string()),
+            title: "DM".to_string(),
+            body: "hello @owner".to_string(),
+            created_at: "2026-04-30T10:00:00Z".to_string(),
+            read_at: Some("2026-04-30T10:01:00Z".to_string()),
+        }];
+
+        let modal = mentions_modal(&rows);
+
+        assert_eq!(modal.rows[0][2], "DM");
+        assert_eq!(
+            modal.row_actions[0],
+            Some(ListModalAction::OpenSource(SourceTarget {
+                channel_id: None,
+                channel_slug: None,
+                thread_id: None,
+                conversation_id: Some("dm".to_string()),
+            }))
+        );
     }
 }

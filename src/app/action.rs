@@ -1,6 +1,14 @@
 use crate::service::Role;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceTarget {
+    pub channel_id: Option<String>,
+    pub channel_slug: Option<String>,
+    pub thread_id: Option<String>,
+    pub conversation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     CreateInvite,
     CreateInviteWithOptions {
@@ -140,6 +148,9 @@ pub enum Action {
     },
     ListMentions,
     ListNotifications,
+    OpenSourceTarget {
+        target: SourceTarget,
+    },
     MarkNotificationRead {
         notification_id: Option<String>,
     },

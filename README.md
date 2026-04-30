@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/public/assets/sshoosh-logo.svg" alt="sshoosh logo" width="420">
+</p>
+
 # sshoosh
 
 `sshoosh` is a self-hosted SSH/TUI workspace chat. Users connect with an SSH key and get a terminal UI for explicit-membership channels, thread-first discussions, direct messages, notifications, mentions, reactions, unread state, FTS search, presence, export, and administration.
@@ -151,11 +155,15 @@ Admin and lifecycle commands:
 
 Threads and DMs are marked read when opened in the detail view. Manual unread remains until the item is opened again or explicitly marked read. Deleted comments/messages are excluded from unread counts.
 
+In compose mode, `Ctrl-X E` prefills an edit command for your latest comment in the current thread or your latest message in the current DM. With mouse support enabled, right-click one of your comments or DM messages to open the message menu, then choose edit or delete; deletes require confirmation.
+
 Bare URLs and Markdown links render as OSC8 terminal hyperlinks where supported. `sshoosh` does not open links on the server; use terminal link support or copy the visible URL.
 
 ## Notifications
 
 V1 creates durable in-app notifications for `@username` mentions, new DMs, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires. Use `/notification list`, `/notification mentions`, and `/notification read` in the TUI or `sshoosh notifications ...` from the CLI.
+
+Notification and mention lists include a source column for the originating channel, thread, or DM. With mouse support enabled, click a source row to open it; public channels are joined automatically when needed, while private channels still require membership. The topbar notification and mention counters are also clickable shortcuts to their lists.
 
 Terminal system notifications are opt-in per account. Use `/notification terminal on`, `/notification terminal off`, or `/notification terminal status` in the TUI. sshoosh sends terminal notification escape sequences to the SSH client and falls back to the terminal bell where desktop notifications are unsupported.
 
@@ -173,7 +181,7 @@ The JSON/Markdown export includes users, channels, threads, comments, DMs, menti
 
 ## Remote Database, Failover, And Encryption
 
-`SSHOOSH_DATABASE_URL` can point at `libsql://`, `https://`, or `file:` URLs. When several servers share one database, each process contends for the `main` master lease; only the active master accepts SSH sessions and writes. Use stable `SSHOOSH_NODE_ID` values in production.
+`SSHOOSH_DATABASE_URL` can point at `libsql://`, `https://`, or `file:` URLs. Several servers may share one database and all nodes accept SSH sessions and writes through the shared SQLite/libSQL transaction layer. Each process still contends for the `main` master lease for singleton maintenance commands such as encryption migration. Use stable `SSHOOSH_NODE_ID` values in production.
 
 If `SSHOOSH_ENCRYPTION_KEY` is set, source content fields are encrypted before storage with XChaCha20-Poly1305. Full-text search stays plaintext intentionally, so search still works and the search index remains sensitive. Existing plaintext databases must be converted with `sshoosh encrypt migrate`.
 

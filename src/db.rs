@@ -66,7 +66,6 @@ pub struct Database {
 pub struct DbTransaction {
     tx: libsql::Transaction,
     encryption: Option<Arc<EncryptionService>>,
-    is_master: Arc<AtomicBool>,
     bypass_master_check: bool,
 }
 
@@ -379,7 +378,6 @@ impl Database {
         Ok(DbTransaction {
             tx,
             encryption: self.encryption.clone(),
-            is_master: self.is_master.clone(),
             bypass_master_check: false,
         })
     }
@@ -639,7 +637,6 @@ pub trait DbExecutor {
 
 impl DbExecutor for &Database {
     async fn execute_query(&mut self, mut query: Query) -> anyhow::Result<DbResult> {
-        ensure_master(self.is_master(), &query)?;
         if normalize_sql(&query.sql).starts_with("pragma ignore_check_constraints = on") {
             self.ignore_check_constraints.store(true, Ordering::Release);
         }
@@ -676,7 +673,6 @@ impl DbExecutor for &Database {
 
 impl DbExecutor for &mut DbTransaction {
     async fn execute_query(&mut self, mut query: Query) -> anyhow::Result<DbResult> {
-        ensure_master(self.is_master.load(Ordering::Acquire), &query)?;
         if self.bypass_master_check {
             query.bypass_master_check = true;
         }
@@ -1229,26 +1225,6 @@ async fn collect_rows(
         });
     }
     Ok(out)
-}
-
-fn ensure_master(is_master: bool, query: &Query) -> anyhow::Result<()> {
-    if query.bypass_master_check || !is_write_sql(&query.sql) || is_master {
-        return Ok(());
-    }
-    bail!("server is standby, retry shortly")
-}
-
-fn is_write_sql(sql: &str) -> bool {
-    let sql = sql.trim_start().to_ascii_lowercase();
-    (sql.starts_with("insert ")
-        || sql.starts_with("update ")
-        || sql.starts_with("delete ")
-        || sql.starts_with("replace ")
-        || sql.starts_with("create ")
-        || sql.starts_with("drop ")
-        || sql.starts_with("alter ")
-        || sql.starts_with("vacuum "))
-        && !sql.contains("server_leases")
 }
 
 fn encrypt_param(

@@ -4,7 +4,7 @@ mod input;
 mod render;
 mod state;
 mod theme;
-pub use action::Action;
+pub use action::{Action, SourceTarget};
 
 use std::collections::{HashSet, VecDeque};
 
@@ -33,7 +33,7 @@ use self::{
     },
 };
 
-pub use self::state::ListModal;
+pub use self::state::{ListModal, ListModalAction};
 pub(crate) use self::util::*;
 
 pub struct App {

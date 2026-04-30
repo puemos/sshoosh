@@ -36,11 +36,6 @@ pub async fn run_with_listener(
 
     loop {
         let (tcp, peer_addr) = listener.accept().await?;
-        if !server.state.is_master() {
-            tracing::debug!(?peer_addr, "rejecting ssh connection while standby");
-            drop(tcp);
-            continue;
-        }
         let ssh_config = ssh_config.clone();
         let server = server.clone();
         tokio::spawn(async move {

@@ -142,6 +142,13 @@ impl App {
             .map(|channel| channel.slug.clone())
     }
 
+    pub fn has_channel(&self, channel_id: &str) -> bool {
+        self.snapshot
+            .channels
+            .iter()
+            .any(|channel| channel.id == channel_id)
+    }
+
     pub fn selected_thread_id(&self) -> Option<String> {
         self.snapshot.selected_thread_id.clone()
     }

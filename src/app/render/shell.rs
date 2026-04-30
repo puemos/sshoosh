@@ -35,7 +35,7 @@ pub fn draw(
     match ui.mode {
         UiMode::Palette => draw_palette(frame, area, centered(area, 72, 18), ui),
         UiMode::Prompt => draw_prompt(frame, area, centered(area, 58, 7), ui),
-        UiMode::Help => draw_help(frame, area, centered(area, 76, 20), commands, ui),
+        UiMode::Help => draw_help(frame, area, help_modal_area(area), commands, ui),
         UiMode::ConfirmQuit => draw_confirm_quit(frame, area, centered(area, 42, 5), ui),
         UiMode::Compose if ui.composer.autocomplete.open => draw_autocomplete(frame, shell[3], ui),
         _ => {}

@@ -30,7 +30,9 @@ const githubUrl = 'https://github.com/puemos/sshoosh';
   <body>
     <div class="site-frame">
       <header class="topline">
-        <a class="brand" href={href('')}>sshoosh</a>
+        <a class="brand" href={href('')} aria-label="sshoosh">
+          <img src={href('assets/sshoosh-logo.svg')} alt="" aria-hidden="true" />
+        </a>
         <nav aria-label="Primary navigation">
           <a href={href('')} aria-current={current === 'home' ? 'page' : undefined}>home</a>
           <a href={href('docs/')} aria-current={current === 'docs' ? 'page' : undefined}>docs</a>

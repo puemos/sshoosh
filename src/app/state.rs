@@ -7,7 +7,7 @@ use crate::service::Snapshot;
 use ratatui::layout::{Position, Rect};
 use tui_scrollview::ScrollViewState;
 
-use super::{commands::PaletteItem, input::MouseModifiers};
+use super::{action::SourceTarget, commands::PaletteItem, input::MouseModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
@@ -197,6 +197,8 @@ pub enum HitTarget {
     WorkspaceChannel(String),
     WorkspaceThread(String),
     WorkspaceDm(String),
+    TopbarNotifications,
+    TopbarMentions,
     DetailScroll,
     EditableMessage(EditableMessageTarget),
     MessageLink(String),
@@ -211,6 +213,7 @@ pub enum HitTarget {
     PromptInput,
     HelpBackdrop,
     BannerModal,
+    ListModalRow(usize),
     ConfirmQuitBackdrop,
     ConfirmQuitYes,
     ConfirmQuitNo,
@@ -590,7 +593,13 @@ pub struct ListModal {
     pub title: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<String>>,
+    pub row_actions: Vec<Option<ListModalAction>>,
     pub empty: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ListModalAction {
+    OpenSource(SourceTarget),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

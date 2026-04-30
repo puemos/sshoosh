@@ -2,8 +2,9 @@
 use super::*;
 #[cfg(test)]
 mod cases {
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::Arc};
 
+    use tokio::sync::Mutex;
     use uuid::Uuid;
 
     use crate::{
@@ -291,6 +292,114 @@ mod cases {
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicks_topbar_notifications_and_mentions() {
+        let mut app = test_app("topbar-clicks").await;
+        app.snapshot.notification_unread_count = 2;
+        app.snapshot.mention_unread_count = 1;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::TopbarNotifications)
+        });
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::TopbarMentions)
+        });
+
+        assert_eq!(
+            app.actions,
+            vec![Action::ListNotifications, Action::ListMentions]
+        );
+    }
+
+    #[tokio::test]
+    async fn mouse_clicks_actionable_list_modal_row() {
+        let mut app = test_app("modal-row-click").await;
+        let target = SourceTarget {
+            channel_id: Some("general".to_string()),
+            channel_slug: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        };
+        app.set_banner_list(ListModal {
+            title: "Notifications".to_string(),
+            columns: vec!["source".to_string()],
+            rows: vec![vec!["#general / Deploy notes".to_string()]],
+            row_actions: vec![Some(ListModalAction::OpenSource(target.clone()))],
+            empty: "No notifications found.".to_string(),
+        });
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::ListModalRow(0))
+        });
+
+        assert!(app.ui.banner.is_none());
+        assert_eq!(app.actions, vec![Action::OpenSourceTarget { target }]);
+    }
+
+    #[tokio::test]
+    async fn open_source_target_joins_public_channel_before_selecting() {
+        let app = test_app("open-public-source").await;
+        let session = app.client_session();
+        let account_id = app.account.id.clone();
+        let channel_id = session
+            .create_channel(account_id.clone(), "alerts".to_string(), false)
+            .await
+            .expect("create channel");
+        let app = Arc::new(Mutex::new(app));
+
+        crate::ssh::process_action(
+            &app,
+            Action::OpenSourceTarget {
+                target: SourceTarget {
+                    channel_id: Some(channel_id.clone()),
+                    channel_slug: Some("alerts".to_string()),
+                    thread_id: None,
+                    conversation_id: None,
+                },
+            },
+        )
+        .await;
+
+        let app = app.lock().await;
+        assert_eq!(
+            app.snapshot.selected_channel_id.as_deref(),
+            Some(channel_id.as_str())
+        );
+        assert_eq!(app.ui.route, Route::Channel(channel_id));
+    }
+
+    #[tokio::test]
+    async fn open_source_target_surfaces_private_channel_join_failure() {
+        let app = test_app("open-private-source").await;
+        let session = app.client_session();
+        let account_id = app.account.id.clone();
+        let channel_id = session
+            .create_channel(account_id.clone(), "secret".to_string(), true)
+            .await
+            .expect("create private channel");
+        let app = Arc::new(Mutex::new(app));
+
+        crate::ssh::process_action(
+            &app,
+            Action::OpenSourceTarget {
+                target: SourceTarget {
+                    channel_id: Some(channel_id),
+                    channel_slug: Some("secret".to_string()),
+                    thread_id: None,
+                    conversation_id: None,
+                },
+            },
+        )
+        .await;
+
+        let app = app.lock().await;
+        let banner = app.ui.banner.as_ref().expect("error banner");
+        assert!(banner.error);
+        assert!(banner.text.contains("Private channels require an invite"));
     }
 
     #[tokio::test]

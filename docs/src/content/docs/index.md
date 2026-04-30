@@ -12,10 +12,10 @@ Run the server and connect with any SSH client:
 ```sh
 sshoosh bootstrap-token
 cargo run -- serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER+<bootstrap-token>@127.0.0.1"
+ssh -p 2222 "$USER@127.0.0.1"
 ```
 
-The bootstrap token is one-time and creates the first owner, creates `#general`, and auto-joins the owner to it. Additional unknown SSH keys must connect as `username+invite-token` or be attached to an existing account by an owner/admin.
+Enter the one-time bootstrap token in the setup screen to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys connect as `username@host` and stay blocked in setup until they enter an invite token, or the key can be attached to an existing account by an owner/admin. The legacy `username+token@host` form is still supported. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
 ## Configuration
 
@@ -80,9 +80,11 @@ Common TUI commands:
 /audit
 ```
 
+In compose mode, `Ctrl-X E` prefills an edit command for your latest comment in the current thread or your latest message in the current DM. With mouse support enabled, right-click one of your comments or DM messages to open the message menu, then choose edit or delete; deletes require confirmation.
+
 ## Membership And Channels
 
-`#general` is mandatory for activated users and cannot be left, archived, or made private. Public channels use explicit membership: users can discover public channels with `channels list`, but content is visible and searchable only after joining.
+Beyond mandatory `#general`, public channels use explicit membership: users can discover public channels with `channels list`, but content is visible and searchable only after joining.
 
 Private channels require owner/admin management through the CLI or TUI commands:
 
@@ -95,6 +97,8 @@ Private channels require owner/admin management through the CLI or TUI commands:
 ## Notifications
 
 `sshoosh` creates durable in-app notifications for `@username` mentions, new direct messages, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires.
+
+Notification and mention lists include a source column for the originating channel, thread, or DM. With mouse support enabled, click a source row to open it; public channels are joined automatically when needed, while private channels still require membership. The topbar notification and mention counters are also clickable shortcuts to their lists.
 
 Terminal system notifications are opt-in per account. Use `/notification terminal on`, `/notification terminal off`, or `/notification terminal status` in the TUI. sshoosh sends terminal notification escape sequences to the SSH client and falls back to the terminal bell where desktop notifications are unsupported.
 
@@ -110,7 +114,7 @@ sshoosh export --format markdown --out /var/backups/sshoosh.md
 
 The release artifact is a single `sshoosh` binary. Runtime state is just the SQLite database and SSH host key configured by `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`.
 
-For remote libSQL/Turso, set `SSHOOSH_DATABASE_URL` and `SSHOOSH_DATABASE_AUTH_TOKEN`; this overrides `SSHOOSH_DB`. Multiple servers may share the same database. They automatically contend for the `main` master lease, and only the active master accepts SSH sessions and writes. Use stable `SSHOOSH_NODE_ID` values in production.
+For remote libSQL/Turso, set `SSHOOSH_DATABASE_URL` and `SSHOOSH_DATABASE_AUTH_TOKEN`; this overrides `SSHOOSH_DB`. Multiple servers may share the same database, and all nodes accept SSH sessions and writes through the shared SQLite/libSQL transaction layer. They still contend for the `main` master lease for singleton maintenance commands such as encryption migration. Use stable `SSHOOSH_NODE_ID` values in production.
 
 Set `SSHOOSH_ENCRYPTION_KEY` to a base64url 32-byte key to encrypt source content fields. Run `sshoosh encrypt migrate` once for existing plaintext rows. Search index columns intentionally remain plaintext so FTS works, which means search data remains sensitive at rest.
 

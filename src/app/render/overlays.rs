@@ -78,32 +78,199 @@ pub(crate) fn draw_help(
 ) {
     ui.hit_map.push(full_area, HitTarget::HelpBackdrop);
     frame.render_widget(Clear, area);
-    let mut lines = vec![
-        Line::from(Span::styled("Keyboard", theme::accent())),
-        Line::from("j/k arrows move through workspace rows · h collapse/back · l open/expand"),
-        Line::from("Enter open/send · Shift-Enter newline · Tab toggles workspace/detail"),
-        Line::from("/ compose command · Up/Down choose suggestion · Tab accepts"),
-        Line::from("Ctrl-X E edits your latest message/comment here"),
-        Line::from("Space toggles threads"),
-        Line::from("Ctrl-P palette · Esc close"),
-        Line::from("q quit · Ctrl-C disconnect"),
-        Line::from(""),
-        Line::from(Span::styled("Slash commands", theme::accent())),
-    ];
-    for spec in commands {
-        lines.push(Line::from(vec![
-            Span::styled(format!("/{:<10}", spec.name), theme::title()),
-            Span::styled(format!("{:<16}", spec.args), theme::muted()),
-            Span::raw(spec.description),
-        ]));
+    let block = panel(" Help ", true).padding(Padding::uniform(1));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .style(theme::panel())
-            .block(panel(" Help ", true))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+
+    if inner.width >= 72 {
+        let left_width = ((inner.width as u32 * 38) / 100).clamp(36, 40) as u16;
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(left_width),
+                Constraint::Length(2),
+                Constraint::Min(30),
+            ])
+            .split(inner);
+        frame.render_widget(
+            Paragraph::new(help_keyboard_lines(chunks[0].width as usize)).style(theme::panel()),
+            chunks[0],
+        );
+        frame.render_widget(
+            Paragraph::new(help_command_lines(commands, chunks[2].width as usize))
+                .style(theme::panel()),
+            chunks[2],
+        );
+        return;
+    }
+
+    let mut lines = help_keyboard_lines(inner.width as usize);
+    lines.push(Line::from(""));
+    lines.extend(help_command_lines(commands, inner.width as usize));
+    frame.render_widget(Paragraph::new(lines).style(theme::panel()), inner);
+}
+
+pub(crate) fn help_modal_area(area: Rect) -> Rect {
+    centered(area, 104, 24)
+}
+
+fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
+    let rows = [
+        ("Navigation", "j/k", "move through workspace rows"),
+        ("", "h / l", "collapse/back / open/expand"),
+        ("", "Tab", "toggle workspace/detail"),
+        ("", "Space", "toggle threads"),
+        ("Compose", "Enter", "open selected item or send"),
+        ("", "Shift-Enter", "insert newline"),
+        ("", "/", "compose command"),
+        ("", "Up/Down", "choose suggestion"),
+        ("", "Tab", "accept suggestion"),
+        ("", "Ctrl-X E", "edit latest message/comment here"),
+        ("System", "Ctrl-P", "command palette"),
+        ("", "Esc", "close overlay or mode"),
+        ("", "q", "quit"),
+        ("", "Ctrl-C", "disconnect"),
+    ];
+    let mut lines = vec![Line::from(Span::styled("Keyboard", theme::accent()))];
+    for (group, key, description) in rows {
+        lines.push(help_shortcut_line(width, group, key, description));
+    }
+    lines
+}
+
+fn help_shortcut_line(
+    width: usize,
+    group: &'static str,
+    key: &'static str,
+    description: &'static str,
+) -> Line<'static> {
+    if width >= 36 {
+        let group_width = 10;
+        let key_width = 12;
+        let used = group_width + key_width + 2;
+        let description_width = width.saturating_sub(used).max(1);
+        return Line::from(vec![
+            Span::styled(pad_or_truncate(group, group_width), help_group_style(group)),
+            Span::raw(" "),
+            Span::styled(
+                pad_or_truncate(key, key_width),
+                theme::muted().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                pad_or_truncate(description, description_width),
+                theme::panel(),
+            ),
+        ]);
+    }
+
+    let key_width = 13.min(width.saturating_sub(2)).max(1);
+    let description_width = width.saturating_sub(key_width + 1).max(1);
+    Line::from(vec![
+        Span::styled(
+            pad_or_truncate(key, key_width),
+            theme::muted().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            pad_or_truncate(description, description_width),
+            theme::panel(),
+        ),
+    ])
+}
+
+fn help_command_lines(commands: &[CommandSpec], width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled("Slash commands", theme::accent()))];
+    for (category, specs) in command_groups(commands) {
+        for (idx, spec) in specs.into_iter().enumerate() {
+            lines.push(help_command_line(
+                width,
+                if idx == 0 { category } else { "" },
+                spec,
+            ));
+        }
+    }
+    lines
+}
+
+fn command_groups<'a>(commands: &'a [CommandSpec]) -> Vec<(&'static str, Vec<&'a CommandSpec>)> {
+    let mut groups: Vec<(&'static str, Vec<&'a CommandSpec>)> = Vec::new();
+    for spec in commands {
+        if let Some((_, specs)) = groups
+            .iter_mut()
+            .find(|(category, _)| *category == spec.category)
+        {
+            specs.push(spec);
+        } else {
+            groups.push((spec.category, vec![spec]));
+        }
+    }
+    groups
+}
+
+fn help_command_line(width: usize, category: &'static str, spec: &CommandSpec) -> Line<'static> {
+    let (category_width, command_width, args_width, shortcut_width): (usize, usize, usize, usize) =
+        if width >= 64 {
+            (11, 14, 18, 3)
+        } else if width >= 52 {
+            (9, 13, 12, 3)
+        } else {
+            (0, 13, 14, 0)
+        };
+    let separator_count = usize::from(category_width > 0)
+        + 1
+        + usize::from(args_width > 0)
+        + usize::from(shortcut_width > 0);
+    let used = category_width
+        .saturating_add(command_width)
+        .saturating_add(args_width)
+        .saturating_add(shortcut_width)
+        .saturating_add(separator_count);
+    let description_width = width.saturating_sub(used).max(1);
+    let mut spans = Vec::new();
+
+    if category_width > 0 {
+        spans.push(Span::styled(
+            pad_or_truncate(category, category_width),
+            help_group_style(category),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        pad_or_truncate(&format!("/{}", spec.name), command_width),
+        theme::title(),
+    ));
+    spans.push(Span::raw(" "));
+    if args_width > 0 {
+        spans.push(Span::styled(
+            pad_or_truncate(spec.args, args_width),
+            theme::muted(),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    if shortcut_width > 0 {
+        spans.push(Span::styled(
+            pad_or_truncate(spec.shortcut.unwrap_or_default(), shortcut_width),
+            theme::muted().add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        pad_or_truncate(spec.description, description_width),
+        theme::panel(),
+    ));
+    Line::from(spans)
+}
+
+fn help_group_style(value: &str) -> Style {
+    if value.is_empty() {
+        theme::muted()
+    } else {
+        theme::accent()
+    }
 }
 
 pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
@@ -334,7 +501,7 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
                 Line::from(""),
                 Line::from(Span::styled(
                     "c copies, Enter or Esc closes",
-                    theme::muted(),
+                    theme::accent(),
                 )),
             ],
         )
@@ -379,14 +546,27 @@ pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, u
         widths.push(content_width.max(1));
     }
 
+    ui.hit_map.push(modal, HitTarget::BannerModal);
     let mut lines = Vec::new();
     if list.rows.is_empty() {
         lines.push(Line::from(Span::styled(list.empty.clone(), theme::muted())));
     } else {
         lines.push(list_modal_line(&list.columns, &widths, true));
         let visible_rows = modal.height.saturating_sub(5) as usize;
-        for row in list.rows.iter().take(visible_rows) {
+        for (idx, row) in list.rows.iter().take(visible_rows).enumerate() {
             lines.push(list_modal_line(row, &widths, false));
+            if list.row_actions.get(idx).is_some_and(Option::is_some) {
+                let y = modal.y.saturating_add(2).saturating_add(idx as u16);
+                ui.hit_map.push(
+                    Rect::new(
+                        modal.x.saturating_add(2),
+                        y,
+                        modal.width.saturating_sub(4),
+                        1,
+                    ),
+                    HitTarget::ListModalRow(idx),
+                );
+            }
         }
         if list.rows.len() > visible_rows {
             lines.push(Line::from(Span::styled(
@@ -396,7 +576,6 @@ pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, u
         }
     }
 
-    ui.hit_map.push(modal, HitTarget::BannerModal);
     frame.render_widget(Clear, modal);
     frame.render_widget(
         Paragraph::new(lines)

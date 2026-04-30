@@ -246,6 +246,8 @@ mod cases {
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
+            notification_unread_count: 2,
+            mention_unread_count: 1,
             ..Snapshot::default()
         };
         let mut ui = UiState::default();
@@ -257,7 +259,33 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        assert_eq!(buffer.cell((9, 0)).expect("active label").symbol(), "#");
+        let logo = buffer.cell((0, 0)).expect("logo");
+        assert_eq!(logo.symbol(), "s");
+        assert!(logo.modifier.contains(Modifier::ITALIC));
+        for x in 0..80 {
+            assert_eq!(buffer.cell((x, 0)).expect("topbar bg").bg, theme::TOPBAR);
+        }
+        let topbar = row_text(buffer, 80, 0);
+        assert!(topbar.starts_with("sshoosh"));
+        assert!(topbar.contains("#general"));
+        assert!(topbar.contains("notifications:2"));
+        assert!(topbar.contains("mentions:1"));
+        let active_x = position_for_text(buffer, 80, 24, "#general")
+            .expect("active label")
+            .0;
+        assert!(active_x > 6);
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::TopbarNotifications))
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::TopbarMentions))
+        );
         assert_eq!(buffer.cell((0, 1)).expect("top divider").symbol(), "─");
         assert_eq!(buffer.cell((38, 1)).expect("top connector").symbol(), "┬");
         assert_eq!(buffer.cell((79, 1)).expect("top divider").symbol(), "─");
@@ -338,6 +366,7 @@ mod cases {
                     "2026-05-01".to_string(),
                 ],
             ],
+            row_actions: Vec::new(),
             empty: "No invites found.".to_string(),
         }));
 
@@ -376,6 +405,7 @@ mod cases {
             title: "Invites".to_string(),
             columns: vec!["id".to_string(), "role".to_string()],
             rows: Vec::new(),
+            row_actions: Vec::new(),
             empty: "No invites found.".to_string(),
         }));
 
@@ -418,6 +448,7 @@ mod cases {
                 "open".to_string(),
                 "2026-05-01T00:00:00Z".to_string(),
             ]],
+            row_actions: Vec::new(),
             empty: "No invites found.".to_string(),
         }));
 
@@ -1041,6 +1072,116 @@ mod cases {
     }
 
     #[test]
+    fn help_overlay_aligns_dense_command_reference() {
+        let width = 120;
+        let height = 32;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+        ui.mode = UiMode::Help;
+        let registry = crate::app::commands::CommandRegistry::default();
+
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let invite_description =
+            position_for_text(buffer, width, height, "Manage invite codes").expect("invite help");
+        let channel_description =
+            position_for_text(buffer, width, height, "Manage channels").expect("channel help");
+        let thread_description =
+            position_for_text(buffer, width, height, "Manage threads").expect("thread help");
+
+        assert_eq!(invite_description.0, channel_description.0);
+        assert_eq!(invite_description.0, thread_description.0);
+        assert_eq!(
+            cell_for_text(buffer, width, height, "Slash commands").fg,
+            theme::ACCENT
+        );
+        assert_eq!(
+            cell_for_text(buffer, width, height, "Admin").fg,
+            theme::ACCENT
+        );
+        let key = cell_for_text(buffer, width, height, "j/k");
+        assert_eq!(key.fg, theme::MUTED);
+        assert!(key.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn help_overlay_stays_readable_at_standard_terminal_size() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+        ui.mode = UiMode::Help;
+        let registry = crate::app::commands::CommandRegistry::default();
+
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..height)
+            .map(|y| row_text(buffer, width, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Keyboard"));
+        assert!(rendered.contains("Slash commands"));
+        assert!(rendered.contains("/channel"));
+        assert!(!rendered.contains("membersManage"));
+        assert!(!rendered.contains("idManage"));
+        assert!(!rendered.contains("readOpen"));
+    }
+
+    #[test]
+    fn help_overlay_keeps_backdrop_click_target() {
+        let backend = TestBackend::new(120, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+        ui.mode = UiMode::Help;
+        let registry = crate::app::commands::CommandRegistry::default();
+
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        assert!(matches!(
+            ui.hit_map.hit(0, 0).map(|region| region.target),
+            Some(HitTarget::HelpBackdrop)
+        ));
+    }
+
+    #[test]
     fn selection_overlay_extracts_text_and_marks_cells() {
         let backend = TestBackend::new(20, 4);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1142,6 +1283,17 @@ mod cases {
             row.push_str(buffer.cell((x, y)).expect("cell").symbol());
         }
         row
+    }
+
+    fn activated_test_account() -> Account {
+        Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        }
     }
 
     #[test]

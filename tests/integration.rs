@@ -1002,6 +1002,39 @@ async fn master_lease_fails_over_after_ttl() {
 }
 
 #[tokio::test]
+async fn shared_sqlite_nodes_can_write_without_holding_master_lease() {
+    let db_path = temp_path("active-active").with_extension("sqlite");
+    let mut first = database_config(db_path.clone(), "node-a");
+    first.master_lease_ttl = Duration::from_secs(15);
+    first.master_heartbeat = Duration::from_secs(5);
+    let db_a = Database::connect_with_config(&first).await.expect("db a");
+    db_a.init().await.expect("init a");
+    let state_a = ServerState::new(db_a.clone()).await.expect("state a");
+    let _runtime_a = ServerRuntime::start(state_a.clone())
+        .await
+        .expect("runtime a");
+    assert!(db_a.is_master());
+    let owner = bootstrap_owner(&state_a, "SHA256:active-owner", "ssh-ed25519 owner").await;
+
+    let mut second = database_config(db_path, "node-b");
+    second.master_lease_ttl = Duration::from_secs(15);
+    second.master_heartbeat = Duration::from_secs(5);
+    let db_b = Database::connect_with_config(&second).await.expect("db b");
+    db_b.init().await.expect("init b");
+    let state_b = ServerState::new(db_b.clone()).await.expect("state b");
+    let _runtime_b = ServerRuntime::start(state_b.clone())
+        .await
+        .expect("runtime b");
+    assert!(!db_b.is_master());
+
+    let invite = state_b
+        .create_invite(owner.id.clone())
+        .await
+        .expect("standby node creates invite");
+    assert!(!invite.is_empty());
+}
+
+#[tokio::test]
 #[ignore = "requires SSHOOSH_TEST_DATABASE_URL and optional SSHOOSH_TEST_DATABASE_AUTH_TOKEN"]
 async fn remote_libsql_connectivity_and_migrations_work() {
     let url = std::env::var("SSHOOSH_TEST_DATABASE_URL").expect("SSHOOSH_TEST_DATABASE_URL");
