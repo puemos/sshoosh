@@ -33,16 +33,16 @@ pub fn parse_mentions(body: &str) -> Vec<String> {
 }
 
 pub(crate) async fn search_visible(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
-    query: &str,
+    search: &str,
     limit: i64,
 ) -> anyhow::Result<SearchPage> {
-    let query = query.trim();
-    anyhow::ensure!(!query.is_empty(), "Search query is required");
+    let search = search.trim();
+    anyhow::ensure!(!search.is_empty(), "Search query is required");
     let limit = limit.clamp(1, 500);
     let fetch_limit = limit.saturating_add(1);
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT search_index.kind, search_index.object_id, search_index.channel_id,
                 search_index.thread_id, search_index.conversation_id,
                 search_index.title, search_index.body, search_index.context
@@ -71,7 +71,7 @@ pub(crate) async fn search_visible(
          ORDER BY rank
          LIMIT ?",
     )
-    .bind(fts_query(query))
+    .bind(fts_query(search))
     .bind(account_id)
     .bind(account_id)
     .bind(fetch_limit)
@@ -79,7 +79,7 @@ pub(crate) async fn search_visible(
     .await?;
     let mut results = Vec::new();
     for row in rows {
-        let kind = match row.get::<String, _>("kind").as_str() {
+        let kind = match row.get::<String>("kind").as_str() {
             "thread" => SearchKind::Thread,
             "comment" => SearchKind::Comment,
             _ => SearchKind::Dm,
@@ -95,7 +95,7 @@ pub(crate) async fn search_visible(
             kind,
             label,
             context: row.get("context"),
-            snippet: snippet(&format!("{title}\n{body}"), query),
+            snippet: snippet(&format!("{title}\n{body}"), search),
             channel_id: row.get("channel_id"),
             thread_id: row.get("thread_id"),
             conversation_id: row.get("conversation_id"),
@@ -106,19 +106,19 @@ pub(crate) async fn search_visible(
     Ok(SearchPage { results, has_more })
 }
 
-pub(crate) fn account_from_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Account> {
+pub(crate) fn account_from_row(row: DbRow) -> anyhow::Result<Account> {
     let activated: Option<String> = row.get("activated_at");
     Ok(Account {
         id: row.get("id"),
         username: row.get("username"),
         display_name: row.get("display_name"),
-        role: Role::from_db(row.get::<String, _>("role").as_str())?,
+        role: Role::from_db(row.get::<String>("role").as_str())?,
         activated: activated.is_some(),
         pending_username: row.get("pending_username"),
     })
 }
 
-pub(crate) fn ssh_key_summary_from_row(row: sqlx::sqlite::SqliteRow) -> SshKeySummary {
+pub(crate) fn ssh_key_summary_from_row(row: DbRow) -> SshKeySummary {
     SshKeySummary {
         id: row.get("id"),
         username: row.get("username"),
@@ -144,26 +144,23 @@ pub(crate) fn parse_public_key(public_key: &str) -> anyhow::Result<ParsedPublicK
     })
 }
 
-pub(crate) fn rows_to_json(
-    rows: Vec<sqlx::sqlite::SqliteRow>,
-) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn rows_to_json(rows: Vec<DbRow>) -> anyhow::Result<serde_json::Value> {
     let mut out = Vec::new();
     for row in rows {
         let mut object = serde_json::Map::new();
-        for column in row.columns() {
-            let name = column.name();
-            let value = if let Ok(value) = row.try_get::<Option<String>, _>(name) {
+        for name in row.columns() {
+            let value = if let Ok(value) = row.try_get::<Option<String>>(&name) {
                 value
                     .map(serde_json::Value::String)
                     .unwrap_or(serde_json::Value::Null)
-            } else if let Ok(value) = row.try_get::<Option<i64>, _>(name) {
+            } else if let Ok(value) = row.try_get::<Option<i64>>(&name) {
                 value
                     .map(|value| serde_json::Value::Number(value.into()))
                     .unwrap_or(serde_json::Value::Null)
             } else {
                 serde_json::Value::Null
             };
-            object.insert(name.to_string(), value);
+            object.insert(name, value);
         }
         out.push(serde_json::Value::Object(object));
     }

@@ -11,6 +11,34 @@ pub(crate) struct Cli {
     )]
     pub(crate) db: String,
 
+    #[arg(long, env = "SSHOOSH_DATABASE_URL", global = true)]
+    pub(crate) database_url: Option<String>,
+
+    #[arg(long, env = "SSHOOSH_DATABASE_AUTH_TOKEN", global = true)]
+    pub(crate) database_auth_token: Option<String>,
+
+    #[arg(long, env = "SSHOOSH_NODE_ID", global = true)]
+    pub(crate) node_id: Option<String>,
+
+    #[arg(long, env = "SSHOOSH_ENCRYPTION_KEY", global = true)]
+    pub(crate) encryption_key: Option<String>,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MASTER_LEASE_TTL_SECS",
+        default_value_t = 15,
+        global = true
+    )]
+    pub(crate) master_lease_ttl_secs: u64,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MASTER_HEARTBEAT_SECS",
+        default_value_t = 5,
+        global = true
+    )]
+    pub(crate) master_heartbeat_secs: u64,
+
     #[arg(long, env = "SSHOOSH_HOST", default_value = "0.0.0.0", global = true)]
     pub(crate) host: String,
 
@@ -101,8 +129,26 @@ pub(crate) enum Command {
     Backup {
         out: String,
     },
+    Encrypt {
+        #[command(subcommand)]
+        command: EncryptCommand,
+    },
+    Master {
+        #[command(subcommand)]
+        command: MasterCommand,
+    },
     #[command(about = "Create a one-time token for the first SSH owner")]
     BootstrapToken,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum EncryptCommand {
+    Migrate,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum MasterCommand {
+    Status,
 }
 
 #[derive(Subcommand, Debug)]

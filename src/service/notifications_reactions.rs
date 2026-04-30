@@ -21,7 +21,7 @@ impl ServerState {
             "terminal_notifications".to_string(),
             serde_json::Value::Bool(enabled),
         );
-        sqlx::query("UPDATE accounts SET settings_json = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET settings_json = ?, updated_at = ? WHERE id = ?")
             .bind(serde_json::to_string(&settings)?)
             .bind(now())
             .bind(account_id)
@@ -45,7 +45,7 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         let now = now();
         if let Some(notification_id) = notification_id {
-            sqlx::query(
+            query(
                 "UPDATE notifications SET read_at = ?
                  WHERE account_id = ? AND (id = ? OR id LIKE ?)",
             )
@@ -56,13 +56,11 @@ impl ServerState {
             .execute(self.db.write_pool())
             .await?;
         } else {
-            sqlx::query(
-                "UPDATE notifications SET read_at = ? WHERE account_id = ? AND read_at IS NULL",
-            )
-            .bind(&now)
-            .bind(account_id)
-            .execute(self.db.write_pool())
-            .await?;
+            query("UPDATE notifications SET read_at = ? WHERE account_id = ? AND read_at IS NULL")
+                .bind(&now)
+                .bind(account_id)
+                .execute(self.db.write_pool())
+                .await?;
         }
         Ok(())
     }
@@ -73,7 +71,7 @@ impl ServerState {
         limit: i64,
     ) -> anyhow::Result<Vec<MentionSummary>> {
         let limit = limit.clamp(1, 200);
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT m.id, actor.username AS actor_username, m.source_kind,
                     COALESCE(t.title, 'DM') AS title,
                     COALESCE(cm.body, dm.body, t.body, '') AS body,
@@ -193,16 +191,12 @@ impl ServerState {
     }
 }
 
-async fn account_settings(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> anyhow::Result<serde_json::Value> {
-    let settings_json: String = sqlx::query_scalar(
-        "SELECT settings_json FROM accounts WHERE id = ? AND disabled_at IS NULL",
-    )
-    .bind(account_id)
-    .fetch_one(pool)
-    .await?;
+async fn account_settings(pool: &Database, account_id: &str) -> anyhow::Result<serde_json::Value> {
+    let settings_json: String =
+        query_scalar("SELECT settings_json FROM accounts WHERE id = ? AND disabled_at IS NULL")
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?;
     let settings = serde_json::from_str(&settings_json)
         .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
     Ok(if settings.is_object() {
@@ -245,7 +239,7 @@ mod terminal_notification_settings_tests {
                 .expect("default setting")
         );
 
-        sqlx::query("UPDATE accounts SET settings_json = ? WHERE id = ?")
+        query("UPDATE accounts SET settings_json = ? WHERE id = ?")
             .bind(r#"{"theme":"dark"}"#)
             .bind(&account.id)
             .execute(state.db.write_pool())
@@ -263,12 +257,11 @@ mod terminal_notification_settings_tests {
                 .await
                 .expect("enabled setting")
         );
-        let settings_json: String =
-            sqlx::query_scalar("SELECT settings_json FROM accounts WHERE id = ?")
-                .bind(&account.id)
-                .fetch_one(state.db.read_pool())
-                .await
-                .expect("settings json");
+        let settings_json: String = query_scalar("SELECT settings_json FROM accounts WHERE id = ?")
+            .bind(&account.id)
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("settings json");
         let settings: serde_json::Value =
             serde_json::from_str(&settings_json).expect("valid settings");
         assert_eq!(settings["theme"], "dark");

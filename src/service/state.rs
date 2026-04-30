@@ -13,6 +13,10 @@ impl ServerState {
         self.live_tx.subscribe()
     }
 
+    pub fn is_master(&self) -> bool {
+        self.db.is_master()
+    }
+
     pub async fn ensure_account_for_key(
         &self,
         login_username: &str,
@@ -23,7 +27,7 @@ impl ServerState {
         let now = now();
         cleanup_pending_accounts_tx(&mut tx).await?;
 
-        if let Some(row) = sqlx::query(
+        if let Some(row) = query(
             "SELECT a.id, a.username, a.display_name, a.role, a.activated_at, a.pending_username
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -32,29 +36,29 @@ impl ServerState {
                AND a.disabled_at IS NULL",
         )
         .bind(fingerprint)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?
         {
             let account_id: String = row.get("id");
-            let activated = row.get::<Option<String>, _>("activated_at").is_some();
+            let activated = row.get::<Option<String>>("activated_at").is_some();
             if activated {
-                sqlx::query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+                query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
                     .bind(&now)
                     .bind(&now)
                     .bind(&account_id)
-                    .execute(&mut *tx)
+                    .execute(&mut tx)
                     .await?;
             } else {
-                sqlx::query("UPDATE accounts SET updated_at = ? WHERE id = ?")
+                query("UPDATE accounts SET updated_at = ? WHERE id = ?")
                     .bind(&now)
                     .bind(&account_id)
-                    .execute(&mut *tx)
+                    .execute(&mut tx)
                     .await?;
             }
-            sqlx::query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
+            query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
                 .bind(&now)
                 .bind(fingerprint)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
             tx.commit().await?;
             return account_from_row(row);
@@ -64,7 +68,7 @@ impl ServerState {
             let username = normalize_username(login_username)?;
             let account_id = id();
             let internal_username = pending_internal_username(&account_id);
-            sqlx::query(
+            query(
                 "INSERT INTO accounts
                  (id, username, display_name, role, settings_json, created_at, updated_at, pending_username)
                  VALUES (?, ?, ?, 'member', '{}', ?, ?, ?)",
@@ -75,9 +79,9 @@ impl ServerState {
             .bind(&now)
             .bind(&now)
             .bind(&username)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
-            sqlx::query(
+            query(
                 "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at, last_used_at)
                  VALUES (?, ?, ?, ?, 'default', ?, ?)",
             )
@@ -87,7 +91,7 @@ impl ServerState {
             .bind(public_key)
             .bind(&now)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
             tx.commit().await?;
             return Ok(Account {
@@ -101,39 +105,39 @@ impl ServerState {
         };
         let username = normalize_username(desired_username)?;
         let token_hash = code_hash(token);
-        let active_count: i64 = sqlx::query_scalar(
+        let active_count: i64 = query_scalar(
             "SELECT COUNT(*)
              FROM accounts
              WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut tx)
         .await?;
         let account_id = id();
         let mut bootstrap_token_id = None;
         let mut invite_id = None;
         let role = if active_count == 0 {
-            let token_id: Option<String> = sqlx::query_scalar(
+            let token_id: Option<String> = query_scalar(
                 "SELECT id
                  FROM bootstrap_tokens
                  WHERE code_hash = ? AND used_at IS NULL
                  LIMIT 1",
             )
             .bind(&token_hash)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut tx)
             .await?;
             let Some(token_id) = token_id else {
                 bail!("Bootstrap token is invalid or already used");
             };
             let existing: Option<String> =
-                sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
+                query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
                     .bind(&username)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut tx)
                     .await?;
             anyhow::ensure!(existing.is_none(), "Username is already taken");
             bootstrap_token_id = Some(token_id);
             Role::Owner
         } else {
-            let invite = sqlx::query(
+            let invite = query(
                 "SELECT id, role_on_accept
                  FROM invites
                  WHERE code_hash = ?
@@ -144,22 +148,22 @@ impl ServerState {
             )
             .bind(&token_hash)
             .bind(&now)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut tx)
             .await?;
             let Some(invite) = invite else {
                 bail!("Invite token is invalid, expired, or already used");
             };
             let existing: Option<String> =
-                sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
+                query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
                     .bind(&username)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut tx)
                     .await?;
             anyhow::ensure!(existing.is_none(), "Username is already taken");
-            invite_id = Some(invite.get::<String, _>("id"));
-            Role::from_db(invite.get::<String, _>("role_on_accept").as_str())?
+            invite_id = Some(invite.get::<String>("id"));
+            Role::from_db(invite.get::<String>("role_on_accept").as_str())?
         };
 
-        sqlx::query(
+        query(
             "INSERT INTO accounts
              (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at, pending_username)
              VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, NULL)",
@@ -172,9 +176,9 @@ impl ServerState {
         .bind(&now)
         .bind(&now)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
-        sqlx::query(
+        query(
             "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at, last_used_at)
              VALUES (?, ?, ?, ?, 'default', ?, ?)",
         )
@@ -184,11 +188,11 @@ impl ServerState {
         .bind(public_key)
         .bind(&now)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
 
         if let Some(token_id) = bootstrap_token_id {
-            sqlx::query(
+            query(
                 "UPDATE bootstrap_tokens
                  SET used_by_account_id = ?, used_at = ?
                  WHERE id = ? AND used_at IS NULL",
@@ -196,11 +200,11 @@ impl ServerState {
             .bind(&account_id)
             .bind(&now)
             .bind(&token_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         }
         if let Some(invite_id) = invite_id {
-            sqlx::query(
+            query(
                 "UPDATE invites
                  SET accepted_by_account_id = ?, accepted_at = ?
                  WHERE id = ? AND accepted_at IS NULL",
@@ -208,19 +212,19 @@ impl ServerState {
             .bind(&account_id)
             .bind(&now)
             .bind(&invite_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         }
 
         let general_id = if let Some(general_id) =
-            sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE slug = 'general'")
-                .fetch_optional(&mut *tx)
+            query_scalar::<String>("SELECT id FROM channels WHERE slug = 'general'")
+                .fetch_optional(&mut tx)
                 .await?
         {
             general_id
         } else {
             let channel_id = id();
-            sqlx::query(
+            query(
                     "INSERT INTO channels
                      (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
                      VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
@@ -229,7 +233,7 @@ impl ServerState {
                 .bind(&account_id)
                 .bind(&now)
                 .bind(&now)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
             insert_event(
                 &mut tx,
@@ -242,7 +246,7 @@ impl ServerState {
             .await?;
             channel_id
         };
-        sqlx::query(
+        query(
             "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(channel_id, account_id) DO NOTHING",
@@ -255,7 +259,7 @@ impl ServerState {
             "member"
         })
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
 
         if role == Role::Owner {
@@ -292,7 +296,7 @@ impl ServerState {
     }
 
     pub async fn reload_account(&self, account_id: &str) -> anyhow::Result<Account> {
-        let row = sqlx::query(
+        let row = query(
             "SELECT id, username, display_name, role, activated_at, pending_username
              FROM accounts WHERE id = ? AND disabled_at IS NULL",
         )
@@ -373,13 +377,13 @@ impl ServerState {
             (Vec::new(), false)
         };
         let notifications = load_notifications(self.db.read_pool(), account_id, 20).await?;
-        let notification_unread_count: i64 = sqlx::query_scalar(
+        let notification_unread_count: i64 = query_scalar(
             "SELECT COUNT(*) FROM notifications WHERE account_id = ? AND read_at IS NULL",
         )
         .bind(account_id)
         .fetch_one(self.db.read_pool())
         .await?;
-        let mention_unread_count: i64 = sqlx::query_scalar(
+        let mention_unread_count: i64 = query_scalar(
             "SELECT COUNT(*) FROM mentions WHERE target_account_id = ? AND read_at IS NULL",
         )
         .bind(account_id)
@@ -428,27 +432,27 @@ impl ServerState {
         disconnected: bool,
     ) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
-        let username: Option<String> = sqlx::query_scalar(
+        let username: Option<String> = query_scalar(
             "SELECT username FROM accounts
              WHERE id = ? AND activated_at IS NOT NULL AND disabled_at IS NULL",
         )
         .bind(account_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(username) = username else {
             tx.commit().await?;
             return Ok(());
         };
         let now = now();
-        sqlx::query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(&now)
             .bind(account_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         if let Some(session_id) = session_id {
             if disconnected {
-                sqlx::query(
+                query(
                     "UPDATE presence_sessions
                      SET last_seen_at = ?, disconnected_at = COALESCE(disconnected_at, ?)
                      WHERE id = ? AND account_id = ?",
@@ -457,10 +461,10 @@ impl ServerState {
                 .bind(&now)
                 .bind(session_id)
                 .bind(account_id)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
             } else {
-                sqlx::query(
+                query(
                     "INSERT INTO presence_sessions (id, account_id, started_at, last_seen_at)
                      VALUES (?, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at
@@ -470,7 +474,7 @@ impl ServerState {
                 .bind(account_id)
                 .bind(&now)
                 .bind(&now)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
             }
         }
@@ -536,7 +540,7 @@ impl ServerState {
         &self,
         account_id: &str,
     ) -> anyhow::Result<Option<String>> {
-        sqlx::query_scalar(
+        query_scalar(
             "SELECT id
              FROM presence_sessions
              WHERE account_id = ? AND disconnected_at IS NULL
@@ -546,7 +550,6 @@ impl ServerState {
         .bind(account_id)
         .fetch_optional(self.db.read_pool())
         .await
-        .map_err(Into::into)
     }
 
     async fn remove_account_session(&self, account_id: &str) -> bool {
@@ -630,19 +633,17 @@ impl ServerState {
     }
 }
 
-pub(crate) async fn cleanup_pending_accounts_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-) -> anyhow::Result<()> {
+pub(crate) async fn cleanup_pending_accounts_tx(tx: &mut DbTransaction) -> anyhow::Result<()> {
     let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(7))
         .format(&time::format_description::well_known::Rfc3339)?;
-    sqlx::query(
+    query(
         "DELETE FROM accounts
          WHERE activated_at IS NULL
            AND pending_username IS NOT NULL
            AND created_at < ?",
     )
     .bind(cutoff)
-    .execute(&mut **tx)
+    .execute(tx)
     .await?;
     Ok(())
 }

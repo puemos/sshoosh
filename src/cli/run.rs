@@ -11,8 +11,15 @@ pub async fn run() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let node_id = cli.node_id.clone().unwrap_or_else(db::default_node_id);
     let cfg = config::Config {
         db_path: cli.db.clone().into(),
+        database_url: cli.database_url.clone(),
+        database_auth_token: cli.database_auth_token.clone(),
+        node_id,
+        encryption_key: cli.encryption_key.clone(),
+        master_lease_ttl: Duration::from_secs(cli.master_lease_ttl_secs),
+        master_heartbeat: Duration::from_secs(cli.master_heartbeat_secs),
         host: cli.host.clone(),
         port: cli.port,
         server_key_path: cli.server_key.clone().into(),
@@ -29,9 +36,39 @@ pub async fn run() -> anyhow::Result<()> {
         command => command,
     };
 
-    let db = db::Database::connect(&cfg.db_path)
+    let allow_plaintext_encryption_migration = matches!(
+        &command,
+        Command::Encrypt {
+            command: EncryptCommand::Migrate
+        }
+    );
+    let db_cfg = db::DatabaseConfig {
+        db_path: cfg.db_path.clone(),
+        database_url: cfg.database_url.clone(),
+        database_auth_token: cfg
+            .database_auth_token
+            .clone()
+            .map(|value| secrecy::SecretString::new(value.into_boxed_str())),
+        node_id: cfg.node_id.clone(),
+        encryption_key: cfg
+            .encryption_key
+            .clone()
+            .map(|value| secrecy::SecretString::new(value.into_boxed_str())),
+        master_lease_ttl: cfg.master_lease_ttl,
+        master_heartbeat: cfg.master_heartbeat,
+        allow_plaintext_encryption_migration,
+    };
+    let db = db::Database::connect_with_config(&db_cfg)
         .await
-        .with_context(|| format!("opening database {}", cfg.db_path.display()))?;
+        .with_context(|| {
+            format!(
+                "opening database {}",
+                db_cfg
+                    .database_url
+                    .as_deref()
+                    .unwrap_or_else(|| cfg.db_path.to_str().unwrap_or("<database>"))
+            )
+        })?;
     db.init().await?;
 
     match command {
@@ -263,17 +300,55 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Doctor { repair_search } => {
-            db.doctor().await?;
+            let report = db.doctor().await?;
             if repair_search {
                 db.repair_search_index().await?;
                 println!("search index repaired");
             }
-            println!("database ok: {}", cfg.db_path.display());
+            println!(
+                "database ok: {} ({:?}, migrations: {}, encryption: {})",
+                report.display_name,
+                report.kind,
+                report.migration_count,
+                if report.encryption_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
             Ok(())
         }
         Command::Backup { out } => {
             db.backup_to(&out).await?;
             println!("backup written: {out}");
+            Ok(())
+        }
+        Command::Encrypt {
+            command: EncryptCommand::Migrate,
+        } => {
+            let state = service::ServerState::new(db.clone()).await?;
+            let _runtime = service::ServerRuntime::start(state).await?;
+            let report = db.encrypt_migrate().await?;
+            println!(
+                "encrypted rows: threads={} comments={} conversation_messages={} notifications={}",
+                report.threads, report.comments, report.conversation_messages, report.notifications
+            );
+            Ok(())
+        }
+        Command::Master {
+            command: MasterCommand::Status,
+        } => {
+            match db.master_status().await? {
+                Some(status) => println!(
+                    "master node={} fencing_token={} lease_until={} heartbeat_at={} this_node={}",
+                    status.node_id,
+                    status.fencing_token,
+                    status.lease_until,
+                    status.heartbeat_at,
+                    status.is_this_node
+                ),
+                None => println!("master lease is not held"),
+            }
             Ok(())
         }
         Command::BootstrapToken => {
@@ -290,7 +365,7 @@ pub(crate) async fn admin_actor_id(
 ) -> anyhow::Result<String> {
     if let Some(actor) = actor {
         let actor = actor.trim().trim_start_matches('@');
-        let id: Option<String> = sqlx::query_scalar(
+        let id: Option<String> = query_scalar(
             "SELECT id
              FROM accounts
              WHERE (id = ? OR lower(username) = lower(?))
@@ -315,7 +390,7 @@ pub(crate) async fn user_actor_id(
 ) -> anyhow::Result<String> {
     if let Some(actor) = actor {
         let actor = actor.trim().trim_start_matches('@');
-        let id: Option<String> = sqlx::query_scalar(
+        let id: Option<String> = query_scalar(
             "SELECT id
              FROM accounts
              WHERE (id = ? OR lower(username) = lower(?))

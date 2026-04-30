@@ -109,4 +109,50 @@ mod cases {
         ));
         assert_eq!(cli.db, "./dev.sqlite");
     }
+
+    #[test]
+    fn database_security_flags_and_ops_commands_parse() {
+        let cli = Cli::try_parse_from([
+            "sshoosh",
+            "--database-url",
+            "libsql://example.turso.io",
+            "--database-auth-token",
+            "token",
+            "--node-id",
+            "node-a",
+            "--encryption-key",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--master-lease-ttl-secs",
+            "9",
+            "--master-heartbeat-secs",
+            "3",
+            "master",
+            "status",
+        ])
+        .expect("parse master status");
+
+        assert_eq!(
+            cli.database_url.as_deref(),
+            Some("libsql://example.turso.io")
+        );
+        assert_eq!(cli.database_auth_token.as_deref(), Some("token"));
+        assert_eq!(cli.node_id.as_deref(), Some("node-a"));
+        assert_eq!(cli.master_lease_ttl_secs, 9);
+        assert_eq!(cli.master_heartbeat_secs, 3);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Master {
+                command: MasterCommand::Status
+            })
+        ));
+
+        let cli =
+            Cli::try_parse_from(["sshoosh", "encrypt", "migrate"]).expect("parse encrypt migrate");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Encrypt {
+                command: EncryptCommand::Migrate
+            })
+        ));
+    }
 }

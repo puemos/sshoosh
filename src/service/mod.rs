@@ -7,7 +7,6 @@ use anyhow::{Context, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction};
 use tokio::{
     sync::{RwLock, broadcast},
     task::JoinHandle,
@@ -15,7 +14,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::db::Database;
+use crate::db::{Database, DbRow, DbTransaction, query, query_as, query_scalar};
 
 pub use crate::domain::*;
 

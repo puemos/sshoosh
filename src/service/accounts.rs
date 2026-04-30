@@ -12,12 +12,12 @@ impl ServerState {
     pub async fn list_accounts(&self, actor_id: &str) -> anyhow::Result<Vec<AccountSummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT id, username, display_name, role, activated_at, disabled_at, created_at, last_seen_at
              FROM accounts
              ORDER BY username",
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut tx)
         .await?;
         tx.commit().await?;
         rows.into_iter()
@@ -26,9 +26,9 @@ impl ServerState {
                     id: row.get("id"),
                     username: row.get("username"),
                     display_name: row.get("display_name"),
-                    role: Role::from_db(row.get::<String, _>("role").as_str())?,
-                    activated: row.get::<Option<String>, _>("activated_at").is_some(),
-                    disabled: row.get::<Option<String>, _>("disabled_at").is_some(),
+                    role: Role::from_db(row.get::<String>("role").as_str())?,
+                    activated: row.get::<Option<String>>("activated_at").is_some(),
+                    disabled: row.get::<Option<String>>("disabled_at").is_some(),
                     created_at: row.get("created_at"),
                     last_seen_at: row.get("last_seen_at"),
                 })
@@ -50,11 +50,11 @@ impl ServerState {
             ensure_not_last_active_owner(&mut tx, &target.id).await?;
         }
         let now = now();
-        sqlx::query("UPDATE accounts SET disabled_at = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET disabled_at = ?, updated_at = ? WHERE id = ?")
             .bind(if disabled { Some(now.clone()) } else { None })
             .bind(&now)
             .bind(&target.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -102,11 +102,11 @@ impl ServerState {
             ensure_not_last_active_owner(&mut tx, &target.id).await?;
         }
         let now = now();
-        sqlx::query("UPDATE accounts SET role = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET role = ?, updated_at = ? WHERE id = ?")
             .bind(role.as_str())
             .bind(&now)
             .bind(&target.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -146,20 +146,19 @@ impl ServerState {
         if actor.id != target.id {
             ensure_can_manage_account(&actor, &target)?;
         }
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?",
-        )
-        .bind(&next_username)
-        .bind(&target.id)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let existing: Option<String> =
+            query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
+                .bind(&next_username)
+                .bind(&target.id)
+                .fetch_optional(&mut tx)
+                .await?;
         anyhow::ensure!(existing.is_none(), "Username is already taken");
         let now = now();
-        sqlx::query("UPDATE accounts SET username = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET username = ?, updated_at = ? WHERE id = ?")
             .bind(&next_username)
             .bind(&now)
             .bind(&target.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -204,11 +203,11 @@ impl ServerState {
             ensure_can_manage_account(&actor, &target)?;
         }
         let now = now();
-        sqlx::query("UPDATE accounts SET display_name = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE accounts SET display_name = ?, updated_at = ? WHERE id = ?")
             .bind(display_name)
             .bind(&now)
             .bind(&target.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -232,7 +231,7 @@ impl ServerState {
     }
 
     pub async fn list_my_ssh_keys(&self, account_id: &str) -> anyhow::Result<Vec<SshKeySummary>> {
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT k.id, a.username, k.fingerprint, k.label, k.created_at, k.last_used_at, k.revoked_at
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -266,7 +265,7 @@ impl ServerState {
         };
         let now = now();
         let key_id = id();
-        sqlx::query(
+        query(
             "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at)
              VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -276,7 +275,7 @@ impl ServerState {
         .bind(&parsed.public_key)
         .bind(label.map(str::trim).filter(|value| !value.is_empty()))
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await
         .with_context(|| format!("adding key {}", parsed.fingerprint))?;
         insert_audit(
@@ -319,7 +318,7 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
         let actor = load_account_tx(&mut tx, actor_id).await?;
-        let row = sqlx::query(
+        let row = query(
             "SELECT k.id, k.account_id, a.username, a.role
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -327,7 +326,7 @@ impl ServerState {
         )
         .bind(format!("{}%", key.trim()))
         .bind(key.trim())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(row) = row else {
             bail!("Active SSH key not found");
@@ -336,7 +335,7 @@ impl ServerState {
             id: row.get("account_id"),
             username: row.get("username"),
             display_name: String::new(),
-            role: Role::from_db(row.get::<String, _>("role").as_str())?,
+            role: Role::from_db(row.get::<String>("role").as_str())?,
             activated: true,
             pending_username: None,
         };
@@ -346,10 +345,10 @@ impl ServerState {
         let key_id: String = row.get("id");
         let label = label.trim();
         let label = (!label.is_empty()).then_some(label);
-        sqlx::query("UPDATE ssh_keys SET label = ? WHERE id = ?")
+        query("UPDATE ssh_keys SET label = ? WHERE id = ?")
             .bind(label)
             .bind(&key_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -372,7 +371,7 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
         let target = load_account_by_username_tx(&mut tx, username).await?;
-        let row = sqlx::query(
+        let row = query(
             "SELECT k.id, k.account_id, a.username AS old_username
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -380,31 +379,31 @@ impl ServerState {
         )
         .bind(format!("{}%", key.trim()))
         .bind(key.trim())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(row) = row else {
             bail!("Active SSH key not found");
         };
         let key_id: String = row.get("id");
         let old_account_id: String = row.get("account_id");
-        sqlx::query("UPDATE ssh_keys SET account_id = ? WHERE id = ?")
+        query("UPDATE ssh_keys SET account_id = ? WHERE id = ?")
             .bind(&target.id)
             .bind(&key_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
-        let remaining_keys: i64 = sqlx::query_scalar(
+        let remaining_keys: i64 = query_scalar(
             "SELECT COUNT(*) FROM ssh_keys WHERE account_id = ? AND revoked_at IS NULL",
         )
         .bind(&old_account_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut tx)
         .await?;
         if remaining_keys == 0 {
             let now = now();
-            sqlx::query("UPDATE accounts SET disabled_at = ?, updated_at = ? WHERE id = ? AND activated_at IS NULL")
+            query("UPDATE accounts SET disabled_at = ?, updated_at = ? WHERE id = ? AND activated_at IS NULL")
                 .bind(&now)
                 .bind(&now)
                 .bind(&old_account_id)
-                .execute(&mut *tx)
+                .execute(&mut tx)
                 .await?;
         }
         insert_audit(
@@ -431,13 +430,13 @@ impl ServerState {
     pub async fn list_ssh_keys(&self, actor_id: &str) -> anyhow::Result<Vec<SshKeySummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT k.id, a.username, k.fingerprint, k.label, k.created_at, k.last_used_at, k.revoked_at
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
              ORDER BY a.username, k.created_at",
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut tx)
         .await?;
         tx.commit().await?;
         Ok(rows.into_iter().map(ssh_key_summary_from_row).collect())
@@ -446,7 +445,7 @@ impl ServerState {
     pub async fn revoke_ssh_key(&self, actor_id: &str, key: &str) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
         let actor = load_account_tx(&mut tx, actor_id).await?;
-        let row = sqlx::query(
+        let row = query(
             "SELECT k.id, k.account_id, k.fingerprint, a.username, a.role
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -454,7 +453,7 @@ impl ServerState {
         )
         .bind(format!("{}%", key.trim()))
         .bind(key.trim())
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(row) = row else {
             bail!("Active SSH key not found");
@@ -463,7 +462,7 @@ impl ServerState {
             id: row.get("account_id"),
             username: row.get("username"),
             display_name: String::new(),
-            role: Role::from_db(row.get::<String, _>("role").as_str())?,
+            role: Role::from_db(row.get::<String>("role").as_str())?,
             activated: true,
             pending_username: None,
         };
@@ -475,17 +474,17 @@ impl ServerState {
         }
         let key_id: String = row.get("id");
         let now = now();
-        sqlx::query("UPDATE ssh_keys SET revoked_at = ? WHERE id = ?")
+        query("UPDATE ssh_keys SET revoked_at = ? WHERE id = ?")
             .bind(&now)
             .bind(&key_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
             Some(actor_id),
             "ssh_key.revoked",
             Some(&key_id),
-            serde_json::json!({"username": target.username, "fingerprint": row.get::<String, _>("fingerprint")}),
+            serde_json::json!({"username": target.username, "fingerprint": row.get::<String>("fingerprint")}),
         )
         .await?;
         insert_event(

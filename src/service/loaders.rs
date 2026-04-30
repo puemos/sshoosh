@@ -1,9 +1,9 @@
 use super::*;
 pub(crate) async fn load_user_presence(
-    pool: &SqlitePool,
+    pool: &Database,
     active_account_ids: &HashSet<String>,
 ) -> anyhow::Result<Vec<UserPresence>> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT id, username, display_name, last_seen_at
          FROM accounts
          WHERE activated_at IS NOT NULL AND disabled_at IS NULL
@@ -26,12 +26,12 @@ pub(crate) async fn load_user_presence(
 }
 
 pub(crate) async fn load_notifications(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<NotificationSummary>> {
     let limit = limit.clamp(1, 200);
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT n.id, n.kind, actor.username AS actor_username, n.title, n.body,
                 n.created_at, n.read_at
          FROM notifications n
@@ -59,11 +59,11 @@ pub(crate) async fn load_notifications(
 }
 
 pub(crate) async fn load_channels(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
 ) -> anyhow::Result<Vec<Channel>> {
     let current_time = now();
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT c.id, c.slug, c.name, c.visibility, c.topic,
                 COALESCE(SUM(
                     CASE
@@ -108,11 +108,11 @@ pub(crate) async fn load_channels(
 }
 
 pub(crate) async fn load_threads(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
     channel_id: &str,
 ) -> anyhow::Result<Vec<ThreadItem>> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT t.id, t.channel_id, t.title, t.body, a.username AS author,
                 t.comment_count, t.last_comment_index,
                 CASE
@@ -173,12 +173,12 @@ pub(crate) async fn load_threads(
 }
 
 pub(crate) async fn load_comments(
-    pool: &SqlitePool,
+    pool: &Database,
     thread_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<CommentItem>, bool)> {
     let limit = limit.clamp(1, MAX_HISTORY_LIMIT);
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT id, author, obj_index, body, created_at, edited_at, reactions
          FROM (
            SELECT c.id, a.username AS author, c.obj_index, c.body, c.created_at, c.edited_at,
@@ -224,10 +224,10 @@ pub(crate) async fn load_comments(
 }
 
 pub(crate) async fn load_conversations(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
 ) -> anyhow::Result<Vec<Conversation>> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT c.id,
                 peer.username AS peer_username,
                 c.last_message_index,
@@ -279,12 +279,12 @@ pub(crate) async fn load_conversations(
 }
 
 pub(crate) async fn load_conversation_messages(
-    pool: &SqlitePool,
+    pool: &Database,
     conversation_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<ConversationMessage>, bool)> {
     let limit = limit.clamp(1, MAX_HISTORY_LIMIT);
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT id, author, obj_index, body, created_at, edited_at, reactions
          FROM (
            SELECT m.id, a.username AS author, m.obj_index, m.body, m.created_at, m.edited_at,
@@ -330,27 +330,27 @@ pub(crate) async fn load_conversation_messages(
 }
 
 pub(crate) async fn load_account_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
 ) -> anyhow::Result<Account> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, username, display_name, role, activated_at, pending_username
          FROM accounts WHERE id = ? AND disabled_at IS NULL",
     )
     .bind(account_id)
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut tx)
     .await?;
     account_from_row(row)
 }
 
 pub(crate) async fn ensure_can_view_channel(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
     channel_id: &str,
 ) -> anyhow::Result<()> {
     let account = load_account_tx(tx, account_id).await?;
     anyhow::ensure!(account.activated, "Account is not activated");
-    let count: i64 = sqlx::query_scalar(
+    let count: i64 = query_scalar(
         "SELECT COUNT(*)
          FROM channels c
          WHERE c.id = ?
@@ -362,7 +362,7 @@ pub(crate) async fn ensure_can_view_channel(
     )
     .bind(channel_id)
     .bind(account_id)
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut tx)
     .await?;
     anyhow::ensure!(count > 0, "You do not have access to this channel");
     Ok(())

@@ -18,6 +18,12 @@ All flags can also be set with environment variables:
 
 ```sh
 SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite
+SSHOOSH_DATABASE_URL=libsql://example.turso.io    # optional; overrides SSHOOSH_DB
+SSHOOSH_DATABASE_AUTH_TOKEN=...                   # required for authenticated remote URLs
+SSHOOSH_NODE_ID=sshoosh-1                         # stable id for multi-server deployments
+SSHOOSH_ENCRYPTION_KEY=...                        # optional base64url 32-byte key
+SSHOOSH_MASTER_LEASE_TTL_SECS=15
+SSHOOSH_MASTER_HEARTBEAT_SECS=5
 SSHOOSH_HOST=0.0.0.0
 SSHOOSH_PORT=2222
 SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
@@ -34,6 +40,8 @@ sshoosh bootstrap-token
 sshoosh doctor
 sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
+sshoosh master status
+sshoosh encrypt migrate
 sshoosh invite --role member --ttl-hours 24
 ```
 
@@ -153,7 +161,7 @@ Terminal system notifications are opt-in per account. Use `/notification termina
 
 ## Backup and Export
 
-Use SQLite backups for operational recovery and exports for portable archives:
+Use SQLite backups for operational recovery and exports for portable archives. `backup` supports local database files; remote libSQL/Turso backup is reported as unsupported until provider backup integration is added.
 
 ```sh
 sshoosh backup /var/backups/sshoosh.sqlite
@@ -162,6 +170,12 @@ sshoosh export --format markdown --out /var/backups/sshoosh.md
 ```
 
 The JSON/Markdown export includes users, channels, threads, comments, DMs, mentions, reactions, notifications, and optionally audit rows. It is not an import format.
+
+## Remote Database, Failover, And Encryption
+
+`SSHOOSH_DATABASE_URL` can point at `libsql://`, `https://`, or `file:` URLs. When several servers share one database, each process contends for the `main` master lease; only the active master accepts SSH sessions and writes. Use stable `SSHOOSH_NODE_ID` values in production.
+
+If `SSHOOSH_ENCRYPTION_KEY` is set, source content fields are encrypted before storage with XChaCha20-Poly1305. Full-text search stays plaintext intentionally, so search still works and the search index remains sensitive. Existing plaintext databases must be converted with `sshoosh encrypt migrate`.
 
 ## Terminal Requirements
 

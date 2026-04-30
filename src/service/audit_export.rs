@@ -3,7 +3,7 @@ impl ServerState {
     pub async fn list_audit(&self, actor_id: &str, limit: i64) -> anyhow::Result<Vec<AuditEntry>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT l.id, actor.username AS actor_username, l.action, l.target,
                     l.metadata_json, l.created_at
              FROM audit_log l
@@ -12,7 +12,7 @@ impl ServerState {
              LIMIT ?",
         )
         .bind(limit.clamp(1, 500))
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut tx)
         .await?;
         tx.commit().await?;
         Ok(rows
@@ -37,54 +37,54 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
         let accounts = rows_to_json(
-            sqlx::query("SELECT id, username, display_name, role, created_at, activated_at, disabled_at FROM accounts ORDER BY username")
-                .fetch_all(&mut *tx)
+            query("SELECT id, username, display_name, role, created_at, activated_at, disabled_at FROM accounts ORDER BY username")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let channels = rows_to_json(
-            sqlx::query("SELECT id, slug, name, visibility, topic, created_at, archived_at FROM channels ORDER BY slug")
-                .fetch_all(&mut *tx)
+            query("SELECT id, slug, name, visibility, topic, created_at, archived_at FROM channels ORDER BY slug")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let threads = rows_to_json(
-            sqlx::query("SELECT id, channel_id, creator_account_id, title, body, comment_count, created_at, edited_at, archived_at, deleted_at FROM threads ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT id, channel_id, creator_account_id, title, body, comment_count, created_at, edited_at, archived_at, deleted_at FROM threads ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let comments = rows_to_json(
-            sqlx::query("SELECT id, thread_id, channel_id, author_account_id, obj_index, body, created_at, edited_at, deleted_at FROM comments ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT id, thread_id, channel_id, author_account_id, obj_index, body, created_at, edited_at, deleted_at FROM comments ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let dms = rows_to_json(
-            sqlx::query("SELECT id, dm_key, creator_account_id, created_at, archived_at FROM conversations ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT id, dm_key, creator_account_id, created_at, archived_at FROM conversations ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let dm_messages = rows_to_json(
-            sqlx::query("SELECT id, conversation_id, author_account_id, obj_index, body, created_at, edited_at, deleted_at FROM conversation_messages ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT id, conversation_id, author_account_id, obj_index, body, created_at, edited_at, deleted_at FROM conversation_messages ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let mentions = rows_to_json(
-            sqlx::query("SELECT * FROM mentions ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT * FROM mentions ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let reactions = rows_to_json(
-            sqlx::query("SELECT * FROM reactions ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT * FROM reactions ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let notifications = rows_to_json(
-            sqlx::query("SELECT * FROM notifications ORDER BY created_at")
-                .fetch_all(&mut *tx)
+            query("SELECT * FROM notifications ORDER BY created_at")
+                .fetch_all(&mut tx)
                 .await?,
         )?;
         let audit = if include_audit {
             rows_to_json(
-                sqlx::query("SELECT * FROM audit_log ORDER BY created_at")
-                    .fetch_all(&mut *tx)
+                query("SELECT * FROM audit_log ORDER BY created_at")
+                    .fetch_all(&mut tx)
                     .await?,
             )?
         } else {
@@ -112,12 +112,11 @@ impl ServerState {
 
     pub async fn mark_thread_read(&self, account_id: &str, thread_id: &str) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
-        let last_index: i64 =
-            sqlx::query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
-                .bind(thread_id)
-                .fetch_one(&mut *tx)
-                .await?;
-        sqlx::query(
+        let last_index: i64 = query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_one(&mut tx)
+            .await?;
+        query(
             "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
              VALUES (?, ?, ?, NULL)
              ON CONFLICT(thread_id, account_id)
@@ -126,26 +125,26 @@ impl ServerState {
         .bind(thread_id)
         .bind(account_id)
         .bind(last_index)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
         let now = now();
-        sqlx::query(
+        query(
             "UPDATE notifications SET read_at = COALESCE(read_at, ?)
              WHERE account_id = ? AND thread_id = ?",
         )
         .bind(&now)
         .bind(account_id)
         .bind(thread_id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
-        sqlx::query(
+        query(
             "UPDATE mentions SET read_at = COALESCE(read_at, ?)
              WHERE target_account_id = ? AND thread_id = ?",
         )
         .bind(&now)
         .bind(account_id)
         .bind(thread_id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
         tx.commit().await?;
         Ok(())
@@ -157,13 +156,12 @@ impl ServerState {
         thread_id: &str,
     ) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
-        let last_index: i64 =
-            sqlx::query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
-                .bind(thread_id)
-                .fetch_one(&mut *tx)
-                .await?;
+        let last_index: i64 = query_scalar("SELECT last_comment_index FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_one(&mut tx)
+            .await?;
         let unread_from = last_index.saturating_sub(1);
-        sqlx::query(
+        query(
             "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(thread_id, account_id)
@@ -173,7 +171,7 @@ impl ServerState {
         .bind(account_id)
         .bind(unread_from)
         .bind(now())
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
         tx.commit().await?;
         Ok(())
@@ -185,11 +183,11 @@ impl ServerState {
         conversation_id: &str,
     ) -> anyhow::Result<()> {
         let last_index: i64 =
-            sqlx::query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
+            query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
                 .bind(conversation_id)
                 .fetch_one(self.db.read_pool())
                 .await?;
-        sqlx::query(
+        query(
             "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
         )
         .bind(last_index)
@@ -197,7 +195,7 @@ impl ServerState {
         .bind(account_id)
         .execute(self.db.write_pool())
         .await?;
-        sqlx::query(
+        query(
             "UPDATE notifications SET read_at = COALESCE(read_at, ?)
              WHERE account_id = ? AND conversation_id = ?",
         )
@@ -206,7 +204,7 @@ impl ServerState {
         .bind(conversation_id)
         .execute(self.db.write_pool())
         .await?;
-        sqlx::query(
+        query(
             "UPDATE mentions SET read_at = COALESCE(read_at, ?)
              WHERE target_account_id = ? AND conversation_id = ?",
         )
@@ -224,11 +222,11 @@ impl ServerState {
         conversation_id: &str,
     ) -> anyhow::Result<()> {
         let last_index: i64 =
-            sqlx::query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
+            query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
                 .bind(conversation_id)
                 .fetch_one(self.db.read_pool())
                 .await?;
-        sqlx::query(
+        query(
             "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
         )
         .bind(last_index.saturating_sub(1))
@@ -240,7 +238,7 @@ impl ServerState {
     }
 
     pub async fn next_unread(&self, account_id: &str) -> anyhow::Result<Option<NextUnread>> {
-        if let Some(row) = sqlx::query(
+        if let Some(row) = query(
             "SELECT t.channel_id, t.id AS thread_id
              FROM threads t
              JOIN channels c ON c.id = t.channel_id
@@ -274,7 +272,7 @@ impl ServerState {
             }));
         }
 
-        let conversation_id: Option<String> = sqlx::query_scalar(
+        let conversation_id: Option<String> = query_scalar(
             "SELECT c.id
              FROM conversations c
              JOIN conversation_members me ON me.conversation_id = c.id AND me.account_id = ?

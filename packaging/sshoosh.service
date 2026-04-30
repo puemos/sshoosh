@@ -8,6 +8,12 @@ Type=simple
 User=sshoosh
 Group=sshoosh
 Environment=SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite
+# Environment=SSHOOSH_DATABASE_URL=libsql://example.turso.io
+# Environment=SSHOOSH_DATABASE_AUTH_TOKEN=
+# Environment=SSHOOSH_NODE_ID=sshoosh-1
+# Environment=SSHOOSH_ENCRYPTION_KEY=
+Environment=SSHOOSH_MASTER_LEASE_TTL_SECS=15
+Environment=SSHOOSH_MASTER_HEARTBEAT_SECS=5
 Environment=SSHOOSH_HOST=0.0.0.0
 Environment=SSHOOSH_PORT=2222
 Environment=SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519

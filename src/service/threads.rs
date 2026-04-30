@@ -19,19 +19,17 @@ impl ServerState {
             ensure_thread_name_available(&mut tx, &thread.channel_id, &next_key).await?;
         }
         let now = now();
-        sqlx::query(
-            "UPDATE threads SET title = ?, body = ?, updated_at = ?, edited_at = ? WHERE id = ?",
-        )
-        .bind(title)
-        .bind(body)
-        .bind(&now)
-        .bind(&now)
-        .bind(thread_id)
-        .execute(&mut *tx)
-        .await?;
-        let channel_slug: String = sqlx::query_scalar("SELECT slug FROM channels WHERE id = ?")
+        query("UPDATE threads SET title = ?, body = ?, updated_at = ?, edited_at = ? WHERE id = ?")
+            .bind(title)
+            .bind(body)
+            .bind(&now)
+            .bind(&now)
+            .bind(thread_id)
+            .execute(&mut tx)
+            .await?;
+        let channel_slug: String = query_scalar("SELECT slug FROM channels WHERE id = ?")
             .bind(&thread.channel_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut tx)
             .await?;
         upsert_search_index_tx(
             &mut tx,
@@ -84,16 +82,16 @@ impl ServerState {
             ensure_thread_name_available(&mut tx, &thread.channel_id, &next_key).await?;
         }
         let now = now();
-        sqlx::query("UPDATE threads SET title = ?, updated_at = ?, edited_at = ? WHERE id = ?")
+        query("UPDATE threads SET title = ?, updated_at = ?, edited_at = ? WHERE id = ?")
             .bind(title)
             .bind(&now)
             .bind(&now)
             .bind(thread_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
-        let channel_slug: String = sqlx::query_scalar("SELECT slug FROM channels WHERE id = ?")
+        let channel_slug: String = query_scalar("SELECT slug FROM channels WHERE id = ?")
             .bind(&thread.channel_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut tx)
             .await?;
         upsert_search_index_tx(
             &mut tx,
@@ -297,7 +295,7 @@ impl ServerState {
         ttl_hours: Option<i64>,
     ) -> anyhow::Result<()> {
         let muted_until = ttl_hours.and_then(timestamp_after_hours);
-        sqlx::query(
+        query(
             "UPDATE conversation_members SET muted_until = ? WHERE conversation_id = ? AND account_id = ?",
         )
         .bind(muted_until.as_deref())
@@ -315,7 +313,7 @@ impl ServerState {
         saved: bool,
     ) -> anyhow::Result<()> {
         let saved_at = saved.then(now);
-        sqlx::query(
+        query(
             "UPDATE conversation_members SET saved_at = ? WHERE conversation_id = ? AND account_id = ?",
         )
         .bind(saved_at.as_deref())

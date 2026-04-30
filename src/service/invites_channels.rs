@@ -3,7 +3,7 @@ impl ServerState {
     pub async fn list_invites(&self, actor_id: &str) -> anyhow::Result<Vec<InviteSummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT i.id, i.role_on_accept, creator.username AS created_by,
                     accepted.username AS accepted_by, i.created_at, i.expires_at,
                     i.revoked_at, i.accepted_at
@@ -12,14 +12,14 @@ impl ServerState {
              LEFT JOIN accounts accepted ON accepted.id = i.accepted_by_account_id
              ORDER BY i.created_at DESC",
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut tx)
         .await?;
         tx.commit().await?;
         rows.into_iter()
             .map(|row| {
                 Ok(InviteSummary {
                     id: row.get("id"),
-                    role_on_accept: Role::from_db(row.get::<String, _>("role_on_accept").as_str())?,
+                    role_on_accept: Role::from_db(row.get::<String>("role_on_accept").as_str())?,
                     created_by: row.get("created_by"),
                     accepted_by: row.get("accepted_by"),
                     created_at: row.get("created_at"),
@@ -34,21 +34,21 @@ impl ServerState {
     pub async fn revoke_invite(&self, actor_id: &str, invite_id: &str) -> anyhow::Result<()> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let id: Option<String> = sqlx::query_scalar(
+        let id: Option<String> = query_scalar(
             "SELECT id FROM invites
              WHERE id LIKE ? AND accepted_at IS NULL AND revoked_at IS NULL",
         )
         .bind(format!("{}%", invite_id.trim()))
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(id) = id else {
             bail!("Open invite not found");
         };
         let now = now();
-        sqlx::query("UPDATE invites SET revoked_at = ? WHERE id = ?")
+        query("UPDATE invites SET revoked_at = ? WHERE id = ?")
             .bind(&now)
             .bind(&id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -79,7 +79,7 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         let channel = load_channel_by_slug_tx(&mut tx, slug).await?;
         ensure_can_manage_channel(&mut tx, actor_id, &channel).await?;
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT c.id AS channel_id, c.slug AS channel_slug, a.username, m.role, m.joined_at
              FROM channel_members m
              JOIN channels c ON c.id = m.channel_id
@@ -88,7 +88,7 @@ impl ServerState {
              ORDER BY a.username",
         )
         .bind(&channel.id)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut tx)
         .await?;
         tx.commit().await?;
         Ok(rows
@@ -128,7 +128,7 @@ impl ServerState {
     ) -> anyhow::Result<Vec<ChannelDirectoryItem>> {
         let actor = self.reload_account(actor_id).await?;
         anyhow::ensure!(actor.activated, "Account is not activated");
-        let rows = sqlx::query(
+        let rows = query(
             "SELECT c.id, c.slug, c.name, c.visibility, c.topic, c.archived_at,
                     EXISTS (
                       SELECT 1 FROM channel_members m
@@ -160,8 +160,8 @@ impl ServerState {
                 name: row.get("name"),
                 visibility: row.get("visibility"),
                 topic: row.get("topic"),
-                joined: row.get::<i64, _>("joined") != 0,
-                archived: row.get::<Option<String>, _>("archived_at").is_some(),
+                joined: row.get::<i64>("joined") != 0,
+                archived: row.get::<Option<String>>("archived_at").is_some(),
             })
             .collect())
     }
@@ -176,10 +176,10 @@ impl ServerState {
             channel.created_by_account_id != actor_id,
             "Channel creator cannot leave without archiving or transferring ownership"
         );
-        sqlx::query("DELETE FROM channel_members WHERE channel_id = ? AND account_id = ?")
+        query("DELETE FROM channel_members WHERE channel_id = ? AND account_id = ?")
             .bind(&channel.id)
             .bind(actor_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -217,12 +217,12 @@ impl ServerState {
             ensure_channel_name_available(&mut tx, &next_slug).await?;
         }
         let now = now();
-        sqlx::query("UPDATE channels SET slug = ?, name = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE channels SET slug = ?, name = ?, updated_at = ? WHERE id = ?")
             .bind(&next_slug)
             .bind(&next_slug)
             .bind(&now)
             .bind(&channel.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -257,11 +257,11 @@ impl ServerState {
         let topic = topic.trim();
         let topic = (!topic.is_empty()).then_some(topic);
         let now = now();
-        sqlx::query("UPDATE channels SET topic = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE channels SET topic = ?, updated_at = ? WHERE id = ?")
             .bind(topic)
             .bind(&now)
             .bind(&channel.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         insert_audit(
             &mut tx,
@@ -299,12 +299,12 @@ impl ServerState {
         ensure_can_manage_channel(&mut tx, actor_id, &channel).await?;
         anyhow::ensure!(channel.slug != "general", "#general cannot be archived");
         let now = now();
-        sqlx::query("UPDATE channels SET archived_at = ?, archived_by_account_id = ?, updated_at = ? WHERE id = ?")
+        query("UPDATE channels SET archived_at = ?, archived_by_account_id = ?, updated_at = ? WHERE id = ?")
             .bind(archived.then_some(now.as_str()))
             .bind(archived.then_some(actor_id))
             .bind(&now)
             .bind(&channel.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         let action = if archived {
             "channel.archived"

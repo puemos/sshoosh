@@ -1,10 +1,10 @@
 use super::*;
-pub(crate) async fn create_invite(pool: &SqlitePool, actor_id: &str) -> anyhow::Result<String> {
+pub(crate) async fn create_invite(pool: &Database, actor_id: &str) -> anyhow::Result<String> {
     create_invite_with_options(pool, actor_id, Role::Member, None).await
 }
 
 pub(crate) async fn create_invite_with_options(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     role_on_accept: Role,
     ttl_hours: Option<i64>,
@@ -25,7 +25,7 @@ pub(crate) async fn create_invite_with_options(
     let code_hash = code_hash(&code);
     let now = now();
     let expires_at = ttl_hours.and_then(timestamp_after_hours);
-    sqlx::query(
+    query(
         "INSERT INTO invites
          (id, code_hash, role_on_accept, created_by_account_id, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -36,7 +36,7 @@ pub(crate) async fn create_invite_with_options(
     .bind(actor_id)
     .bind(&now)
     .bind(expires_at.as_deref())
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     insert_audit(
         &mut tx,
@@ -60,7 +60,7 @@ pub(crate) async fn create_invite_with_options(
 }
 
 pub(crate) async fn accept_invite(
-    pool: &SqlitePool,
+    pool: &Database,
     account_id: &str,
     code: &str,
     username: &str,
@@ -73,25 +73,25 @@ pub(crate) async fn accept_invite(
         return Ok(());
     }
     let now = now();
-    let active_count: i64 = sqlx::query_scalar(
+    let active_count: i64 = query_scalar(
         "SELECT COUNT(*)
          FROM accounts
          WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut tx)
     .await?;
     let token_hash = code_hash(code.trim());
     let mut bootstrap_token_id = None;
     let mut invite_id = None;
     let role = if active_count == 0 {
-        let token_id: Option<String> = sqlx::query_scalar(
+        let token_id: Option<String> = query_scalar(
             "SELECT id
              FROM bootstrap_tokens
              WHERE code_hash = ? AND used_at IS NULL
              LIMIT 1",
         )
         .bind(&token_hash)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(token_id) = token_id else {
             bail!("Bootstrap token is invalid or already used");
@@ -99,7 +99,7 @@ pub(crate) async fn accept_invite(
         bootstrap_token_id = Some(token_id);
         Role::Owner
     } else {
-        let invite = sqlx::query(
+        let invite = query(
             "SELECT id, role_on_accept
              FROM invites
              WHERE code_hash = ?
@@ -109,22 +109,22 @@ pub(crate) async fn accept_invite(
         )
         .bind(&token_hash)
         .bind(&now)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(invite) = invite else {
             bail!("Invite is invalid, expired, or already used");
         };
-        invite_id = Some(invite.get::<String, _>("id"));
-        Role::from_db(invite.get::<String, _>("role_on_accept").as_str())?
+        invite_id = Some(invite.get::<String>("id"));
+        Role::from_db(invite.get::<String>("role_on_accept").as_str())?
     };
     let existing: Option<String> =
-        sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
+        query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
             .bind(&username)
             .bind(account_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut tx)
             .await?;
     anyhow::ensure!(existing.is_none(), "Username is already taken");
-    sqlx::query(
+    query(
         "UPDATE accounts
          SET username = ?, display_name = ?, role = ?, activated_at = ?, updated_at = ?, pending_username = NULL
          WHERE id = ?",
@@ -135,10 +135,10 @@ pub(crate) async fn accept_invite(
     .bind(&now)
     .bind(&now)
     .bind(account_id)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     if let Some(token_id) = bootstrap_token_id {
-        sqlx::query(
+        query(
             "UPDATE bootstrap_tokens
              SET used_by_account_id = ?, used_at = ?
              WHERE id = ? AND used_at IS NULL",
@@ -146,19 +146,19 @@ pub(crate) async fn accept_invite(
         .bind(account_id)
         .bind(&now)
         .bind(token_id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     }
     if let Some(invite_id) = invite_id {
-        sqlx::query("UPDATE invites SET accepted_by_account_id = ?, accepted_at = ? WHERE id = ?")
+        query("UPDATE invites SET accepted_by_account_id = ?, accepted_at = ? WHERE id = ?")
             .bind(account_id)
             .bind(&now)
             .bind(invite_id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
     }
     let general_id = ensure_general_channel_tx(&mut tx, account_id, &now).await?;
-    sqlx::query(
+    query(
         "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(channel_id, account_id) DO NOTHING",
@@ -171,7 +171,7 @@ pub(crate) async fn accept_invite(
         "member"
     })
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     let event_kind = if role == Role::Owner {
         "account.bootstrapped"
@@ -192,19 +192,19 @@ pub(crate) async fn accept_invite(
 }
 
 async fn ensure_general_channel_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut DbTransaction,
     account_id: &str,
     now: &str,
 ) -> anyhow::Result<String> {
     if let Some(general_id) =
-        sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE slug = 'general'")
-            .fetch_optional(&mut **tx)
+        query_scalar::<String>("SELECT id FROM channels WHERE slug = 'general'")
+            .fetch_optional(&mut *tx)
             .await?
     {
         return Ok(general_id);
     }
     let channel_id = id();
-    sqlx::query(
+    query(
         "INSERT INTO channels
          (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
          VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
@@ -213,7 +213,7 @@ async fn ensure_general_channel_tx(
     .bind(account_id)
     .bind(now)
     .bind(now)
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await?;
     insert_event(
         tx,
@@ -228,7 +228,7 @@ async fn ensure_general_channel_tx(
 }
 
 pub(crate) async fn create_channel(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     name: &str,
     private: bool,
@@ -240,7 +240,7 @@ pub(crate) async fn create_channel(
     ensure_channel_name_available(&mut tx, &slug).await?;
     let now = now();
     let channel_id = id();
-    sqlx::query(
+    query(
         "INSERT INTO channels
          (id, slug, name, visibility, created_by_account_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -252,16 +252,16 @@ pub(crate) async fn create_channel(
     .bind(actor_id)
     .bind(&now)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    sqlx::query(
+    query(
         "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
          VALUES (?, ?, 'owner', ?)",
     )
     .bind(&channel_id)
     .bind(actor_id)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     insert_event(
         &mut tx,
@@ -277,7 +277,7 @@ pub(crate) async fn create_channel(
 }
 
 pub(crate) async fn join_channel(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     slug: &str,
 ) -> anyhow::Result<String> {
@@ -285,11 +285,10 @@ pub(crate) async fn join_channel(
     let actor = load_account_tx(&mut tx, actor_id).await?;
     anyhow::ensure!(actor.activated, "Account is not activated");
     let slug = slug.trim().trim_start_matches('#').to_lowercase();
-    let row =
-        sqlx::query("SELECT id, visibility FROM channels WHERE slug = ? AND archived_at IS NULL")
-            .bind(&slug)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let row = query("SELECT id, visibility FROM channels WHERE slug = ? AND archived_at IS NULL")
+        .bind(&slug)
+        .fetch_optional(&mut tx)
+        .await?;
     let Some(row) = row else {
         bail!("Channel #{slug} not found");
     };
@@ -297,7 +296,7 @@ pub(crate) async fn join_channel(
     let visibility: String = row.get("visibility");
     anyhow::ensure!(visibility == "public", "Private channels require an invite");
     let now = now();
-    sqlx::query(
+    query(
         "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
          VALUES (?, ?, 'member', ?)
          ON CONFLICT(channel_id, account_id) DO NOTHING",
@@ -305,7 +304,7 @@ pub(crate) async fn join_channel(
     .bind(&channel_id)
     .bind(actor_id)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     insert_event(
         &mut tx,
@@ -321,7 +320,7 @@ pub(crate) async fn join_channel(
 }
 
 pub(crate) async fn create_thread(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     channel_id: &str,
     title: &str,
@@ -339,7 +338,7 @@ pub(crate) async fn create_thread(
     ensure_thread_name_available(&mut tx, channel_id, &title_key).await?;
     let now = now();
     let thread_id = id();
-    sqlx::query(
+    query(
         "INSERT INTO threads
          (id, channel_id, creator_account_id, title, body, last_activity_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -352,20 +351,20 @@ pub(crate) async fn create_thread(
     .bind(&now)
     .bind(&now)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    sqlx::query(
+    query(
         "INSERT INTO thread_reads (thread_id, account_id, last_read_index)
          VALUES (?, ?, 0)
          ON CONFLICT(thread_id, account_id) DO UPDATE SET last_read_index = 0",
     )
     .bind(&thread_id)
     .bind(actor_id)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    let channel_slug: String = sqlx::query_scalar("SELECT slug FROM channels WHERE id = ?")
+    let channel_slug: String = query_scalar("SELECT slug FROM channels WHERE id = ?")
         .bind(channel_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut tx)
         .await?;
     upsert_search_index_tx(
         &mut tx,
@@ -410,18 +409,18 @@ pub(crate) async fn create_thread(
 }
 
 pub(crate) async fn add_comment(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     thread_id: &str,
     body: &str,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(!body.trim().is_empty(), "Comment body is required");
     let mut tx = begin(pool).await?;
-    let row = sqlx::query(
+    let row = query(
         "SELECT channel_id, last_comment_index FROM threads WHERE id = ? AND deleted_at IS NULL",
     )
     .bind(thread_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Thread not found");
@@ -432,7 +431,7 @@ pub(crate) async fn add_comment(
     let next_index = current_index + 1;
     let now = now();
     let comment_id = id();
-    sqlx::query(
+    query(
         "INSERT INTO comments
          (id, thread_id, channel_id, author_account_id, obj_index, body, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -445,9 +444,9 @@ pub(crate) async fn add_comment(
     .bind(body.trim())
     .bind(&now)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    sqlx::query(
+    query(
         "UPDATE threads
          SET comment_count = comment_count + 1,
              last_comment_index = ?,
@@ -459,9 +458,9 @@ pub(crate) async fn add_comment(
     .bind(&now)
     .bind(&now)
     .bind(thread_id)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    sqlx::query(
+    query(
         "INSERT INTO thread_reads (thread_id, account_id, last_read_index)
          VALUES (?, ?, ?)
          ON CONFLICT(thread_id, account_id)
@@ -470,15 +469,15 @@ pub(crate) async fn add_comment(
     .bind(thread_id)
     .bind(actor_id)
     .bind(next_index)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    let thread_title: String = sqlx::query_scalar("SELECT title FROM threads WHERE id = ?")
+    let thread_title: String = query_scalar("SELECT title FROM threads WHERE id = ?")
         .bind(thread_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut tx)
         .await?;
-    let channel_slug: String = sqlx::query_scalar("SELECT slug FROM channels WHERE id = ?")
+    let channel_slug: String = query_scalar("SELECT slug FROM channels WHERE id = ?")
         .bind(&channel_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut tx)
         .await?;
     upsert_search_index_tx(
         &mut tx,
@@ -536,7 +535,7 @@ pub(crate) async fn add_comment(
 }
 
 pub(crate) async fn open_dm(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     target: &str,
 ) -> anyhow::Result<String> {
@@ -544,9 +543,9 @@ pub(crate) async fn open_dm(
     let mut tx = begin(pool).await?;
     let actor = load_account_tx(&mut tx, actor_id).await?;
     anyhow::ensure!(actor.activated, "Account is not activated");
-    let target_row = sqlx::query("SELECT id FROM accounts WHERE lower(username) = lower(?) AND activated_at IS NOT NULL AND disabled_at IS NULL")
+    let target_row = query("SELECT id FROM accounts WHERE lower(username) = lower(?) AND activated_at IS NOT NULL AND disabled_at IS NULL")
         .bind(target)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut tx)
         .await?;
     let Some(target_row) = target_row else {
         bail!("User @{target} not found");
@@ -556,15 +555,15 @@ pub(crate) async fn open_dm(
     let dm_key = dm_key(actor_id, &target_id);
     let now = now();
     let conversation_id = if let Some(existing) =
-        sqlx::query_scalar::<_, String>("SELECT id FROM conversations WHERE dm_key = ?")
+        query_scalar::<String>("SELECT id FROM conversations WHERE dm_key = ?")
             .bind(&dm_key)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut tx)
             .await?
     {
         existing
     } else {
         let conversation_id = id();
-        sqlx::query(
+        query(
             "INSERT INTO conversations
              (id, dm_key, creator_account_id, last_activity_at, created_at)
              VALUES (?, ?, ?, ?, ?)",
@@ -574,23 +573,23 @@ pub(crate) async fn open_dm(
         .bind(actor_id)
         .bind(&now)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
         for member_id in [actor_id, target_id.as_str()] {
-            sqlx::query(
+            query(
                 "INSERT INTO conversation_members (conversation_id, account_id, joined_at)
                  VALUES (?, ?, ?)",
             )
             .bind(&conversation_id)
             .bind(member_id)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
         }
         conversation_id
     };
     for member_id in [actor_id, target_id.as_str()] {
-        sqlx::query(
+        query(
             "INSERT INTO conversation_members (conversation_id, account_id, joined_at)
              VALUES (?, ?, ?)
              ON CONFLICT(conversation_id, account_id) DO NOTHING",
@@ -598,7 +597,7 @@ pub(crate) async fn open_dm(
         .bind(&conversation_id)
         .bind(member_id)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     }
     insert_event(
@@ -615,30 +614,30 @@ pub(crate) async fn open_dm(
 }
 
 pub(crate) async fn send_dm(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     conversation_id: &str,
     body: &str,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(!body.trim().is_empty(), "Message body is required");
     let mut tx = begin(pool).await?;
-    let is_member: i64 = sqlx::query_scalar(
+    let is_member: i64 = query_scalar(
         "SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND account_id = ?",
     )
     .bind(conversation_id)
     .bind(actor_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut tx)
     .await?;
     anyhow::ensure!(is_member > 0, "Not a participant in this conversation");
     let current_index: i64 =
-        sqlx::query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
+        query_scalar("SELECT last_message_index FROM conversations WHERE id = ?")
             .bind(conversation_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut tx)
             .await?;
     let next_index = current_index + 1;
     let now = now();
     let message_id = id();
-    sqlx::query(
+    query(
         "INSERT INTO conversation_messages
          (id, conversation_id, author_account_id, obj_index, body, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -650,23 +649,21 @@ pub(crate) async fn send_dm(
     .bind(body.trim())
     .bind(&now)
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
-    sqlx::query(
-        "UPDATE conversations SET last_message_index = ?, last_activity_at = ? WHERE id = ?",
-    )
-    .bind(next_index)
-    .bind(&now)
-    .bind(conversation_id)
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query(
+    query("UPDATE conversations SET last_message_index = ?, last_activity_at = ? WHERE id = ?")
+        .bind(next_index)
+        .bind(&now)
+        .bind(conversation_id)
+        .execute(&mut tx)
+        .await?;
+    query(
         "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
     )
     .bind(next_index)
     .bind(conversation_id)
     .bind(actor_id)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     upsert_search_index_tx(
         &mut tx,

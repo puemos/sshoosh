@@ -23,6 +23,12 @@ Every server flag can also be set with an environment variable:
 
 ```sh
 SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite
+SSHOOSH_DATABASE_URL=libsql://example.turso.io
+SSHOOSH_DATABASE_AUTH_TOKEN=...
+SSHOOSH_NODE_ID=sshoosh-1
+SSHOOSH_ENCRYPTION_KEY=...
+SSHOOSH_MASTER_LEASE_TTL_SECS=15
+SSHOOSH_MASTER_HEARTBEAT_SECS=5
 SSHOOSH_HOST=0.0.0.0
 SSHOOSH_PORT=2222
 SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
@@ -41,6 +47,8 @@ sshoosh bootstrap-token
 sshoosh doctor
 sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
+sshoosh master status
+sshoosh encrypt migrate
 sshoosh invite --role member --ttl-hours 24
 ```
 
@@ -101,6 +109,10 @@ sshoosh export --format markdown --out /var/backups/sshoosh.md
 ```
 
 The release artifact is a single `sshoosh` binary. Runtime state is just the SQLite database and SSH host key configured by `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`.
+
+For remote libSQL/Turso, set `SSHOOSH_DATABASE_URL` and `SSHOOSH_DATABASE_AUTH_TOKEN`; this overrides `SSHOOSH_DB`. Multiple servers may share the same database. They automatically contend for the `main` master lease, and only the active master accepts SSH sessions and writes. Use stable `SSHOOSH_NODE_ID` values in production.
+
+Set `SSHOOSH_ENCRYPTION_KEY` to a base64url 32-byte key to encrypt source content fields. Run `sshoosh encrypt migrate` once for existing plaintext rows. Search index columns intentionally remain plaintext so FTS works, which means search data remains sensitive at rest.
 
 For systemd deployments, copy `packaging/sshoosh.service` to `/etc/systemd/system/sshoosh.service`, adjust the binary path if needed, then:
 

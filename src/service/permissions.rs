@@ -1,12 +1,12 @@
 use super::*;
 pub(crate) async fn ensure_channel_name_available(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     slug: &str,
 ) -> anyhow::Result<()> {
     let existing_channel: Option<String> =
-        sqlx::query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
+        query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
             .bind(slug)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut tx)
             .await?;
     anyhow::ensure!(
         existing_channel.is_none(),
@@ -20,14 +20,14 @@ pub(crate) async fn ensure_channel_name_available(
 }
 
 pub(crate) async fn ensure_thread_name_available(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     channel_id: &str,
     title_key: &str,
 ) -> anyhow::Result<()> {
     let existing_channel: Option<String> =
-        sqlx::query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
+        query_scalar("SELECT id FROM channels WHERE slug = ? AND archived_at IS NULL")
             .bind(title_key)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut tx)
             .await?;
     anyhow::ensure!(
         existing_channel.is_none(),
@@ -41,12 +41,12 @@ pub(crate) async fn ensure_thread_name_available(
 }
 
 pub(crate) async fn active_thread_name_exists(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     channel_id: Option<&str>,
     name_key: &str,
 ) -> anyhow::Result<bool> {
     let rows = if let Some(channel_id) = channel_id {
-        sqlx::query_scalar::<_, String>(
+        query_scalar::<String>(
             "SELECT title
              FROM threads
              WHERE channel_id = ?
@@ -54,16 +54,16 @@ pub(crate) async fn active_thread_name_exists(
                AND archived_at IS NULL",
         )
         .bind(channel_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut tx)
         .await?
     } else {
-        sqlx::query_scalar::<_, String>(
+        query_scalar::<String>(
             "SELECT title
              FROM threads
              WHERE deleted_at IS NULL
                AND archived_at IS NULL",
         )
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut tx)
         .await?
     };
     Ok(rows
@@ -88,7 +88,7 @@ pub(crate) struct ThreadMeta {
 }
 
 pub(crate) async fn require_admin_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut DbTransaction,
     actor_id: &str,
 ) -> anyhow::Result<Account> {
     let actor = load_account_tx(tx, actor_id).await?;
@@ -111,10 +111,10 @@ pub(crate) fn ensure_can_manage_account(actor: &Account, target: &Account) -> an
 }
 
 pub(crate) async fn ensure_not_last_active_owner(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     target_id: &str,
 ) -> anyhow::Result<()> {
-    let count: i64 = sqlx::query_scalar(
+    let count: i64 = query_scalar(
         "SELECT COUNT(*)
          FROM accounts
          WHERE id <> ?
@@ -123,22 +123,21 @@ pub(crate) async fn ensure_not_last_active_owner(
            AND disabled_at IS NULL",
     )
     .bind(target_id)
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut tx)
     .await?;
     anyhow::ensure!(count > 0, "Cannot remove the last active owner");
     Ok(())
 }
 
 pub(crate) async fn ensure_owner_keeps_active_key(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
 ) -> anyhow::Result<()> {
-    let active_keys: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM ssh_keys WHERE account_id = ? AND revoked_at IS NULL",
-    )
-    .bind(account_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let active_keys: i64 =
+        query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ? AND revoked_at IS NULL")
+            .bind(account_id)
+            .fetch_one(&mut tx)
+            .await?;
     if active_keys <= 1 {
         ensure_not_last_active_owner(tx, account_id).await?;
     }
@@ -146,16 +145,16 @@ pub(crate) async fn ensure_owner_keeps_active_key(
 }
 
 pub(crate) async fn load_account_by_username_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     username: &str,
 ) -> anyhow::Result<Account> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, username, display_name, role, activated_at, pending_username
          FROM accounts
          WHERE lower(username) = lower(?)",
     )
     .bind(username.trim().trim_start_matches('@'))
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("User not found");
@@ -164,17 +163,17 @@ pub(crate) async fn load_account_by_username_tx(
 }
 
 pub(crate) async fn load_channel_by_slug_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     slug: &str,
 ) -> anyhow::Result<ChannelMeta> {
     let slug = slug.trim().trim_start_matches('#').to_lowercase();
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, slug, visibility, created_by_account_id
          FROM channels
          WHERE slug = ? AND archived_at IS NULL",
     )
     .bind(&slug)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Channel #{slug} not found");
@@ -188,17 +187,17 @@ pub(crate) async fn load_channel_by_slug_tx(
 }
 
 pub(crate) async fn load_channel_by_slug_any_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     slug: &str,
 ) -> anyhow::Result<ChannelMeta> {
     let slug = slug.trim().trim_start_matches('#').to_lowercase();
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, slug, visibility, created_by_account_id
          FROM channels
          WHERE slug = ?",
     )
     .bind(&slug)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Channel #{slug} not found");
@@ -212,16 +211,16 @@ pub(crate) async fn load_channel_by_slug_any_tx(
 }
 
 pub(crate) async fn load_thread_meta_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     thread_id: &str,
 ) -> anyhow::Result<ThreadMeta> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, channel_id, creator_account_id, title, body
          FROM threads
          WHERE id = ? AND deleted_at IS NULL",
     )
     .bind(thread_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Thread not found");
@@ -235,7 +234,7 @@ pub(crate) async fn load_thread_meta_tx(
 }
 
 pub(crate) async fn ensure_can_manage_channel(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut DbTransaction,
     actor_id: &str,
     channel: &ChannelMeta,
 ) -> anyhow::Result<Account> {
@@ -248,7 +247,7 @@ pub(crate) async fn ensure_can_manage_channel(
 }
 
 pub(crate) async fn ensure_can_modify_thread(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut DbTransaction,
     actor_id: &str,
     thread: &ThreadMeta,
     require_moderator: bool,
@@ -266,16 +265,16 @@ pub(crate) async fn ensure_can_modify_thread(
 }
 
 pub(crate) async fn load_channel_by_id_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     channel_id: &str,
 ) -> anyhow::Result<ChannelMeta> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, slug, visibility, created_by_account_id
          FROM channels
          WHERE id = ? AND archived_at IS NULL",
     )
     .bind(channel_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Channel not found");
@@ -289,7 +288,7 @@ pub(crate) async fn load_channel_by_id_tx(
 }
 
 pub(crate) async fn update_channel_member(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     slug: &str,
     username: &str,
@@ -305,7 +304,7 @@ pub(crate) async fn update_channel_member(
     let target = load_account_by_username_tx(&mut tx, username).await?;
     let now = now();
     if add {
-        sqlx::query(
+        query(
             "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
              VALUES (?, ?, 'member', ?)
              ON CONFLICT(channel_id, account_id) DO NOTHING",
@@ -313,17 +312,17 @@ pub(crate) async fn update_channel_member(
         .bind(&channel.id)
         .bind(&target.id)
         .bind(&now)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     } else {
         anyhow::ensure!(
             target.id != channel.created_by_account_id,
             "Cannot remove the channel creator"
         );
-        sqlx::query("DELETE FROM channel_members WHERE channel_id = ? AND account_id = ?")
+        query("DELETE FROM channel_members WHERE channel_id = ? AND account_id = ?")
             .bind(&channel.id)
             .bind(&target.id)
-            .execute(&mut *tx)
+            .execute(&mut tx)
             .await?;
     }
     let action = if add {
@@ -360,7 +359,7 @@ pub(crate) enum ThreadFlag {
 }
 
 pub(crate) async fn update_thread_flag(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     thread_id: &str,
     flag: ThreadFlag,
@@ -397,11 +396,11 @@ pub(crate) async fn update_thread_flag(
         ThreadFlag::Deleted => ("deleted_at", "thread.deleted"),
     };
     let sql = format!("UPDATE threads SET {column} = ?, updated_at = ? WHERE id = ?");
-    sqlx::query(&sql)
+    query(&sql)
         .bind(value)
         .bind(&now)
         .bind(thread_id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     if matches!(flag, ThreadFlag::Deleted) && enabled {
         delete_search_index_tx(&mut tx, "thread", thread_id).await?;
@@ -428,7 +427,7 @@ pub(crate) async fn update_thread_flag(
 }
 
 pub(crate) async fn upsert_thread_read_state(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
     thread_id: &str,
     update_mute: bool,
@@ -436,12 +435,12 @@ pub(crate) async fn upsert_thread_read_state(
     update_saved: bool,
     saved_at: Option<&str>,
 ) -> anyhow::Result<()> {
-    let existing: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+    let existing: Option<(Option<String>, Option<String>)> = query_as(
         "SELECT muted_until, saved_at FROM thread_reads WHERE thread_id = ? AND account_id = ?",
     )
     .bind(thread_id)
     .bind(account_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let next_muted_until = if update_mute {
         muted_until.map(ToOwned::to_owned)
@@ -453,7 +452,7 @@ pub(crate) async fn upsert_thread_read_state(
     } else {
         existing.as_ref().and_then(|(_, value)| value.clone())
     };
-    sqlx::query(
+    query(
         "INSERT INTO thread_reads (thread_id, account_id, muted_until, saved_at)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(thread_id, account_id)
@@ -465,7 +464,7 @@ pub(crate) async fn upsert_thread_read_state(
     .bind(next_saved_at.as_deref())
     .bind(next_muted_until.as_deref())
     .bind(next_saved_at.as_deref())
-    .execute(&mut **tx)
+    .execute(&mut tx)
     .await?;
     Ok(())
 }
@@ -476,18 +475,18 @@ pub(crate) struct CommentMeta {
 }
 
 pub(crate) async fn load_comment_meta_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     thread_id: &str,
     obj_index: i64,
 ) -> anyhow::Result<CommentMeta> {
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, author_account_id
          FROM comments
          WHERE thread_id = ? AND obj_index = ? AND deleted_at IS NULL",
     )
     .bind(thread_id)
     .bind(obj_index)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("Comment #{obj_index} not found");
@@ -499,7 +498,7 @@ pub(crate) async fn load_comment_meta_tx(
 }
 
 pub(crate) async fn update_comment_body(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     thread_id: &str,
     obj_index: i64,
@@ -519,12 +518,12 @@ pub(crate) async fn update_comment_body(
         "You can only edit your own comments"
     );
     let now = now();
-    sqlx::query("UPDATE comments SET body = ?, updated_at = ?, edited_at = ? WHERE id = ?")
+    query("UPDATE comments SET body = ?, updated_at = ?, edited_at = ? WHERE id = ?")
         .bind(body)
         .bind(&now)
         .bind(&now)
         .bind(&row.id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     upsert_search_index_tx(
         &mut tx,
@@ -562,7 +561,7 @@ pub(crate) async fn update_comment_body(
 }
 
 pub(crate) async fn soft_delete_comment(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     thread_id: &str,
     obj_index: i64,
@@ -579,18 +578,18 @@ pub(crate) async fn soft_delete_comment(
         "You can only delete your own comments"
     );
     let now = now();
-    sqlx::query("UPDATE comments SET deleted_at = ?, updated_at = ? WHERE id = ?")
+    query("UPDATE comments SET deleted_at = ?, updated_at = ? WHERE id = ?")
         .bind(&now)
         .bind(&now)
         .bind(&row.id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
-    sqlx::query(
+    query(
         "UPDATE threads SET comment_count = MAX(comment_count - 1, 0), updated_at = ? WHERE id = ?",
     )
     .bind(&now)
     .bind(thread_id)
-    .execute(&mut *tx)
+    .execute(&mut tx)
     .await?;
     delete_search_index_tx(&mut tx, "comment", &row.id).await?;
     insert_audit(
@@ -620,27 +619,27 @@ pub(crate) struct DmMessageMeta {
 }
 
 pub(crate) async fn load_dm_message_meta_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     actor_id: &str,
     conversation_id: &str,
     obj_index: i64,
 ) -> anyhow::Result<DmMessageMeta> {
-    let is_member: i64 = sqlx::query_scalar(
+    let is_member: i64 = query_scalar(
         "SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND account_id = ?",
     )
     .bind(conversation_id)
     .bind(actor_id)
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut tx)
     .await?;
     anyhow::ensure!(is_member > 0, "Not a participant in this conversation");
-    let row = sqlx::query(
+    let row = query(
         "SELECT id, author_account_id
          FROM conversation_messages
          WHERE conversation_id = ? AND obj_index = ? AND deleted_at IS NULL",
     )
     .bind(conversation_id)
     .bind(obj_index)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(&mut tx)
     .await?;
     let Some(row) = row else {
         bail!("DM message #{obj_index} not found");
@@ -652,7 +651,7 @@ pub(crate) async fn load_dm_message_meta_tx(
 }
 
 pub(crate) async fn update_dm_body(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     conversation_id: &str,
     obj_index: i64,
@@ -667,15 +666,13 @@ pub(crate) async fn update_dm_body(
         "You can only edit your own DMs"
     );
     let now = now();
-    sqlx::query(
-        "UPDATE conversation_messages SET body = ?, updated_at = ?, edited_at = ? WHERE id = ?",
-    )
-    .bind(body)
-    .bind(&now)
-    .bind(&now)
-    .bind(&row.id)
-    .execute(&mut *tx)
-    .await?;
+    query("UPDATE conversation_messages SET body = ?, updated_at = ?, edited_at = ? WHERE id = ?")
+        .bind(body)
+        .bind(&now)
+        .bind(&now)
+        .bind(&row.id)
+        .execute(&mut tx)
+        .await?;
     upsert_search_index_tx(
         &mut tx,
         SearchIndexInput {
@@ -712,7 +709,7 @@ pub(crate) async fn update_dm_body(
 }
 
 pub(crate) async fn soft_delete_dm(
-    pool: &SqlitePool,
+    pool: &Database,
     actor_id: &str,
     conversation_id: &str,
     obj_index: i64,
@@ -724,11 +721,11 @@ pub(crate) async fn soft_delete_dm(
         "You can only delete your own DMs"
     );
     let now = now();
-    sqlx::query("UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE id = ?")
+    query("UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE id = ?")
         .bind(&now)
         .bind(&now)
         .bind(&row.id)
-        .execute(&mut *tx)
+        .execute(&mut tx)
         .await?;
     delete_search_index_tx(&mut tx, "dm", &row.id).await?;
     insert_audit(
@@ -752,15 +749,15 @@ pub(crate) async fn soft_delete_dm(
     Ok(())
 }
 
-pub(crate) async fn begin(pool: &SqlitePool) -> anyhow::Result<Transaction<'_, Sqlite>> {
+pub(crate) async fn begin(pool: &Database) -> anyhow::Result<DbTransaction> {
     let tx = pool.begin().await?;
     Ok(tx)
 }
 
 pub(crate) async fn load_active_presence_sessions(
-    pool: &SqlitePool,
+    pool: &Database,
 ) -> anyhow::Result<HashSet<String>> {
-    let rows = sqlx::query(
+    let rows = query(
         "SELECT account_id, last_seen_at
          FROM presence_sessions
          WHERE disconnected_at IS NULL",

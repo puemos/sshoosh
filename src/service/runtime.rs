@@ -6,15 +6,23 @@ pub struct ServerRuntime {
 
 impl ServerRuntime {
     pub async fn start(state: ServerState) -> anyhow::Result<Self> {
-        let max_seq: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM event_log")
+        state.db.set_master_status(false, 0);
+        let acquired = state.db.try_acquire_or_renew_master().await?;
+        if acquired {
+            tracing::info!(node_id = state.db.node_id(), "master lease acquired");
+        } else {
+            tracing::info!(node_id = state.db.node_id(), "running as standby");
+        }
+        let max_seq: i64 = query_scalar("SELECT COALESCE(MAX(seq), 0) FROM event_log")
             .fetch_one(state.db.read_pool())
             .await
             .unwrap_or(0);
         let cursor = Arc::new(RwLock::new(max_seq));
+        let lease_handle = start_master_lease_manager(state.db.clone());
         let handle =
             start_event_poller(state.db.read_pool().clone(), state.live_tx.clone(), cursor);
         Ok(Self {
-            handles: vec![handle],
+            handles: vec![lease_handle, handle],
         })
     }
 }
@@ -28,7 +36,7 @@ impl Drop for ServerRuntime {
 }
 
 fn start_event_poller(
-    pool: SqlitePool,
+    pool: Database,
     live_tx: broadcast::Sender<LiveEvent>,
     cursor: Arc<RwLock<i64>>,
 ) -> JoinHandle<()> {
@@ -38,7 +46,7 @@ fn start_event_poller(
         loop {
             tick.tick().await;
             let last_seq = *cursor.read().await;
-            let rows = match sqlx::query(
+            let rows = match query(
                 "SELECT seq, channel_id, thread_id, conversation_id, kind, payload_json
                  FROM event_log
                  WHERE seq > ?
@@ -75,6 +83,24 @@ fn start_event_poller(
                 });
             }
             *cursor.write().await = next_seq;
+        }
+    })
+}
+
+fn start_master_lease_manager(db: Database) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(db.master_heartbeat());
+        tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            match db.try_acquire_or_renew_master().await {
+                Ok(true) => {}
+                Ok(false) => {}
+                Err(err) => {
+                    db.set_master_status(false, 0);
+                    tracing::warn!(error = ?err, "master lease renewal failed");
+                }
+            }
         }
     })
 }

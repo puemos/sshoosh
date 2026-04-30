@@ -8,7 +8,11 @@ use std::{
 
 use anyhow::Context;
 use clap::{ArgAction, Parser, Subcommand};
-use sshoosh::{config, db, service, ssh};
+use sshoosh::{
+    config,
+    db::{self, query_scalar},
+    service, ssh,
+};
 use tokio::process::{Child, Command as ProcessCommand};
 use tracing_subscriber::EnvFilter;
 

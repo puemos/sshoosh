@@ -1,13 +1,15 @@
 use std::{fs, net::SocketAddr, path::PathBuf, process::Command, sync::Arc, time::Duration};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use getrandom::SysRng;
 use russh::{
     ChannelMsg, Disconnect, client,
     keys::{PrivateKey, PrivateKeyWithHashAlg, signature::rand_core::UnwrapErr},
 };
+use secrecy::SecretString;
 use sshoosh::{
     config::Config,
-    db::Database,
+    db::{Database, DatabaseConfig, query, query_scalar},
     service::{Account, ServerRuntime, ServerState},
     ssh::run_with_listener,
 };
@@ -18,6 +20,19 @@ fn temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("sshoosh-{name}-{}", Uuid::now_v7()))
 }
 
+fn database_config(path: PathBuf, node_id: &str) -> DatabaseConfig {
+    DatabaseConfig {
+        db_path: path,
+        database_url: None,
+        database_auth_token: None,
+        node_id: node_id.to_string(),
+        encryption_key: None,
+        master_lease_ttl: Duration::from_secs(15),
+        master_heartbeat: Duration::from_secs(5),
+        allow_plaintext_encryption_migration: false,
+    }
+}
+
 async fn test_state(name: &str) -> (Config, ServerState) {
     let db_path = temp_path(name).with_extension("sqlite");
     let key_path = temp_path(name).with_extension("ed25519");
@@ -26,6 +41,12 @@ async fn test_state(name: &str) -> (Config, ServerState) {
     let state = ServerState::new(db).await.expect("state");
     let config = Config {
         db_path,
+        database_url: None,
+        database_auth_token: None,
+        node_id: sshoosh::db::default_node_id(),
+        encryption_key: None,
+        master_lease_ttl: Duration::from_secs(15),
+        master_heartbeat: Duration::from_secs(5),
         host: "127.0.0.1".to_string(),
         port: 0,
         server_key_path: key_path,
@@ -662,19 +683,18 @@ async fn unknown_ssh_key_creates_blocked_pending_account() {
     assert_eq!(reconnected.id, pending.id);
     assert!(!reconnected.activated);
 
-    let account_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(state.db.read_pool())
         .await
         .expect("account count");
-    let key_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ssh_keys")
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys")
         .fetch_one(state.db.read_pool())
         .await
         .expect("key count");
-    let alice_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'alice'")
-            .fetch_one(state.db.read_pool())
-            .await
-            .expect("alice count");
+    let alice_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'alice'")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("alice count");
     assert_eq!(account_count, 1);
     assert_eq!(key_count, 1);
     assert_eq!(alice_count, 0);
@@ -760,7 +780,7 @@ async fn stale_pending_accounts_are_cleaned_before_new_auth() {
         .ensure_account_for_key("stale", "SHA256:stale", "ssh-ed25519 stale")
         .await
         .expect("pending stale");
-    sqlx::query("UPDATE accounts SET created_at = '2000-01-01T00:00:00Z' WHERE id = ?")
+    query("UPDATE accounts SET created_at = '2000-01-01T00:00:00Z' WHERE id = ?")
         .bind(&pending.id)
         .execute(state.db.write_pool())
         .await
@@ -771,12 +791,12 @@ async fn stale_pending_accounts_are_cleaned_before_new_auth() {
         .await
         .expect("fresh pending");
     assert_ne!(fresh.id, pending.id);
-    let stale_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+    let stale_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
         .bind(&pending.id)
         .fetch_one(state.db.read_pool())
         .await
         .expect("stale count");
-    let owner_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+    let owner_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
         .bind(&owner.id)
         .fetch_one(state.db.read_pool())
         .await
@@ -806,7 +826,7 @@ async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
         )
         .await;
     assert!(reused.is_err(), "{reused:?}");
-    let owner_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE role = 'owner'")
+    let owner_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE role = 'owner'")
         .fetch_one(state.db.read_pool())
         .await
         .expect("owner count");
@@ -836,7 +856,7 @@ async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
         )
         .await;
     assert!(reused.is_err(), "{reused:?}");
-    let bob_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'bob'")
+    let bob_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'bob'")
         .fetch_one(state.db.read_pool())
         .await
         .expect("bob count");
@@ -890,25 +910,156 @@ async fn mutation_live_feed_uses_event_log_once() {
 }
 
 #[tokio::test]
-async fn webhook_tables_are_not_created() {
-    let (_config, state) = test_state("no-webhook-tables").await;
+async fn encrypted_content_keeps_plaintext_fts() {
+    let db_path = temp_path("encrypted-content").with_extension("sqlite");
+    let mut cfg = database_config(db_path.clone(), "enc-node");
+    let key = URL_SAFE_NO_PAD.encode([7u8; 32]);
+    cfg.encryption_key = Some(SecretString::new(key.into_boxed_str()));
+    let db = Database::connect_with_config(&cfg)
+        .await
+        .expect("connect db");
+    db.init().await.expect("init db");
+    let state = ServerState::new(db).await.expect("state");
+    let owner = bootstrap_owner(&state, "SHA256:enc-owner", "ssh-ed25519 owner").await;
+    let channel_id = state
+        .create_channel(owner.id.clone(), "secure".to_string(), false)
+        .await
+        .expect("channel");
+    let thread_id = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "Secret plan".to_string(),
+        )
+        .await
+        .expect("thread");
+    state
+        .edit_thread(&owner.id, &thread_id, "Secret plan", "Launch at dawn")
+        .await
+        .expect("edit");
+
+    let raw = libsql::Builder::new_local(&db_path)
+        .build()
+        .await
+        .expect("raw db");
+    let conn = raw.connect().expect("raw conn");
+    let mut rows = conn
+        .query(
+            "SELECT title, body FROM threads WHERE id = ?",
+            [thread_id.as_str()],
+        )
+        .await
+        .expect("raw thread");
+    let row = rows.next().await.expect("row").expect("thread row");
+    let raw_title: String = row.get(0).expect("raw title");
+    let raw_body: String = row.get(1).expect("raw body");
+    assert!(raw_title.starts_with("sshoosh:v1:xchacha20poly1305:"));
+    assert!(raw_body.starts_with("sshoosh:v1:xchacha20poly1305:"));
+
+    let mut rows = conn
+        .query(
+            "SELECT title, body FROM search_index WHERE object_id = ?",
+            [thread_id.as_str()],
+        )
+        .await
+        .expect("raw fts");
+    let row = rows.next().await.expect("row").expect("fts row");
+    let fts_title: String = row.get(0).expect("fts title");
+    let fts_body: String = row.get(1).expect("fts body");
+    assert_eq!(fts_title, "Secret plan");
+    assert_eq!(fts_body, "Launch at dawn");
+
+    let snapshot = state
+        .snapshot(&owner.id, Some(&channel_id), Some(&thread_id), None)
+        .await
+        .expect("snapshot");
+    assert_eq!(snapshot.threads[0].title, "Secret plan");
+    assert_eq!(snapshot.threads[0].body, "Launch at dawn");
+}
+
+#[tokio::test]
+async fn master_lease_fails_over_after_ttl() {
+    let db_path = temp_path("master-lease").with_extension("sqlite");
+    let mut first = database_config(db_path.clone(), "node-a");
+    first.master_lease_ttl = Duration::from_millis(300);
+    first.master_heartbeat = Duration::from_millis(100);
+    let db_a = Database::connect_with_config(&first).await.expect("db a");
+    db_a.init().await.expect("init a");
+
+    let mut second = database_config(db_path, "node-b");
+    second.master_lease_ttl = Duration::from_millis(300);
+    second.master_heartbeat = Duration::from_millis(100);
+    let db_b = Database::connect_with_config(&second).await.expect("db b");
+    db_b.init().await.expect("init b");
+
+    assert!(db_a.try_acquire_or_renew_master().await.expect("a acquire"));
+    assert!(!db_b.try_acquire_or_renew_master().await.expect("b standby"));
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    assert!(db_b.try_acquire_or_renew_master().await.expect("b acquire"));
+    let status = db_b.master_status().await.expect("status").expect("lease");
+    assert_eq!(status.node_id, "node-b");
+    assert!(status.fencing_token > 1);
+}
+
+#[tokio::test]
+#[ignore = "requires SSHOOSH_TEST_DATABASE_URL and optional SSHOOSH_TEST_DATABASE_AUTH_TOKEN"]
+async fn remote_libsql_connectivity_and_migrations_work() {
+    let url = std::env::var("SSHOOSH_TEST_DATABASE_URL").expect("SSHOOSH_TEST_DATABASE_URL");
+    let token = std::env::var("SSHOOSH_TEST_DATABASE_AUTH_TOKEN").ok();
+    let cfg = DatabaseConfig {
+        db_path: temp_path("ignored-remote").with_extension("sqlite"),
+        database_url: Some(url),
+        database_auth_token: token.map(|value| SecretString::new(value.into_boxed_str())),
+        node_id: "remote-test-node".to_string(),
+        encryption_key: None,
+        master_lease_ttl: Duration::from_secs(15),
+        master_heartbeat: Duration::from_secs(5),
+        allow_plaintext_encryption_migration: false,
+    };
+    let db = Database::connect_with_config(&cfg)
+        .await
+        .expect("remote db");
+    db.init().await.expect("remote init");
+    let report = db.doctor().await.expect("remote doctor");
+    assert!(report.migration_count >= 2);
+}
+
+#[tokio::test]
+async fn webhook_claim_schema_is_reserved_without_delivery_worker() {
+    let (_config, state) = test_state("webhook-schema").await;
     let names: Vec<String> =
-        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE lower(name) LIKE '%webhook%'")
+        query_scalar("SELECT name FROM sqlite_master WHERE lower(name) LIKE '%webhook%'")
             .fetch_all(state.db.read_pool())
             .await
             .expect("webhook table names");
-    assert!(names.is_empty(), "{names:?}");
+    assert!(names.iter().any(|name| name == "webhook_jobs"), "{names:?}");
+    let columns: Vec<String> = query_scalar("SELECT name FROM pragma_table_info('webhook_jobs')")
+        .fetch_all(state.db.read_pool())
+        .await
+        .expect("webhook columns");
+    assert!(
+        columns.iter().any(|name| name == "claimed_by_node_id"),
+        "{columns:?}"
+    );
+    assert!(
+        columns.iter().any(|name| name == "claimed_until"),
+        "{columns:?}"
+    );
+    assert!(
+        columns.iter().any(|name| name == "claim_token"),
+        "{columns:?}"
+    );
 }
 
 #[tokio::test]
 async fn invalid_database_role_fails_loudly() {
     let (_config, state) = test_state("invalid-role").await;
     let owner = bootstrap_owner(&state, "SHA256:role-owner", "ssh-ed25519 owner").await;
-    sqlx::query("PRAGMA ignore_check_constraints = ON")
+    query("PRAGMA ignore_check_constraints = ON")
         .execute(state.db.write_pool())
         .await
         .expect("disable checks");
-    sqlx::query("UPDATE accounts SET role = 'superuser' WHERE id = ?")
+    query("UPDATE accounts SET role = 'superuser' WHERE id = ?")
         .bind(&owner.id)
         .execute(state.db.write_pool())
         .await
@@ -1084,7 +1235,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     let output = read_until(&mut channel, "mouse").await;
     assert!(output.contains("mouse"), "{output:?}");
 
-    let owner_id: String = sqlx::query_scalar("SELECT id FROM accounts WHERE username = 'owner'")
+    let owner_id: String = query_scalar("SELECT id FROM accounts WHERE username = 'owner'")
         .fetch_one(state_for_assert.db.read_pool())
         .await
         .expect("owner id");

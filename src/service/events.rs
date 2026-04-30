@@ -1,6 +1,6 @@
 use super::*;
 pub(crate) async fn set_reaction_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
     source_kind: &str,
     source_id: &str,
@@ -10,7 +10,7 @@ pub(crate) async fn set_reaction_tx(
     let emoji = emoji.trim();
     validate_emoji(emoji)?;
     if remove {
-        sqlx::query(
+        query(
             "DELETE FROM reactions
              WHERE source_kind = ? AND source_id = ? AND account_id = ? AND emoji = ?",
         )
@@ -18,10 +18,10 @@ pub(crate) async fn set_reaction_tx(
         .bind(source_id)
         .bind(account_id)
         .bind(emoji)
-        .execute(&mut **tx)
+        .execute(&mut tx)
         .await?;
     } else {
-        sqlx::query(
+        query(
             "INSERT INTO reactions (id, source_kind, source_id, account_id, emoji, created_at)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(source_kind, source_id, account_id, emoji) DO NOTHING",
@@ -32,7 +32,7 @@ pub(crate) async fn set_reaction_tx(
         .bind(account_id)
         .bind(emoji)
         .bind(now())
-        .execute(&mut **tx)
+        .execute(&mut tx)
         .await?;
     }
     Ok(())
@@ -51,7 +51,7 @@ pub(crate) fn validate_emoji(emoji: &str) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn insert_event(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     channel_id: Option<&str>,
     thread_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -60,7 +60,7 @@ pub(crate) async fn insert_event(
 ) -> anyhow::Result<LiveEvent> {
     let now = now();
     let payload_json = serde_json::to_string(&payload)?;
-    let result = sqlx::query(
+    let result = query(
         "INSERT INTO event_log
          (created_at, channel_id, thread_id, conversation_id, kind, payload_json)
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -71,7 +71,7 @@ pub(crate) async fn insert_event(
     .bind(conversation_id)
     .bind(kind)
     .bind(&payload_json)
-    .execute(&mut **tx)
+    .execute(&mut tx)
     .await?;
     Ok(LiveEvent {
         seq: result.last_insert_rowid(),
@@ -84,13 +84,13 @@ pub(crate) async fn insert_event(
 }
 
 pub(crate) async fn insert_audit(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     actor_account_id: Option<&str>,
     action: &str,
     target: Option<&str>,
     metadata: serde_json::Value,
 ) -> anyhow::Result<()> {
-    sqlx::query(
+    query(
         "INSERT INTO audit_log
          (id, actor_account_id, action, target, metadata_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -101,7 +101,7 @@ pub(crate) async fn insert_audit(
     .bind(target)
     .bind(serde_json::to_string(&metadata)?)
     .bind(now())
-    .execute(&mut **tx)
+    .execute(&mut tx)
     .await?;
     Ok(())
 }
@@ -118,15 +118,15 @@ pub(crate) struct SearchIndexInput<'a> {
 }
 
 pub(crate) async fn upsert_search_index_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     input: SearchIndexInput<'_>,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
+    query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
         .bind(input.kind)
         .bind(input.object_id)
-        .execute(&mut **tx)
+        .execute(&mut tx)
         .await?;
-    sqlx::query(
+    query(
         "INSERT INTO search_index
          (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -139,20 +139,20 @@ pub(crate) async fn upsert_search_index_tx(
     .bind(input.title)
     .bind(input.body)
     .bind(input.context)
-    .execute(&mut **tx)
+    .execute(&mut tx)
     .await?;
     Ok(())
 }
 
 pub(crate) async fn delete_search_index_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     kind: &str,
     object_id: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
+    query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
         .bind(kind)
         .bind(object_id)
-        .execute(&mut **tx)
+        .execute(&mut tx)
         .await?;
     Ok(())
 }
@@ -194,7 +194,7 @@ pub(crate) struct NotificationInput<'a> {
 }
 
 pub(crate) async fn create_notification_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     account_id: &str,
     actor_id: Option<&str>,
     input: NotificationInput<'_>,
@@ -203,7 +203,7 @@ pub(crate) async fn create_notification_tx(
         return Ok(String::new());
     }
     if let Some(thread_id) = input.thread_id {
-        let muted: i64 = sqlx::query_scalar(
+        let muted: i64 = query_scalar(
             "SELECT COUNT(*) FROM thread_reads
              WHERE thread_id = ? AND account_id = ?
                AND muted_until IS NOT NULL AND muted_until > ?",
@@ -211,14 +211,14 @@ pub(crate) async fn create_notification_tx(
         .bind(thread_id)
         .bind(account_id)
         .bind(now())
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut tx)
         .await?;
         if muted > 0 {
             return Ok(String::new());
         }
     }
     if let Some(conversation_id) = input.conversation_id {
-        let muted: i64 = sqlx::query_scalar(
+        let muted: i64 = query_scalar(
             "SELECT COUNT(*) FROM conversation_members
              WHERE conversation_id = ? AND account_id = ?
                AND muted_until IS NOT NULL AND muted_until > ?",
@@ -226,7 +226,7 @@ pub(crate) async fn create_notification_tx(
         .bind(conversation_id)
         .bind(account_id)
         .bind(now())
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut tx)
         .await?;
         if muted > 0 {
             return Ok(String::new());
@@ -234,7 +234,7 @@ pub(crate) async fn create_notification_tx(
     }
     let id = id();
     let created_at = now();
-    sqlx::query(
+    query(
         "INSERT INTO notifications
          (id, account_id, actor_account_id, kind, source_kind, source_id, channel_id,
           thread_id, conversation_id, title, body, created_at)
@@ -252,7 +252,7 @@ pub(crate) async fn create_notification_tx(
     .bind(input.title)
     .bind(input.body)
     .bind(&created_at)
-    .execute(&mut **tx)
+    .execute(&mut tx)
     .await?;
     Ok(id)
 }
@@ -269,21 +269,21 @@ pub(crate) struct MentionInput<'a> {
 }
 
 pub(crate) async fn create_mention_notifications_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     actor_id: &str,
     input: MentionInput<'_>,
 ) -> anyhow::Result<HashSet<String>> {
     let usernames = parse_mentions(input.body);
     let mut targets = HashSet::new();
     for username in usernames {
-        let row = sqlx::query(
+        let row = query(
             "SELECT id FROM accounts
              WHERE lower(username) = lower(?)
                AND activated_at IS NOT NULL
                AND disabled_at IS NULL",
         )
         .bind(&username)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut tx)
         .await?;
         let Some(row) = row else {
             continue;
@@ -292,7 +292,7 @@ pub(crate) async fn create_mention_notifications_tx(
         if target_id == actor_id || targets.contains(&target_id) {
             continue;
         }
-        sqlx::query(
+        query(
             "INSERT INTO mentions
              (id, target_account_id, actor_account_id, source_kind, source_id, channel_id,
               thread_id, conversation_id, obj_index, created_at)
@@ -308,7 +308,7 @@ pub(crate) async fn create_mention_notifications_tx(
         .bind(input.conversation_id)
         .bind(input.obj_index)
         .bind(now())
-        .execute(&mut **tx)
+        .execute(&mut tx)
         .await?;
         create_notification_tx(
             tx,
@@ -341,18 +341,18 @@ pub(crate) struct ReplyNotificationInput<'a> {
 }
 
 pub(crate) async fn create_thread_reply_notifications_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     actor_id: &str,
     input: ReplyNotificationInput<'_>,
 ) -> anyhow::Result<()> {
-    let participants = sqlx::query_scalar::<_, String>(
+    let participants = query_scalar::<String>(
         "SELECT creator_account_id FROM threads WHERE id = ?
          UNION
          SELECT author_account_id FROM comments WHERE thread_id = ? AND deleted_at IS NULL",
     )
     .bind(input.thread_id)
     .bind(input.thread_id)
-    .fetch_all(&mut **tx)
+    .fetch_all(&mut tx)
     .await?;
     for account_id in participants {
         if account_id == actor_id {
@@ -380,18 +380,18 @@ pub(crate) async fn create_thread_reply_notifications_tx(
 }
 
 pub(crate) async fn create_dm_notifications_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    mut tx: &mut DbTransaction,
     actor_id: &str,
     conversation_id: &str,
     message_id: &str,
     obj_index: i64,
     body: &str,
 ) -> anyhow::Result<()> {
-    let members = sqlx::query_scalar::<_, String>(
+    let members = query_scalar::<String>(
         "SELECT account_id FROM conversation_members WHERE conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(&mut **tx)
+    .fetch_all(&mut tx)
     .await?;
     for account_id in members {
         if account_id == actor_id {
