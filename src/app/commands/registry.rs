@@ -232,8 +232,12 @@ impl CommandRegistry {
         if !buffer.starts_with('/') {
             return AutocompleteState::default();
         }
-        let token_end = buffer[..cursor].find(char::is_whitespace).unwrap_or(cursor);
-        let command_token = &buffer[1..token_end.min(buffer.len())];
+        let cursor = cursor.min(buffer.len());
+        if cursor == 0 {
+            return AutocompleteState::default();
+        }
+        let token_end = buffer.find(char::is_whitespace).unwrap_or(buffer.len());
+        let command_token = &buffer[1..cursor.min(token_end)];
         if cursor <= token_end {
             let mut items: Vec<_> = self
                 .specs

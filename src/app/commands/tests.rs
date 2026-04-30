@@ -225,6 +225,22 @@ mod cases {
     }
 
     #[test]
+    fn command_autocomplete_handles_cursor_before_slash() {
+        let registry = CommandRegistry::default();
+        let state = registry.autocomplete("/", 0, &Snapshot::default());
+        assert!(!state.open);
+    }
+
+    #[test]
+    fn command_autocomplete_replaces_entire_command_token() {
+        let registry = CommandRegistry::default();
+        let state = registry.autocomplete("/thread", 3, &Snapshot::default());
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "/thread ");
+        assert_eq!(state.items[0].replacement_range, 0..7);
+    }
+
+    #[test]
     fn dm_autocomplete_uses_available_users() {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
