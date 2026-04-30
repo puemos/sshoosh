@@ -296,6 +296,137 @@ mod cases {
     }
 
     #[test]
+    fn list_modal_renders_invites_as_aligned_rows() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(state::Banner::list(state::ListModal {
+            title: "Invites".to_string(),
+            columns: vec![
+                "id".to_string(),
+                "role".to_string(),
+                "created by".to_string(),
+                "state".to_string(),
+                "expires".to_string(),
+            ],
+            rows: vec![
+                vec![
+                    "019ddd09".to_string(),
+                    "member".to_string(),
+                    "@shyalter".to_string(),
+                    "open".to_string(),
+                    "-".to_string(),
+                ],
+                vec![
+                    "019ddcfe".to_string(),
+                    "admin".to_string(),
+                    "@owner".to_string(),
+                    "accepted".to_string(),
+                    "2026-05-01".to_string(),
+                ],
+            ],
+            empty: "No invites found.".to_string(),
+        }));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("Invites"));
+        assert!(rendered.contains("created by"));
+        assert!(rendered.contains("@shyalter"));
+        assert!(!rendered.contains("expires:-019"));
+        let (_, header_y) = position_for_text(buffer, width, height, "created by").unwrap();
+        let (_, row_y) = position_for_text(buffer, width, height, "@shyalter").unwrap();
+        let (_, accepted_y) = position_for_text(buffer, width, height, "accepted").unwrap();
+        assert_eq!(row_y, header_y + 1);
+        assert_eq!(accepted_y, header_y + 2);
+        assert!(row_text(buffer, width, row_y).contains("019ddd09"));
+        assert!(row_text(buffer, width, accepted_y).contains("019ddcfe"));
+    }
+
+    #[test]
+    fn list_modal_renders_empty_state() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(state::Banner::list(state::ListModal {
+            title: "Invites".to_string(),
+            columns: vec!["id".to_string(), "role".to_string()],
+            rows: Vec::new(),
+            empty: "No invites found.".to_string(),
+        }));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("Invites"));
+        assert!(rendered.contains("No invites found."));
+    }
+
+    #[test]
+    fn list_modal_remains_readable_on_narrow_terminals() {
+        let width = 42;
+        let height = 18;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(state::Banner::list(state::ListModal {
+            title: "Invites".to_string(),
+            columns: vec![
+                "id".to_string(),
+                "role".to_string(),
+                "created by".to_string(),
+                "state".to_string(),
+                "expires".to_string(),
+            ],
+            rows: vec![vec![
+                "019ddd09".to_string(),
+                "member".to_string(),
+                "@shyalter".to_string(),
+                "open".to_string(),
+                "2026-05-01T00:00:00Z".to_string(),
+            ]],
+            empty: "No invites found.".to_string(),
+        }));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("Invites"));
+        assert!(rendered.contains("open"));
+        assert!(rendered.contains("~"));
+        assert!(!row_text(buffer, width, 0).contains("Invites"));
+    }
+
+    #[test]
     fn search_results_and_pagination_prompts_render() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -759,6 +890,70 @@ mod cases {
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(rendered.contains("Deploy notes"));
         assert!(!rendered.contains("Detail"));
+    }
+
+    #[test]
+    fn render_thread_empty_state_uses_centered_action_hint() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 0,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: None,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+
+        assert!(rendered.contains("Select a thread"));
+        assert!(rendered.contains("/thread new title"));
+        assert!(!rendered.contains("No thread selected"));
+        assert!(
+            cell_for_text(buffer, width, height, "/thread new title")
+                .modifier
+                .contains(Modifier::BOLD)
+        );
     }
 
     #[test]

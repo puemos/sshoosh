@@ -459,13 +459,23 @@ pub struct Banner {
     pub text: String,
     pub error: bool,
     pub presentation: BannerPresentation,
+    pub list: Option<ListModal>,
     at: Instant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListModal {
+    pub title: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub empty: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BannerPresentation {
     Toast,
     Modal,
+    ListModal,
 }
 
 impl Banner {
@@ -474,6 +484,7 @@ impl Banner {
             text: text.into(),
             error: false,
             presentation: BannerPresentation::Toast,
+            list: None,
             at: Instant::now(),
         }
     }
@@ -483,6 +494,7 @@ impl Banner {
             text: text.into(),
             error: true,
             presentation: BannerPresentation::Toast,
+            list: None,
             at: Instant::now(),
         }
     }
@@ -492,6 +504,17 @@ impl Banner {
             text: text.into(),
             error: false,
             presentation: BannerPresentation::Modal,
+            list: None,
+            at: Instant::now(),
+        }
+    }
+
+    pub fn list(list: ListModal) -> Self {
+        Self {
+            text: list.title.clone(),
+            error: false,
+            presentation: BannerPresentation::ListModal,
+            list: Some(list),
             at: Instant::now(),
         }
     }
@@ -499,13 +522,16 @@ impl Banner {
     pub fn active(&self) -> bool {
         let ttl = match self.presentation {
             BannerPresentation::Toast => Duration::from_secs(8),
-            BannerPresentation::Modal => Duration::from_secs(60),
+            BannerPresentation::Modal | BannerPresentation::ListModal => Duration::from_secs(60),
         };
         self.at.elapsed() < ttl
     }
 
     pub fn modal_active(&self) -> bool {
-        self.presentation == BannerPresentation::Modal && self.active()
+        matches!(
+            self.presentation,
+            BannerPresentation::Modal | BannerPresentation::ListModal
+        ) && self.active()
     }
 }
 

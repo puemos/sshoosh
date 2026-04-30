@@ -22,14 +22,14 @@ use tokio::{
 };
 
 use crate::{
-    app::{Action, App},
+    app::{Action, App, ListModal},
     client::ClientSession,
     config::Config,
-    output::ssh::{
-        format_accounts, format_audit, format_channel_members, format_channels, format_invites,
-        format_keys, format_mentions, format_notifications,
+    output::ssh::format_audit,
+    service::{
+        Account, AccountSummary, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
+        MentionSummary, NextUnread, NotificationSummary, ServerRuntime, ServerState, SshKeySummary,
     },
-    service::{Account, NextUnread, ServerRuntime, ServerState},
     terminal,
 };
 

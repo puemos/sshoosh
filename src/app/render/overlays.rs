@@ -137,6 +137,12 @@ pub(crate) fn draw_banner(frame: &mut Frame, area: Rect, ui: &mut UiState) {
     let Some(banner) = ui.banner.as_ref().filter(|banner| banner.active()).cloned() else {
         return;
     };
+    if banner.presentation == BannerPresentation::ListModal {
+        if let Some(list) = banner.list.as_ref() {
+            draw_list_modal(frame, area, list, ui);
+        }
+        return;
+    }
     if banner.presentation == BannerPresentation::Modal {
         draw_banner_modal(frame, area, &banner, ui);
         return;
@@ -249,6 +255,139 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
             .wrap(Wrap { trim: true }),
         modal,
     );
+}
+
+pub(crate) fn draw_list_modal(frame: &mut Frame, area: Rect, list: &ListModal, ui: &mut UiState) {
+    let bottom_bar_top = area
+        .y
+        .saturating_add(area.height)
+        .saturating_sub(bottombar_height(ui));
+    let available_height = bottom_bar_top.saturating_sub(area.y).saturating_sub(2);
+    if area.width < 16 || available_height < 5 {
+        return;
+    }
+
+    let desired_width = list_modal_width(list).saturating_add(4);
+    let desired_height = list.rows.len().saturating_add(5).min(u16::MAX as usize) as u16;
+    let modal = centered(
+        Rect::new(area.x, area.y, area.width, available_height),
+        desired_width,
+        desired_height.clamp(5, available_height),
+    );
+    let content_width = modal.width.saturating_sub(4) as usize;
+    let mut widths = list_column_widths(list, content_width);
+    if widths.is_empty() {
+        widths.push(content_width.max(1));
+    }
+
+    let mut lines = Vec::new();
+    if list.rows.is_empty() {
+        lines.push(Line::from(Span::styled(list.empty.clone(), theme::muted())));
+    } else {
+        lines.push(list_modal_line(&list.columns, &widths, true));
+        let visible_rows = modal.height.saturating_sub(5) as usize;
+        for row in list.rows.iter().take(visible_rows) {
+            lines.push(list_modal_line(row, &widths, false));
+        }
+        if list.rows.len() > visible_rows {
+            lines.push(Line::from(Span::styled(
+                format!("{} more rows", list.rows.len() - visible_rows),
+                theme::muted(),
+            )));
+        }
+    }
+
+    ui.hit_map.push(modal, HitTarget::BannerModal);
+    frame.render_widget(Clear, modal);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme::panel())
+            .block(panel(&format!(" {} ", list.title), true).padding(Padding::uniform(1))),
+        modal,
+    );
+}
+
+fn list_modal_width(list: &ListModal) -> u16 {
+    let width = list_column_widths(list, usize::MAX / 4)
+        .into_iter()
+        .sum::<usize>()
+        .saturating_add(list.columns.len().saturating_sub(1) * 2)
+        .max(list.empty.chars().count());
+    width.min(u16::MAX as usize) as u16
+}
+
+fn list_column_widths(list: &ListModal, max_width: usize) -> Vec<usize> {
+    let column_count = list
+        .columns
+        .len()
+        .max(list.rows.iter().map(Vec::len).max().unwrap_or(0));
+    if column_count == 0 {
+        return Vec::new();
+    }
+    let mut widths = (0..column_count)
+        .map(|idx| {
+            let header_width = list
+                .columns
+                .get(idx)
+                .map(|value| value.chars().count())
+                .unwrap_or_default();
+            let row_width = list
+                .rows
+                .iter()
+                .filter_map(|row| row.get(idx))
+                .map(|value| value.chars().count())
+                .max()
+                .unwrap_or_default();
+            header_width.max(row_width).clamp(3, 28)
+        })
+        .collect::<Vec<_>>();
+    let separators = column_count.saturating_sub(1) * 2;
+    let mut total = widths.iter().sum::<usize>().saturating_add(separators);
+    while total > max_width && widths.iter().any(|width| *width > 3) {
+        if let Some((idx, _)) = widths.iter().enumerate().max_by_key(|(_, width)| **width) {
+            widths[idx] = widths[idx].saturating_sub(1).max(3);
+        }
+        total = widths.iter().sum::<usize>().saturating_add(separators);
+    }
+    widths
+}
+
+fn list_modal_line(values: &[String], widths: &[usize], header: bool) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, width) in widths.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw("  "));
+        }
+        let value = values.get(idx).cloned().unwrap_or_default();
+        let text = pad_or_truncate(&value, *width);
+        let style = if header {
+            theme::muted().add_modifier(Modifier::BOLD)
+        } else {
+            list_cell_style(&value)
+        };
+        spans.push(Span::styled(text, style));
+    }
+    Line::from(spans)
+}
+
+fn list_cell_style(value: &str) -> Style {
+    match value {
+        "open" | "active" | "enabled" | "joined" | "read" | "accepted" => theme::accent(),
+        "pending" | "joinable" | "unread" => theme::unread(),
+        "revoked" | "disabled" | "archived" => Style::default().fg(theme::ERROR).bg(theme::PANEL),
+        _ => theme::panel(),
+    }
+}
+
+fn pad_or_truncate(value: &str, width: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count > width {
+        let keep = width.saturating_sub(1);
+        let mut out = value.chars().take(keep).collect::<String>();
+        out.push('~');
+        return out;
+    }
+    format!("{value:<width$}")
 }
 
 pub(crate) fn panel(title: &str, active: bool) -> Block<'_> {

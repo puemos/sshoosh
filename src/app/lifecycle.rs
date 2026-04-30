@@ -108,6 +108,10 @@ impl App {
         self.ui.banner = Some(Banner::modal_ok(text));
     }
 
+    pub fn set_banner_list(&mut self, list: super::ListModal) {
+        self.ui.banner = Some(Banner::list(list));
+    }
+
     pub fn set_banner_err(&mut self, text: impl Into<String>) {
         self.ui.banner = Some(Banner::err(text));
     }
