@@ -50,12 +50,24 @@ pub(crate) enum HeaderMode {
     Suppressed,
 }
 
+pub(crate) fn resolve_author_color(snapshot: &Snapshot, author: &str) -> Color {
+    let lower = author.to_ascii_lowercase();
+    if let Some(index) = snapshot
+        .users
+        .iter()
+        .position(|user| user.username.eq_ignore_ascii_case(&lower))
+    {
+        theme::author_color_for_index(index)
+    } else {
+        theme::author_color_fallback(author)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn message_card<'a>(
     snapshot: &Snapshot,
     kind: MessageKind,
     header_mode: HeaderMode,
-    avoid_color: Option<Color>,
     author: &str,
     created_at: Option<&str>,
     edited_at: Option<&str>,
@@ -65,7 +77,7 @@ pub(crate) fn message_card<'a>(
 ) -> MessageCard<'a> {
     let _ = snapshot.current_username.as_deref();
     let surface = message_surface(body);
-    let author_color = theme::author_color_avoiding(author, avoid_color);
+    let author_color = resolve_author_color(snapshot, author);
     let gutter_color = if is_error_message(body) {
         theme::MESSAGE_ERROR_GUTTER
     } else {

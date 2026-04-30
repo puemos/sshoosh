@@ -2,7 +2,6 @@ use super::*;
 use crate::time_format::{
     calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
 };
-use ratatui::style::Color;
 
 const GROUP_GAP_SECONDS: i64 = 5 * 60;
 
@@ -96,17 +95,14 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         let mut prev_author: Option<String> = None;
         let mut prev_kind: Option<MessageKind> = None;
         let mut prev_created_at: Option<String> = None;
-        let mut prev_color: Option<Color> = None;
         let mut first_message = true;
 
         if !thread.body.trim().is_empty() {
             last_day = calendar_day_key(&thread.created_at);
-            let resolved_color = theme::author_color_avoiding(&thread.author, prev_color);
             let card = message_card(
                 snapshot,
                 MessageKind::ThreadRoot,
                 HeaderMode::Full,
-                prev_color,
                 &thread.author,
                 Some(&thread.created_at),
                 thread.edited_at.as_deref(),
@@ -124,7 +120,6 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             prev_author = Some(thread.author.clone());
             prev_kind = Some(MessageKind::ThreadRoot);
             prev_created_at = Some(thread.created_at.clone());
-            prev_color = Some(resolved_color);
             first_message = false;
         }
         for comment in snapshot.comments.iter() {
@@ -158,16 +153,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             } else {
                 HeaderMode::Full
             };
-            // For follow-ups inside a group, keep the same color as prev_color
-            // (no avoidance — it's the same author). For new groups, avoid the
-            // previous group's color so two stacked groups don't share a hue.
-            let avoid = if continue_group { None } else { prev_color };
-            let resolved_color = theme::author_color_avoiding(&comment.author, avoid);
             let card = message_card(
                 snapshot,
                 MessageKind::Comment,
                 header_mode,
-                avoid,
                 &comment.author,
                 Some(&comment.created_at),
                 comment.edited_at.as_deref(),
@@ -189,7 +178,6 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             prev_author = Some(comment.author.clone());
             prev_kind = Some(MessageKind::Comment);
             prev_created_at = Some(comment.created_at.clone());
-            prev_color = Some(resolved_color);
             first_message = false;
         }
     } else {
@@ -474,7 +462,6 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         let mut prev_author: Option<String> = None;
         let mut prev_kind: Option<MessageKind> = None;
         let mut prev_created_at: Option<String> = None;
-        let mut prev_color: Option<Color> = None;
         for (idx, message) in snapshot.conversation_messages.iter().enumerate() {
             let continue_group = should_continue_group(
                 prev_author.as_deref(),
@@ -492,13 +479,10 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             } else {
                 HeaderMode::Full
             };
-            let avoid = if continue_group { None } else { prev_color };
-            let resolved_color = theme::author_color_avoiding(&message.author, avoid);
             let card = message_card(
                 snapshot,
                 MessageKind::Dm,
                 header_mode,
-                avoid,
                 &message.author,
                 Some(&message.created_at),
                 message.edited_at.as_deref(),
@@ -520,7 +504,6 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             prev_author = Some(message.author.clone());
             prev_kind = Some(MessageKind::Dm);
             prev_created_at = Some(message.created_at.clone());
-            prev_color = Some(resolved_color);
         }
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);

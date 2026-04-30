@@ -200,7 +200,6 @@ mod cases {
             &snapshot,
             MessageKind::Comment,
             HeaderMode::Full,
-            None,
             "owner",
             Some("2020-01-02T03:04:00Z"),
             Some("2020-01-02T03:05:00Z"),
@@ -1226,10 +1225,7 @@ mod cases {
             .cell((root_body_x.saturating_sub(3), root_body_y))
             .expect("root gutter");
         assert_eq!(root_gutter.symbol(), "▏");
-        assert_eq!(
-            root_gutter.fg,
-            theme::author_color_avoiding("owner", None)
-        );
+        assert_eq!(root_gutter.fg, resolve_author_color(&snapshot, "owner"));
 
         let (alice_x, alice_y) =
             position_for_text(buffer, width, height, "Looks good").expect("alice body");
@@ -1237,14 +1233,12 @@ mod cases {
             buffer.cell((alice_x, alice_y)).expect("alice body").bg,
             theme::MESSAGE_CARD
         );
-        let owner_color_root = theme::author_color_avoiding("owner", None);
-        let alice_color = theme::author_color_avoiding("alice", Some(owner_color_root));
         assert_eq!(
             buffer
                 .cell((alice_x.saturating_sub(3), alice_y))
                 .expect("alice gutter")
                 .fg,
-            alice_color
+            resolve_author_color(&snapshot, "alice")
         );
         // (edited) renders inline at end of the last body line; reactions sit
         // right-aligned in the header line one row above the body.
@@ -1253,13 +1247,12 @@ mod cases {
 
         let (owner_x, owner_y) =
             position_for_text(buffer, width, height, "I would").expect("owner body");
-        let owner_comment_color = theme::author_color_avoiding("owner", Some(alice_color));
         assert_eq!(
             buffer
                 .cell((owner_x.saturating_sub(3), owner_y))
                 .expect("owner gutter")
                 .fg,
-            owner_comment_color
+            resolve_author_color(&snapshot, "owner")
         );
 
         let (error_x, error_y) =

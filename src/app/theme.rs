@@ -41,28 +41,23 @@ const AUTHOR_PALETTE: &[Color] = &[
     Color::Rgb(231, 154, 184), // 337°  pink
 ];
 
-fn author_hash(author: &str) -> usize {
+/// Maps a user's index (their position in the sorted user list) to a palette
+/// color. Multiplied by a coprime of palette length so consecutively-sorted
+/// users land on far-apart hues rather than adjacent slots.
+pub fn author_color_for_index(index: usize) -> Color {
+    AUTHOR_PALETTE[(index * 11) % AUTHOR_PALETTE.len()]
+}
+
+/// Fallback when an author is not present in the user list (e.g. system
+/// accounts, deleted users). djb2 hash → palette slot.
+pub fn author_color_fallback(author: &str) -> Color {
     let mut hash: u32 = 5381;
     for byte in author.as_bytes() {
         hash = hash
             .wrapping_mul(33)
             .wrapping_add(byte.to_ascii_lowercase() as u32);
     }
-    hash as usize
-}
-
-/// Stable per-author color, but if the resulting slot would equal `avoid`,
-/// shift to the next slot. Prevents two adjacent groups from sharing a color
-/// and visually merging.
-pub fn author_color_avoiding(author: &str, avoid: Option<Color>) -> Color {
-    let palette = AUTHOR_PALETTE;
-    let mut slot = author_hash(author) % palette.len();
-    if let Some(avoid) = avoid
-        && palette[slot] == avoid
-    {
-        slot = (slot + 1) % palette.len();
-    }
-    palette[slot]
+    AUTHOR_PALETTE[(hash as usize) % AUTHOR_PALETTE.len()]
 }
 pub const WARN: Color = Color::Rgb(226, 174, 162); // #E2AEA2
 pub const OK: Color = ACCENT;
