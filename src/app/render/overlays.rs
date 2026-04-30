@@ -1,4 +1,5 @@
-fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
+use super::*;
+pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::PaletteBackdrop);
     frame.render_widget(Clear, area);
     let chunks = Layout::default()
@@ -51,7 +52,7 @@ fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState
     }
 }
 
-fn draw_prompt(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
+pub(crate) fn draw_prompt(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::PromptBackdrop);
     frame.render_widget(Clear, area);
     let text = if ui.prompt.input.is_empty() {
@@ -68,7 +69,7 @@ fn draw_prompt(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState)
     ui.hit_map.push(area, HitTarget::PromptInput);
 }
 
-fn draw_help(
+pub(crate) fn draw_help(
     frame: &mut Frame,
     full_area: Rect,
     area: Rect,
@@ -104,7 +105,7 @@ fn draw_help(
     );
 }
 
-fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
+pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::ConfirmQuitBackdrop);
     frame.render_widget(Clear, area);
     frame.render_widget(
@@ -132,7 +133,7 @@ fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut Ui
     }
 }
 
-fn draw_banner(frame: &mut Frame, area: Rect, ui: &mut UiState) {
+pub(crate) fn draw_banner(frame: &mut Frame, area: Rect, ui: &mut UiState) {
     let Some(banner) = ui.banner.as_ref().filter(|banner| banner.active()).cloned() else {
         return;
     };
@@ -144,7 +145,7 @@ fn draw_banner(frame: &mut Frame, area: Rect, ui: &mut UiState) {
     draw_toast(frame, area, &banner, ui);
 }
 
-fn draw_toast(frame: &mut Frame, area: Rect, banner: &super::state::Banner, ui: &UiState) {
+pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &UiState) {
     if area.width < 8 || area.height < 4 {
         return;
     }
@@ -203,7 +204,7 @@ fn draw_toast(frame: &mut Frame, area: Rect, banner: &super::state::Banner, ui: 
     );
 }
 
-fn wrapped_line_count(text: &str, width: usize) -> u16 {
+pub(crate) fn wrapped_line_count(text: &str, width: usize) -> u16 {
     let width = width.max(1);
     let lines = text
         .lines()
@@ -213,12 +214,7 @@ fn wrapped_line_count(text: &str, width: usize) -> u16 {
     lines.min(u16::MAX as usize) as u16
 }
 
-fn draw_banner_modal(
-    frame: &mut Frame,
-    area: Rect,
-    banner: &super::state::Banner,
-    ui: &mut UiState,
-) {
+pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, ui: &mut UiState) {
     let modal = centered(area, 68, 9);
     let (title, lines) = if let Some(code) = banner.text.strip_prefix("Invite code:") {
         (
@@ -255,7 +251,7 @@ fn draw_banner_modal(
     );
 }
 
-fn panel(title: &str, active: bool) -> Block<'_> {
+pub(crate) fn panel(title: &str, active: bool) -> Block<'_> {
     Block::default()
         .title(title.to_string())
         .borders(Borders::ALL)
@@ -263,7 +259,7 @@ fn panel(title: &str, active: bool) -> Block<'_> {
         .style(theme::panel())
 }
 
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
+pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width.saturating_sub(2)).max(1);
     let height = height.min(area.height.saturating_sub(2)).max(1);
     Rect::new(
@@ -273,4 +269,3 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
-

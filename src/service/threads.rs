@@ -1,3 +1,4 @@
+use super::*;
 impl ServerState {
     pub async fn edit_thread(
         &self,
@@ -54,7 +55,7 @@ impl ServerState {
             serde_json::json!({"channel_id": thread.channel_id}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&thread.channel_id),
             Some(thread_id),
@@ -64,7 +65,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -117,7 +117,7 @@ impl ServerState {
             serde_json::json!({"channel_id": thread.channel_id}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&thread.channel_id),
             Some(thread_id),
@@ -127,14 +127,12 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
     pub async fn delete_thread(&self, actor_id: &str, thread_id: &str) -> anyhow::Result<()> {
         update_thread_flag(
             self.db.write_pool(),
-            &self.live_tx,
             actor_id,
             thread_id,
             ThreadFlag::Deleted,
@@ -151,7 +149,6 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         update_thread_flag(
             self.db.write_pool(),
-            &self.live_tx,
             actor_id,
             thread_id,
             ThreadFlag::Archived,
@@ -168,7 +165,6 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         update_thread_flag(
             self.db.write_pool(),
-            &self.live_tx,
             actor_id,
             thread_id,
             ThreadFlag::Pinned,
@@ -256,15 +252,7 @@ impl ServerState {
         obj_index: i64,
         body: &str,
     ) -> anyhow::Result<()> {
-        update_comment_body(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            thread_id,
-            obj_index,
-            body,
-        )
-        .await
+        update_comment_body(self.db.write_pool(), actor_id, thread_id, obj_index, body).await
     }
 
     pub async fn delete_comment(
@@ -273,14 +261,7 @@ impl ServerState {
         thread_id: &str,
         obj_index: i64,
     ) -> anyhow::Result<()> {
-        soft_delete_comment(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            thread_id,
-            obj_index,
-        )
-        .await
+        soft_delete_comment(self.db.write_pool(), actor_id, thread_id, obj_index).await
     }
 
     pub async fn edit_dm(
@@ -292,7 +273,6 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         update_dm_body(
             self.db.write_pool(),
-            &self.live_tx,
             actor_id,
             conversation_id,
             obj_index,
@@ -307,14 +287,7 @@ impl ServerState {
         conversation_id: &str,
         obj_index: i64,
     ) -> anyhow::Result<()> {
-        soft_delete_dm(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            conversation_id,
-            obj_index,
-        )
-        .await
+        soft_delete_dm(self.db.write_pool(), actor_id, conversation_id, obj_index).await
     }
 
     pub async fn set_conversation_muted(
@@ -370,6 +343,4 @@ impl ServerState {
     ) -> anyhow::Result<SearchPage> {
         search_visible(self.db.read_pool(), actor_id, query, limit).await
     }
-
-
 }

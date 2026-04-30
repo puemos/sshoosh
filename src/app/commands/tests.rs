@@ -1,5 +1,7 @@
 #[cfg(test)]
-mod tests {
+use super::*;
+#[cfg(test)]
+mod cases {
     use super::*;
 
     #[test]
@@ -9,7 +11,6 @@ mod tests {
             registry.parse_action("/thread new hello | world").unwrap(),
             Some(Action::CreateThread {
                 title: "hello".to_string(),
-                body: String::new()
             })
         );
         assert_eq!(
@@ -52,9 +53,6 @@ mod tests {
             "/notifications",
             "/notification",
             "/notification-read",
-            "/webhooks",
-            "/webhook",
-            "/webhook-add hook https://example.com",
             "/audit",
         ] {
             assert!(registry.parse_action(line).is_err(), "{line}");

@@ -96,7 +96,7 @@ impl InputDecoder {
     }
 }
 
-fn decode_one(bytes: &[u8]) -> Option<(usize, Key)> {
+pub(crate) fn decode_one(bytes: &[u8]) -> Option<(usize, Key)> {
     match bytes[0] {
         b'\r' | b'\n' => Some((1, Key::Enter)),
         b'\t' => Some((1, Key::Tab)),
@@ -112,7 +112,7 @@ fn decode_one(bytes: &[u8]) -> Option<(usize, Key)> {
     }
 }
 
-fn decode_escape(bytes: &[u8]) -> Option<(usize, Key)> {
+pub(crate) fn decode_escape(bytes: &[u8]) -> Option<(usize, Key)> {
     if bytes.len() == 1 {
         return Some((1, Key::Esc));
     }
@@ -134,7 +134,7 @@ fn decode_escape(bytes: &[u8]) -> Option<(usize, Key)> {
     }
 }
 
-fn decode_csi(bytes: &[u8]) -> Option<(usize, Key)> {
+pub(crate) fn decode_csi(bytes: &[u8]) -> Option<(usize, Key)> {
     if bytes.len() >= 6 && bytes.starts_with(b"\x1b[200~") {
         let end = find_subsequence(&bytes[6..], b"\x1b[201~")?;
         let paste = String::from_utf8_lossy(&bytes[6..6 + end]).into_owned();
@@ -163,7 +163,7 @@ fn decode_csi(bytes: &[u8]) -> Option<(usize, Key)> {
     }
 }
 
-fn decode_sgr_mouse(bytes: &[u8]) -> Option<(usize, Key)> {
+pub(crate) fn decode_sgr_mouse(bytes: &[u8]) -> Option<(usize, Key)> {
     let end = bytes.iter().position(|byte| matches!(byte, b'M' | b'm'))?;
     if end < 3 {
         return Some((end + 1, Key::Esc));
@@ -202,7 +202,7 @@ fn decode_sgr_mouse(bytes: &[u8]) -> Option<(usize, Key)> {
     ))
 }
 
-fn decode_mouse_cb(cb: u8, pressed: bool) -> Option<(MouseEventKind, MouseModifiers)> {
+pub(crate) fn decode_mouse_cb(cb: u8, pressed: bool) -> Option<(MouseEventKind, MouseModifiers)> {
     let button_number = (cb & 0b0000_0011) | ((cb & 0b1100_0000) >> 4);
     let dragging = cb & 0b0010_0000 == 0b0010_0000;
     let kind = match (button_number, dragging, pressed) {
@@ -233,7 +233,7 @@ fn decode_mouse_cb(cb: u8, pressed: bool) -> Option<(MouseEventKind, MouseModifi
     ))
 }
 
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+pub(crate) fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle)

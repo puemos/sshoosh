@@ -1,4 +1,5 @@
-async fn ensure_channel_name_available(
+use super::*;
+pub(crate) async fn ensure_channel_name_available(
     tx: &mut Transaction<'_, Sqlite>,
     slug: &str,
 ) -> anyhow::Result<()> {
@@ -18,7 +19,7 @@ async fn ensure_channel_name_available(
     Ok(())
 }
 
-async fn ensure_thread_name_available(
+pub(crate) async fn ensure_thread_name_available(
     tx: &mut Transaction<'_, Sqlite>,
     channel_id: &str,
     title_key: &str,
@@ -39,7 +40,7 @@ async fn ensure_thread_name_available(
     Ok(())
 }
 
-async fn active_thread_name_exists(
+pub(crate) async fn active_thread_name_exists(
     tx: &mut Transaction<'_, Sqlite>,
     channel_id: Option<&str>,
     name_key: &str,
@@ -71,22 +72,22 @@ async fn active_thread_name_exists(
 }
 
 #[derive(Clone, Debug)]
-struct ChannelMeta {
-    id: String,
-    slug: String,
-    visibility: String,
-    created_by_account_id: String,
+pub(crate) struct ChannelMeta {
+    pub(crate) id: String,
+    pub(crate) slug: String,
+    pub(crate) visibility: String,
+    pub(crate) created_by_account_id: String,
 }
 
 #[derive(Clone, Debug)]
-struct ThreadMeta {
-    channel_id: String,
-    creator_account_id: String,
-    title: String,
-    body: String,
+pub(crate) struct ThreadMeta {
+    pub(crate) channel_id: String,
+    pub(crate) creator_account_id: String,
+    pub(crate) title: String,
+    pub(crate) body: String,
 }
 
-async fn require_admin_tx(
+pub(crate) async fn require_admin_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
 ) -> anyhow::Result<Account> {
@@ -98,7 +99,7 @@ async fn require_admin_tx(
     Ok(actor)
 }
 
-fn ensure_can_manage_account(actor: &Account, target: &Account) -> anyhow::Result<()> {
+pub(crate) fn ensure_can_manage_account(actor: &Account, target: &Account) -> anyhow::Result<()> {
     anyhow::ensure!(
         actor.role.can_admin(),
         "Only owners/admins can manage users"
@@ -109,7 +110,7 @@ fn ensure_can_manage_account(actor: &Account, target: &Account) -> anyhow::Resul
     Ok(())
 }
 
-async fn ensure_not_last_active_owner(
+pub(crate) async fn ensure_not_last_active_owner(
     tx: &mut Transaction<'_, Sqlite>,
     target_id: &str,
 ) -> anyhow::Result<()> {
@@ -128,7 +129,7 @@ async fn ensure_not_last_active_owner(
     Ok(())
 }
 
-async fn ensure_owner_keeps_active_key(
+pub(crate) async fn ensure_owner_keeps_active_key(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
 ) -> anyhow::Result<()> {
@@ -144,7 +145,7 @@ async fn ensure_owner_keeps_active_key(
     Ok(())
 }
 
-async fn load_account_by_username_tx(
+pub(crate) async fn load_account_by_username_tx(
     tx: &mut Transaction<'_, Sqlite>,
     username: &str,
 ) -> anyhow::Result<Account> {
@@ -159,10 +160,10 @@ async fn load_account_by_username_tx(
     let Some(row) = row else {
         bail!("User not found");
     };
-    Ok(account_from_row(row))
+    account_from_row(row)
 }
 
-async fn load_channel_by_slug_tx(
+pub(crate) async fn load_channel_by_slug_tx(
     tx: &mut Transaction<'_, Sqlite>,
     slug: &str,
 ) -> anyhow::Result<ChannelMeta> {
@@ -186,7 +187,7 @@ async fn load_channel_by_slug_tx(
     })
 }
 
-async fn load_channel_by_slug_any_tx(
+pub(crate) async fn load_channel_by_slug_any_tx(
     tx: &mut Transaction<'_, Sqlite>,
     slug: &str,
 ) -> anyhow::Result<ChannelMeta> {
@@ -210,7 +211,7 @@ async fn load_channel_by_slug_any_tx(
     })
 }
 
-async fn load_thread_meta_tx(
+pub(crate) async fn load_thread_meta_tx(
     tx: &mut Transaction<'_, Sqlite>,
     thread_id: &str,
 ) -> anyhow::Result<ThreadMeta> {
@@ -233,7 +234,7 @@ async fn load_thread_meta_tx(
     })
 }
 
-async fn ensure_can_manage_channel(
+pub(crate) async fn ensure_can_manage_channel(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     channel: &ChannelMeta,
@@ -246,7 +247,7 @@ async fn ensure_can_manage_channel(
     bail!("You do not manage this channel")
 }
 
-async fn ensure_can_modify_thread(
+pub(crate) async fn ensure_can_modify_thread(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     thread: &ThreadMeta,
@@ -264,7 +265,7 @@ async fn ensure_can_modify_thread(
     bail!("You cannot modify this thread")
 }
 
-async fn load_channel_by_id_tx(
+pub(crate) async fn load_channel_by_id_tx(
     tx: &mut Transaction<'_, Sqlite>,
     channel_id: &str,
 ) -> anyhow::Result<ChannelMeta> {
@@ -287,9 +288,8 @@ async fn load_channel_by_id_tx(
     })
 }
 
-async fn update_channel_member(
+pub(crate) async fn update_channel_member(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     slug: &str,
     username: &str,
@@ -339,7 +339,7 @@ async fn update_channel_member(
         serde_json::json!({"channel": channel.slug, "username": target.username}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&channel.id),
         None,
@@ -349,20 +349,18 @@ async fn update_channel_member(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
 #[derive(Clone, Copy)]
-enum ThreadFlag {
+pub(crate) enum ThreadFlag {
     Archived,
     Pinned,
     Deleted,
 }
 
-async fn update_thread_flag(
+pub(crate) async fn update_thread_flag(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     thread_id: &str,
     flag: ThreadFlag,
@@ -416,7 +414,7 @@ async fn update_thread_flag(
         serde_json::json!({"channel_id": thread.channel_id}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&thread.channel_id),
         Some(thread_id),
@@ -426,11 +424,10 @@ async fn update_thread_flag(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn upsert_thread_read_state(
+pub(crate) async fn upsert_thread_read_state(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     thread_id: &str,
@@ -473,12 +470,12 @@ async fn upsert_thread_read_state(
     Ok(())
 }
 
-struct CommentMeta {
-    id: String,
-    author_account_id: String,
+pub(crate) struct CommentMeta {
+    pub(crate) id: String,
+    pub(crate) author_account_id: String,
 }
 
-async fn load_comment_meta_tx(
+pub(crate) async fn load_comment_meta_tx(
     tx: &mut Transaction<'_, Sqlite>,
     thread_id: &str,
     obj_index: i64,
@@ -501,9 +498,8 @@ async fn load_comment_meta_tx(
     })
 }
 
-async fn update_comment_body(
+pub(crate) async fn update_comment_body(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     thread_id: &str,
     obj_index: i64,
@@ -552,7 +548,7 @@ async fn update_comment_body(
         serde_json::json!({"thread_id": thread_id}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&thread.channel_id),
         Some(thread_id),
@@ -562,13 +558,11 @@ async fn update_comment_body(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn soft_delete_comment(
+pub(crate) async fn soft_delete_comment(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     thread_id: &str,
     obj_index: i64,
@@ -607,7 +601,7 @@ async fn soft_delete_comment(
         serde_json::json!({"thread_id": thread_id}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&thread.channel_id),
         Some(thread_id),
@@ -617,16 +611,15 @@ async fn soft_delete_comment(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-struct DmMessageMeta {
-    id: String,
-    author_account_id: String,
+pub(crate) struct DmMessageMeta {
+    pub(crate) id: String,
+    pub(crate) author_account_id: String,
 }
 
-async fn load_dm_message_meta_tx(
+pub(crate) async fn load_dm_message_meta_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     conversation_id: &str,
@@ -658,9 +651,8 @@ async fn load_dm_message_meta_tx(
     })
 }
 
-async fn update_dm_body(
+pub(crate) async fn update_dm_body(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     conversation_id: &str,
     obj_index: i64,
@@ -706,7 +698,7 @@ async fn update_dm_body(
         serde_json::json!({"conversation_id": conversation_id}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -716,13 +708,11 @@ async fn update_dm_body(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn soft_delete_dm(
+pub(crate) async fn soft_delete_dm(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     conversation_id: &str,
     obj_index: i64,
@@ -749,7 +739,7 @@ async fn soft_delete_dm(
         serde_json::json!({"conversation_id": conversation_id}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -759,16 +749,17 @@ async fn soft_delete_dm(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn begin(pool: &SqlitePool) -> anyhow::Result<Transaction<'_, Sqlite>> {
+pub(crate) async fn begin(pool: &SqlitePool) -> anyhow::Result<Transaction<'_, Sqlite>> {
     let tx = pool.begin().await?;
     Ok(tx)
 }
 
-async fn load_active_presence_sessions(pool: &SqlitePool) -> anyhow::Result<HashSet<String>> {
+pub(crate) async fn load_active_presence_sessions(
+    pool: &SqlitePool,
+) -> anyhow::Result<HashSet<String>> {
     let rows = sqlx::query(
         "SELECT account_id, last_seen_at
          FROM presence_sessions
@@ -791,4 +782,3 @@ async fn load_active_presence_sessions(pool: &SqlitePool) -> anyhow::Result<Hash
         })
         .collect())
 }
-

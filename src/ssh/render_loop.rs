@@ -1,5 +1,5 @@
-async fn render_once(
-    state: &ServerState,
+use super::*;
+pub(crate) async fn render_once(
     app: &Arc<Mutex<App>>,
     input_rx: &mut mpsc::Receiver<Vec<u8>>,
     handle: &russh::server::Handle,
@@ -30,7 +30,7 @@ async fn render_once(
     }
 
     for action in actions {
-        process_action(state, app, action).await;
+        process_action(app, action).await;
     }
 
     let needs_refresh = {
@@ -64,4 +64,3 @@ async fn render_once(
     }
     Ok(false)
 }
-

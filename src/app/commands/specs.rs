@@ -1,4 +1,5 @@
-const INVITE_SUBCOMMANDS: &[SubcommandSpec] = &[
+use super::*;
+pub(crate) const INVITE_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "new",
         aliases: &["create"],
@@ -19,7 +20,7 @@ const INVITE_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const CHANNEL_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const CHANNEL_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "new",
         aliases: &["create"],
@@ -94,7 +95,7 @@ const CHANNEL_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const THREAD_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const THREAD_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "new",
         aliases: &["create"],
@@ -175,7 +176,7 @@ const THREAD_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const DM_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const DM_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "open",
         aliases: &[],
@@ -232,7 +233,7 @@ const DM_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const USER_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const USER_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "list",
         aliases: &["ls"],
@@ -271,7 +272,7 @@ const USER_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const KEY_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const KEY_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "list",
         aliases: &["ls"],
@@ -304,7 +305,7 @@ const KEY_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const COMMENT_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const COMMENT_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "edit",
         aliases: &[],
@@ -319,7 +320,7 @@ const COMMENT_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const NOTIFICATION_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const NOTIFICATION_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "list",
         aliases: &["ls"],
@@ -340,35 +341,14 @@ const NOTIFICATION_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const WEBHOOK_SUBCOMMANDS: &[SubcommandSpec] = &[
-    SubcommandSpec {
-        name: "list",
-        aliases: &["ls"],
-        description: "List webhooks and deliveries",
-        args: "",
-    },
-    SubcommandSpec {
-        name: "add",
-        aliases: &[],
-        description: "Add an outgoing webhook",
-        args: "name url",
-    },
-    SubcommandSpec {
-        name: "remove",
-        aliases: &["delete"],
-        description: "Remove a webhook",
-        args: "id",
-    },
-];
-
-const AUDIT_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
+pub(crate) const AUDIT_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
     name: "list",
     aliases: &["ls"],
     description: "List audit log entries",
     args: "",
 }];
 
-const REACTION_SUBCOMMANDS: &[SubcommandSpec] = &[
+pub(crate) const REACTION_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "add",
         aliases: &[],

@@ -1,11 +1,16 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs, net::SocketAddr, path::PathBuf, process::Command, sync::Arc, time::Duration};
 
 use getrandom::SysRng;
 use russh::{
     ChannelMsg, Disconnect, client,
     keys::{PrivateKey, PrivateKeyWithHashAlg, signature::rand_core::UnwrapErr},
 };
-use sshoosh::{config::Config, db::Database, service::ServerState, ssh::run_with_listener};
+use sshoosh::{
+    config::Config,
+    db::Database,
+    service::{Account, ServerRuntime, ServerState},
+    ssh::run_with_listener,
+};
 use tokio::{net::TcpListener, time::timeout};
 use uuid::Uuid;
 
@@ -29,31 +34,40 @@ async fn test_state(name: &str) -> (Config, ServerState) {
     (config, state)
 }
 
+async fn bootstrap_owner(state: &ServerState, fingerprint: &str, public_key: &str) -> Account {
+    let token = state
+        .create_bootstrap_token()
+        .await
+        .expect("bootstrap token");
+    state
+        .ensure_account_for_key(&format!("owner+{token}"), fingerprint, public_key)
+        .await
+        .expect("owner")
+}
+
+async fn accept_invite_key(
+    state: &ServerState,
+    username: &str,
+    fingerprint: &str,
+    public_key: &str,
+    invite: String,
+) -> Account {
+    state
+        .ensure_account_for_key(&format!("{username}+{invite}"), fingerprint, public_key)
+        .await
+        .expect("invite key")
+}
+
 #[tokio::test]
 async fn sqlite_services_cover_invites_threads_comments_and_dms() {
     let (_config, state) = test_state("services").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
+    let owner = bootstrap_owner(&state, "SHA256:owner", "ssh-ed25519 owner").await;
     assert!(owner.activated);
     assert_eq!(owner.role.as_str(), "owner");
 
     let invite = state.create_invite(owner.id.clone()).await.expect("invite");
-    let pending = state
-        .ensure_account_for_key("alice", "SHA256:alice", "ssh-ed25519 alice")
-        .await
-        .expect("pending");
-    assert!(!pending.activated);
-    state
-        .accept_invite(pending.id.clone(), invite, "alice".to_string())
-        .await
-        .expect("accept invite");
-
-    let alice = state
-        .reload_account(&pending.id)
-        .await
-        .expect("reload alice");
+    let alice =
+        accept_invite_key(&state, "alice", "SHA256:alice", "ssh-ed25519 alice", invite).await;
     assert!(alice.activated);
     assert_eq!(alice.username, "alice");
 
@@ -66,7 +80,6 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
             owner.id.clone(),
             channel_id.clone(),
             "Deploy checklist".to_string(),
-            "Cut release and verify backup.".to_string(),
         )
         .await
         .expect("thread");
@@ -115,24 +128,18 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
 #[tokio::test]
 async fn sqlite_services_track_session_presence_counts() {
     let (_config, state) = test_state("presence").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:presence-owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
+    let owner = bootstrap_owner(&state, "SHA256:presence-owner", "ssh-ed25519 owner").await;
     let invite = state.create_invite(owner.id.clone()).await.expect("invite");
-    let alice_pending = state
-        .ensure_account_for_key("alice", "SHA256:presence-alice", "ssh-ed25519 alice")
-        .await
-        .expect("alice pending");
-    state
-        .accept_invite(alice_pending.id.clone(), invite, "alice".to_string())
-        .await
-        .expect("accept alice");
-    let alice = state
-        .reload_account(&alice_pending.id)
-        .await
-        .expect("alice");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:presence-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
 
+    let _runtime = ServerRuntime::start(state.clone()).await.expect("runtime");
     let mut live_rx = state.subscribe();
     state
         .begin_account_session(&owner.id)
@@ -189,23 +196,16 @@ async fn sqlite_services_track_session_presence_counts() {
 #[tokio::test]
 async fn sqlite_services_share_presence_sessions_across_state_handles() {
     let (_config, state) = test_state("presence-cross-state").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:presence-cross-owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
+    let owner = bootstrap_owner(&state, "SHA256:presence-cross-owner", "ssh-ed25519 owner").await;
     let invite = state.create_invite(owner.id.clone()).await.expect("invite");
-    let alice_pending = state
-        .ensure_account_for_key("alice", "SHA256:presence-cross-alice", "ssh-ed25519 alice")
-        .await
-        .expect("alice pending");
-    state
-        .accept_invite(alice_pending.id.clone(), invite, "alice".to_string())
-        .await
-        .expect("accept alice");
-    let alice = state
-        .reload_account(&alice_pending.id)
-        .await
-        .expect("alice");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:presence-cross-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
     let follower = service_pair(&state).await;
 
     let owner_session = state
@@ -238,10 +238,7 @@ async fn sqlite_services_share_presence_sessions_across_state_handles() {
 #[tokio::test]
 async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
     let (_config, state) = test_state("duplicate-names").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
+    let owner = bootstrap_owner(&state, "SHA256:owner", "ssh-ed25519 owner").await;
 
     let channel_id = state
         .create_channel(owner.id.clone(), "engineering".to_string(), false)
@@ -252,7 +249,6 @@ async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
             owner.id.clone(),
             channel_id.clone(),
             "Deploy checklist".to_string(),
-            "Cut release and verify backup.".to_string(),
         )
         .await
         .expect("thread");
@@ -262,7 +258,6 @@ async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
             owner.id.clone(),
             channel_id.clone(),
             "deploy-checklist".to_string(),
-            "Same normalized title.".to_string(),
         )
         .await
         .expect_err("duplicate thread");
@@ -281,12 +276,7 @@ async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
     );
 
     let channel_conflict_thread = state
-        .create_thread(
-            owner.id.clone(),
-            channel_id,
-            "engineering".to_string(),
-            "Conflicts with channel name.".to_string(),
-        )
+        .create_thread(owner.id.clone(), channel_id, "engineering".to_string())
         .await
         .expect_err("thread conflicts with channel");
     assert!(
@@ -300,26 +290,19 @@ async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
 #[tokio::test]
 async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     let (_config, state) = test_state("admin-lifecycle").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:admin-owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
-    let alice_pending = state
-        .ensure_account_for_key("alice", "SHA256:admin-alice", "ssh-ed25519 alice")
-        .await
-        .expect("alice pending");
+    let owner = bootstrap_owner(&state, "SHA256:admin-owner", "ssh-ed25519 owner").await;
     let invite = state
         .create_invite_with_options(&owner.id, sshoosh::service::Role::Member, Some(1))
         .await
         .expect("invite");
-    state
-        .accept_invite(alice_pending.id.clone(), invite, "alice".to_string())
-        .await
-        .expect("accept alice");
-    let alice = state
-        .reload_account(&alice_pending.id)
-        .await
-        .expect("alice");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:admin-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
 
     state
         .set_user_role(&owner.id, "alice", sshoosh::service::Role::Admin)
@@ -377,7 +360,6 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
             owner.id.clone(),
             private_id.clone(),
             "Rotation plan".to_string(),
-            "Initial body".to_string(),
         )
         .await
         .expect("thread");
@@ -479,23 +461,16 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
 #[tokio::test]
 async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
     let (_config, state) = test_state("v1").await;
-    let owner = state
-        .ensure_account_for_key("owner", "SHA256:v1-owner", "ssh-ed25519 owner")
-        .await
-        .expect("owner");
+    let owner = bootstrap_owner(&state, "SHA256:v1-owner", "ssh-ed25519 owner").await;
     let invite = state.create_invite(owner.id.clone()).await.expect("invite");
-    let alice_pending = state
-        .ensure_account_for_key("alice", "SHA256:v1-alice", "ssh-ed25519 alice")
-        .await
-        .expect("alice pending");
-    state
-        .accept_invite(alice_pending.id.clone(), invite, "alice".to_string())
-        .await
-        .expect("accept alice");
-    let alice = state
-        .reload_account(&alice_pending.id)
-        .await
-        .expect("alice");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:v1-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
 
     let key = PrivateKey::random(
         &mut UnwrapErr(SysRng),
@@ -541,13 +516,15 @@ async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
         .expect("alice joins");
 
     let follower = service_pair(&state).await;
+    let _runtime = ServerRuntime::start(follower.clone())
+        .await
+        .expect("runtime");
     let mut live_rx = follower.subscribe();
     let thread_id = state
         .create_thread(
             owner.id.clone(),
             engineering_id.clone(),
             "Launch plan".to_string(),
-            "Please review this @alice".to_string(),
         )
         .await
         .expect("thread");
@@ -642,18 +619,6 @@ async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
             .all(|notification| notification.read_at.is_some())
     );
 
-    let webhook_id = state
-        .add_webhook(&owner.id, "ops", "http://127.0.0.1:9/hook")
-        .await
-        .expect("add webhook");
-    state
-        .test_webhook(&owner.id, &webhook_id)
-        .await
-        .expect("test webhook");
-    let (webhooks, deliveries) = state.list_webhooks(&owner.id).await.expect("webhooks");
-    assert_eq!(webhooks.len(), 1);
-    assert!(!deliveries.is_empty());
-
     let export = state
         .export_workspace(&owner.id, sshoosh::service::ExportFormat::Json, true)
         .await
@@ -675,6 +640,205 @@ async fn service_pair(state: &ServerState) -> ServerState {
         .expect("state pair")
 }
 
+#[tokio::test]
+async fn unknown_ssh_key_does_not_create_rows() {
+    let (_config, state) = test_state("unknown-key").await;
+    let result = state
+        .ensure_account_for_key("intruder", "SHA256:unknown", "ssh-ed25519 unknown")
+        .await;
+    assert!(result.is_err(), "{result:?}");
+    let account_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    let key_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ssh_keys")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    assert_eq!(account_count, 0);
+    assert_eq!(key_count, 0);
+}
+
+#[tokio::test]
+async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
+    let (_config, state) = test_state("bootstrap-token").await;
+    let token = state.create_bootstrap_token().await.expect("token");
+    let owner = state
+        .ensure_account_for_key(
+            &format!("owner+{token}"),
+            "SHA256:bootstrap-owner",
+            "ssh-ed25519 owner",
+        )
+        .await
+        .expect("owner");
+    assert_eq!(owner.role, sshoosh::service::Role::Owner);
+    let reused = state
+        .ensure_account_for_key(
+            &format!("second+{token}"),
+            "SHA256:bootstrap-second",
+            "ssh-ed25519 second",
+        )
+        .await;
+    assert!(reused.is_err(), "{reused:?}");
+    let owner_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE role = 'owner'")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("owner count");
+    assert_eq!(owner_count, 1);
+}
+
+#[tokio::test]
+async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
+    let (_config, state) = test_state("invite-token").await;
+    let owner = bootstrap_owner(&state, "SHA256:invite-owner", "ssh-ed25519 owner").await;
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:invite-alice",
+        "ssh-ed25519 alice",
+        invite.clone(),
+    )
+    .await;
+    assert!(alice.activated);
+    assert_eq!(alice.role, sshoosh::service::Role::Member);
+    let reused = state
+        .ensure_account_for_key(
+            &format!("bob+{invite}"),
+            "SHA256:invite-bob",
+            "ssh-ed25519 bob",
+        )
+        .await;
+    assert!(reused.is_err(), "{reused:?}");
+    let bob_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'bob'")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("bob count");
+    assert_eq!(bob_count, 0);
+}
+
+#[tokio::test]
+async fn server_state_new_starts_no_live_event_tasks() {
+    let (_config, state) = test_state("inert-state").await;
+    let mut live_rx = state.subscribe();
+    let token = state.create_bootstrap_token().await.expect("token");
+    state
+        .ensure_account_for_key(
+            &format!("owner+{token}"),
+            "SHA256:inert-owner",
+            "ssh-ed25519 owner",
+        )
+        .await
+        .expect("owner");
+    let result = timeout(Duration::from_millis(200), live_rx.recv()).await;
+    assert!(
+        result.is_err(),
+        "ServerState::new should not start the event poller"
+    );
+}
+
+#[tokio::test]
+async fn mutation_live_feed_uses_event_log_once() {
+    let (_config, state) = test_state("single-live-event").await;
+    let owner = bootstrap_owner(&state, "SHA256:single-owner", "ssh-ed25519 owner").await;
+    let channel_id = state
+        .create_channel(owner.id.clone(), "events".to_string(), false)
+        .await
+        .expect("channel");
+    let _runtime = ServerRuntime::start(state.clone()).await.expect("runtime");
+    let mut live_rx = state.subscribe();
+    state
+        .create_thread(owner.id.clone(), channel_id, "One event".to_string())
+        .await
+        .expect("thread");
+    let event = timeout(Duration::from_secs(3), live_rx.recv())
+        .await
+        .expect("event timeout")
+        .expect("event");
+    assert_eq!(event.kind, "thread.created");
+    let extra = timeout(Duration::from_millis(700), live_rx.recv()).await;
+    assert!(
+        extra.is_err(),
+        "one create_thread mutation should publish one event"
+    );
+}
+
+#[tokio::test]
+async fn webhook_tables_are_not_created() {
+    let (_config, state) = test_state("no-webhook-tables").await;
+    let names: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE lower(name) LIKE '%webhook%'")
+            .fetch_all(state.db.read_pool())
+            .await
+            .expect("webhook table names");
+    assert!(names.is_empty(), "{names:?}");
+}
+
+#[tokio::test]
+async fn invalid_database_role_fails_loudly() {
+    let (_config, state) = test_state("invalid-role").await;
+    let owner = bootstrap_owner(&state, "SHA256:role-owner", "ssh-ed25519 owner").await;
+    sqlx::query("PRAGMA ignore_check_constraints = ON")
+        .execute(state.db.write_pool())
+        .await
+        .expect("disable checks");
+    sqlx::query("UPDATE accounts SET role = 'superuser' WHERE id = ?")
+        .bind(&owner.id)
+        .execute(state.db.write_pool())
+        .await
+        .expect("poison role");
+    let result = state.reload_account(&owner.id).await;
+    assert!(result.is_err(), "{result:?}");
+}
+
+#[test]
+fn source_modules_do_not_use_include_macro() {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut stack = vec![src];
+    while let Some(path) = stack.pop() {
+        for entry in fs::read_dir(&path).expect("read source dir") {
+            let entry = entry.expect("source dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                let content = fs::read_to_string(&path).expect("read source file");
+                assert!(!content.contains("include!("), "{}", path.display());
+            }
+        }
+    }
+}
+
+#[test]
+fn tui_actions_route_through_client_session() {
+    let actions =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ssh/actions.rs"))
+            .expect("read actions");
+    assert!(
+        !actions.contains("ServerState"),
+        "TUI action processing should not depend on service state directly"
+    );
+    assert!(
+        !actions.contains("state."),
+        "TUI action processing should call ClientSession methods"
+    );
+}
+
+#[test]
+fn cli_protected_commands_fail_without_actor() {
+    let db_path = temp_path("cli-no-actor").with_extension("sqlite");
+    let output = Command::new(env!("CARGO_BIN_EXE_sshoosh"))
+        .args(["--db", db_path.to_str().expect("db path"), "users", "list"])
+        .output()
+        .expect("run sshoosh");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("protected admin commands require --actor"),
+        "{stderr}"
+    );
+}
+
 struct TestClient;
 
 impl client::Handler for TestClient {
@@ -691,6 +855,11 @@ impl client::Handler for TestClient {
 #[tokio::test]
 async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     let (config, state) = test_state("ssh").await;
+    let bootstrap_token = state
+        .create_bootstrap_token()
+        .await
+        .expect("bootstrap token");
+    let login = format!("owner+{bootstrap_token}");
     let state_for_assert = state.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr: SocketAddr = listener.local_addr().expect("addr");
@@ -710,7 +879,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("connect");
     let auth = session
         .authenticate_publickey(
-            "owner",
+            login,
             PrivateKeyWithHashAlg::new(
                 key,
                 session

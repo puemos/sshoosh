@@ -1,8 +1,9 @@
+use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct StyledRun {
-    text: String,
-    style: Style,
-    link_url: Option<String>,
+pub(crate) struct StyledRun {
+    pub(crate) text: String,
+    pub(crate) style: Style,
+    pub(crate) link_url: Option<String>,
 }
 
 impl StyledRun {
@@ -24,19 +25,19 @@ impl StyledRun {
 }
 
 #[derive(Default)]
-struct InlineMarkdownState {
+pub(crate) struct InlineMarkdownState {
     strong: usize,
     emphasis: usize,
     strikethrough: usize,
     links: Vec<LinkState>,
 }
 
-struct LinkState {
+pub(crate) struct LinkState {
     dest: String,
     label: String,
 }
 
-fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun>> {
+pub(crate) fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun>> {
     let width = width.max(1);
     let mut wrapped = Vec::new();
     for raw in body.lines() {
@@ -50,7 +51,7 @@ fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun>> {
     wrapped
 }
 
-fn parse_inline_markdown(line: &str) -> Vec<StyledRun> {
+pub(crate) fn parse_inline_markdown(line: &str) -> Vec<StyledRun> {
     if should_render_literal_line(line) {
         return literal_runs(line);
     }
@@ -99,7 +100,11 @@ fn parse_inline_markdown(line: &str) -> Vec<StyledRun> {
     }
 }
 
-fn append_markdown_text(runs: &mut Vec<StyledRun>, state: &mut InlineMarkdownState, text: &str) {
+pub(crate) fn append_markdown_text(
+    runs: &mut Vec<StyledRun>,
+    state: &mut InlineMarkdownState,
+    text: &str,
+) {
     if state.links.is_empty() {
         append_text_with_bare_links(runs, state, text);
     } else {
@@ -108,7 +113,7 @@ fn append_markdown_text(runs: &mut Vec<StyledRun>, state: &mut InlineMarkdownSta
     }
 }
 
-fn append_text_with_bare_links(
+pub(crate) fn append_text_with_bare_links(
     runs: &mut Vec<StyledRun>,
     state: &InlineMarkdownState,
     mut text: &str,
@@ -126,7 +131,7 @@ fn append_text_with_bare_links(
     }
 }
 
-fn append_markdown_run(
+pub(crate) fn append_markdown_run(
     runs: &mut Vec<StyledRun>,
     state: &mut InlineMarkdownState,
     text: &str,
@@ -142,7 +147,7 @@ fn append_markdown_run(
     push_run(runs, text, style, link_url);
 }
 
-fn append_link_target(runs: &mut Vec<StyledRun>, link: &LinkState) {
+pub(crate) fn append_link_target(runs: &mut Vec<StyledRun>, link: &LinkState) {
     if link.dest.is_empty() || link_target_is_visible(link) {
         return;
     }
@@ -154,7 +159,7 @@ fn append_link_target(runs: &mut Vec<StyledRun>, link: &LinkState) {
     );
 }
 
-fn link_target_is_visible(link: &LinkState) -> bool {
+pub(crate) fn link_target_is_visible(link: &LinkState) -> bool {
     let label = link.label.trim();
     let dest = link.dest.trim();
     label == dest
@@ -163,7 +168,7 @@ fn link_target_is_visible(link: &LinkState) -> bool {
             .is_some_and(|email| label == email)
 }
 
-fn markdown_text_style(state: &InlineMarkdownState) -> Style {
+pub(crate) fn markdown_text_style(state: &InlineMarkdownState) -> Style {
     let style = if state.links.is_empty() {
         theme::message_body()
     } else {
@@ -172,11 +177,11 @@ fn markdown_text_style(state: &InlineMarkdownState) -> Style {
     apply_markdown_modifiers(style, state)
 }
 
-fn markdown_link_style(state: &InlineMarkdownState) -> Style {
+pub(crate) fn markdown_link_style(state: &InlineMarkdownState) -> Style {
     apply_markdown_modifiers(theme::message_link(), state)
 }
 
-fn apply_markdown_modifiers(mut style: Style, state: &InlineMarkdownState) -> Style {
+pub(crate) fn apply_markdown_modifiers(mut style: Style, state: &InlineMarkdownState) -> Style {
     if state.strong > 0 {
         style = theme::message_strong(style);
     }
@@ -189,7 +194,7 @@ fn apply_markdown_modifiers(mut style: Style, state: &InlineMarkdownState) -> St
     style
 }
 
-fn find_bare_link(text: &str) -> Option<(usize, usize)> {
+pub(crate) fn find_bare_link(text: &str) -> Option<(usize, usize)> {
     let mut best = None;
     for prefix in ["https://", "http://", "mailto:"] {
         let mut search_start = 0;
@@ -212,7 +217,7 @@ fn find_bare_link(text: &str) -> Option<(usize, usize)> {
     best
 }
 
-fn is_bare_link_boundary(text: &str, start: usize) -> bool {
+pub(crate) fn is_bare_link_boundary(text: &str, start: usize) -> bool {
     start == 0
         || text[..start]
             .chars()
@@ -220,7 +225,7 @@ fn is_bare_link_boundary(text: &str, start: usize) -> bool {
             .is_some_and(|ch| ch.is_whitespace() || matches!(ch, '(' | '[' | '<' | '{'))
 }
 
-fn bare_link_end(text: &str, start: usize) -> usize {
+pub(crate) fn bare_link_end(text: &str, start: usize) -> usize {
     let mut end = text.len();
     for (offset, ch) in text[start..].char_indices() {
         if ch.is_whitespace() || ch.is_control() {
@@ -244,7 +249,7 @@ fn bare_link_end(text: &str, start: usize) -> usize {
     end
 }
 
-fn push_run(
+pub(crate) fn push_run(
     runs: &mut Vec<StyledRun>,
     text: impl Into<String>,
     style: Style,
@@ -268,11 +273,11 @@ fn push_run(
     }
 }
 
-fn literal_runs(line: &str) -> Vec<StyledRun> {
+pub(crate) fn literal_runs(line: &str) -> Vec<StyledRun> {
     vec![StyledRun::new(line, theme::message_body())]
 }
 
-fn should_render_literal_line(line: &str) -> bool {
+pub(crate) fn should_render_literal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("![")
         || trimmed.starts_with("```")
@@ -288,7 +293,7 @@ fn should_render_literal_line(line: &str) -> bool {
         || starts_ordered_list_item(trimmed)
 }
 
-fn starts_unordered_list_item(trimmed: &str) -> bool {
+pub(crate) fn starts_unordered_list_item(trimmed: &str) -> bool {
     trimmed
         .strip_prefix("- ")
         .or_else(|| trimmed.strip_prefix("* "))
@@ -296,7 +301,7 @@ fn starts_unordered_list_item(trimmed: &str) -> bool {
         .is_some()
 }
 
-fn starts_ordered_list_item(trimmed: &str) -> bool {
+pub(crate) fn starts_ordered_list_item(trimmed: &str) -> bool {
     let Some((marker, rest)) = trimmed.split_once(' ') else {
         return false;
     };
@@ -309,7 +314,7 @@ fn starts_ordered_list_item(trimmed: &str) -> bool {
     !rest.is_empty() && !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit())
 }
 
-fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<StyledRun>> {
+pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<StyledRun>> {
     let mut wrapped = Vec::new();
     let mut line = Vec::new();
     let mut line_width = 0;
@@ -329,8 +334,7 @@ fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<StyledRun>> {
     wrapped
 }
 
-fn is_openable_link_url(url: &str) -> bool {
+pub(crate) fn is_openable_link_url(url: &str) -> bool {
     let url = url.trim();
     url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")
 }
-

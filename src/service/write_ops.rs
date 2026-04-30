@@ -1,14 +1,10 @@
-async fn create_invite(
-    pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
-    actor_id: &str,
-) -> anyhow::Result<String> {
-    create_invite_with_options(pool, live_tx, actor_id, Role::Member, None).await
+use super::*;
+pub(crate) async fn create_invite(pool: &SqlitePool, actor_id: &str) -> anyhow::Result<String> {
+    create_invite_with_options(pool, actor_id, Role::Member, None).await
 }
 
-async fn create_invite_with_options(
+pub(crate) async fn create_invite_with_options(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     role_on_accept: Role,
     ttl_hours: Option<i64>,
@@ -50,7 +46,7 @@ async fn create_invite_with_options(
         serde_json::json!({"role": role_on_accept.as_str(), "expires_at": expires_at}),
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -60,13 +56,11 @@ async fn create_invite_with_options(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(code)
 }
 
-async fn accept_invite(
+pub(crate) async fn accept_invite(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     account_id: &str,
     code: &str,
     username: &str,
@@ -138,7 +132,7 @@ async fn accept_invite(
         .execute(&mut *tx)
         .await?;
     }
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -148,13 +142,11 @@ async fn accept_invite(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn create_channel(
+pub(crate) async fn create_channel(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     name: &str,
     private: bool,
@@ -189,7 +181,7 @@ async fn create_channel(
     .bind(&now)
     .execute(&mut *tx)
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&channel_id),
         None,
@@ -199,13 +191,11 @@ async fn create_channel(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(channel_id)
 }
 
-async fn join_channel(
+pub(crate) async fn join_channel(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     slug: &str,
 ) -> anyhow::Result<String> {
@@ -235,7 +225,7 @@ async fn join_channel(
     .bind(&now)
     .execute(&mut *tx)
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&channel_id),
         None,
@@ -245,17 +235,14 @@ async fn join_channel(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(channel_id)
 }
 
-async fn create_thread(
+pub(crate) async fn create_thread(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     channel_id: &str,
     title: &str,
-    _body: &str,
 ) -> anyhow::Result<String> {
     let title = title.trim();
     anyhow::ensure!(!title.is_empty(), "Thread title is required");
@@ -327,7 +314,7 @@ async fn create_thread(
         },
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(channel_id),
         Some(&thread_id),
@@ -337,13 +324,11 @@ async fn create_thread(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(thread_id)
 }
 
-async fn add_comment(
+pub(crate) async fn add_comment(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     thread_id: &str,
     body: &str,
@@ -455,7 +440,7 @@ async fn add_comment(
         },
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         Some(&channel_id),
         Some(thread_id),
@@ -465,13 +450,11 @@ async fn add_comment(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
 
-async fn open_dm(
+pub(crate) async fn open_dm(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     target: &str,
 ) -> anyhow::Result<String> {
@@ -536,7 +519,7 @@ async fn open_dm(
         .execute(&mut *tx)
         .await?;
     }
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -546,13 +529,11 @@ async fn open_dm(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(conversation_id)
 }
 
-async fn send_dm(
+pub(crate) async fn send_dm(
     pool: &SqlitePool,
-    live_tx: &broadcast::Sender<LiveEvent>,
     actor_id: &str,
     conversation_id: &str,
     body: &str,
@@ -643,7 +624,7 @@ async fn send_dm(
         },
     )
     .await?;
-    let event = insert_event(
+    insert_event(
         &mut tx,
         None,
         None,
@@ -653,7 +634,5 @@ async fn send_dm(
     )
     .await?;
     tx.commit().await?;
-    publish(live_tx, event);
     Ok(())
 }
-

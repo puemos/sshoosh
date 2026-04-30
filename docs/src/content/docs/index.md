@@ -3,18 +3,19 @@ title: Overview
 description: Install, run, and operate sshoosh, the SSH-native TUI workspace chat.
 ---
 
-`sshoosh` is a self-hosted SSH/TUI workspace chat. Users connect with an SSH key and get a terminal UI for explicit-membership channels, thread-first discussions, direct messages, notifications, mentions, reactions, unread state, full-text search, presence, export, webhooks, and administration.
+`sshoosh` is a self-hosted SSH/TUI workspace chat. Users connect with an SSH key and get a terminal UI for explicit-membership channels, thread-first discussions, direct messages, notifications, mentions, reactions, unread state, full-text search, presence, export, and administration.
 
 ## Quick Start
 
 Run the server and connect with any SSH client:
 
 ```sh
+sshoosh bootstrap-token
 cargo run -- serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER@127.0.0.1"
+ssh -p 2222 "$USER+<bootstrap-token>@127.0.0.1"
 ```
 
-The first SSH key to connect becomes the owner, creates `#general`, and is auto-joined to it. Additional SSH keys create pending accounts until a user accepts an invite or an admin attaches the key to an existing account.
+The bootstrap token is one-time and creates the first owner, creates `#general`, and auto-joins the owner to it. Additional unknown SSH keys must connect as `username+invite-token` or be attached to an existing account by an owner/admin.
 
 ## Configuration
 
@@ -36,12 +37,14 @@ Core CLI commands:
 
 ```sh
 sshoosh serve
+sshoosh bootstrap-token
 sshoosh doctor
+sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
 sshoosh invite --role member --ttl-hours 24
 ```
 
-Admin commands default to the first active owner/admin. Use `--actor ownername` to attribute an action to a specific owner/admin.
+Protected CLI commands require `--actor ownername` to attribute the action to a specific active account.
 
 | Area | CLI examples |
 | --- | --- |
@@ -50,24 +53,22 @@ Admin commands default to the first active owner/admin. Use `--actor ownername` 
 | Invites | `sshoosh invites create --role admin --ttl-hours 2`, `sshoosh invites revoke <invite-id>` |
 | Channels | `sshoosh channels create engineering`, `sshoosh channels create ops-secret --private`, `sshoosh channels add-member ops-secret alice` |
 | Notifications | `sshoosh notifications list --actor alice`, `sshoosh notifications mark-read --actor alice` |
-| Webhooks | `sshoosh webhooks add ops https://example.com/sshoosh`, `sshoosh webhooks test <webhook-id>` |
 | Export | `sshoosh export --format json --out export.json --include-audit`, `sshoosh export --format markdown --out export.md` |
 
 Common TUI commands:
 
 ```text
-/invite [member|admin] [ttl-hours]
-/channel name
-/private name
-/channels
-/join #channel
-/leave [#channel]
-/thread title | body
-/dm @user
+/invite new [member|admin] [ttl-hours]
+/channel new name
+/channel private name
+/channel list
+/channel join #channel
+/channel leave [#channel]
+/thread new title
+/dm open @user
 /search query
-/mentions
-/notifications
-/webhooks
+/notification mentions
+/notification list
 /audit
 ```
 
@@ -78,18 +79,14 @@ Common TUI commands:
 Private channels require owner/admin management through the CLI or TUI commands:
 
 ```text
-/channel-members #channel
-/channel-add #channel @user
-/channel-remove #channel @user
+/channel members #channel
+/channel add #channel @user
+/channel remove #channel @user
 ```
 
-## Notifications And Webhooks
+## Notifications
 
 `sshoosh` creates durable in-app notifications for `@username` mentions, new direct messages, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires.
-
-Outgoing webhooks are admin-managed. Each notification queues delivery jobs for enabled webhooks, and a background worker retries failed deliveries with exponential backoff before marking them failed. Delivery history is visible with `/webhooks` or `sshoosh webhooks list`.
-
-Webhook payloads are JSON and include the notification kind, title, body, and notification id. Use HTTPS endpoints in production.
 
 ## Backup, Export, And systemd
 

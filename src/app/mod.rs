@@ -9,6 +9,7 @@ pub use action::Action;
 use ratatui::layout::{Position, Rect};
 
 use crate::{
+    client::ClientSession,
     service::{
         Account, DEFAULT_HISTORY_LIMIT, LiveEvent, MAX_HISTORY_LIMIT, SearchResult, ServerState,
         Snapshot,
@@ -29,12 +30,14 @@ use self::{
     },
 };
 
+pub(crate) use self::util::*;
+
 pub struct App {
     pub running: bool,
     terminal: SshooshTerminal,
     shared: SharedBuffer,
     pub account: Account,
-    state: ServerState,
+    client: ClientSession,
     live_rx: tokio::sync::broadcast::Receiver<LiveEvent>,
     snapshot: Snapshot,
     ui: UiState,
@@ -51,7 +54,7 @@ pub struct App {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum WorkspaceRow {
+pub(crate) enum WorkspaceRow {
     Channel(String),
     Thread(String),
     Dm(String),
@@ -73,11 +76,10 @@ impl PointerShape {
     }
 }
 
-include!("app/lifecycle.rs");
-include!("app/input_handlers.rs");
-include!("app/compose.rs");
-include!("app/navigation.rs");
-include!("app/render_bridge.rs");
-
-include!("app/util.rs");
-include!("app/tests.rs");
+mod compose;
+mod input_handlers;
+mod lifecycle;
+mod navigation;
+mod render_bridge;
+mod tests;
+mod util;

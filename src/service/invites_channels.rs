@@ -1,3 +1,4 @@
+use super::*;
 impl ServerState {
     pub async fn list_invites(&self, actor_id: &str) -> anyhow::Result<Vec<InviteSummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
@@ -14,19 +15,20 @@ impl ServerState {
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| InviteSummary {
-                id: row.get("id"),
-                role_on_accept: Role::from_db(row.get::<String, _>("role_on_accept").as_str()),
-                created_by: row.get("created_by"),
-                accepted_by: row.get("accepted_by"),
-                created_at: row.get("created_at"),
-                expires_at: row.get("expires_at"),
-                revoked_at: row.get("revoked_at"),
-                accepted_at: row.get("accepted_at"),
+        rows.into_iter()
+            .map(|row| {
+                Ok(InviteSummary {
+                    id: row.get("id"),
+                    role_on_accept: Role::from_db(row.get::<String, _>("role_on_accept").as_str())?,
+                    created_by: row.get("created_by"),
+                    accepted_by: row.get("accepted_by"),
+                    created_at: row.get("created_at"),
+                    expires_at: row.get("expires_at"),
+                    revoked_at: row.get("revoked_at"),
+                    accepted_at: row.get("accepted_at"),
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn revoke_invite(&self, actor_id: &str, invite_id: &str) -> anyhow::Result<()> {
@@ -56,7 +58,7 @@ impl ServerState {
             serde_json::json!({}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -66,7 +68,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -108,15 +109,7 @@ impl ServerState {
         slug: &str,
         username: &str,
     ) -> anyhow::Result<()> {
-        update_channel_member(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            slug,
-            username,
-            true,
-        )
-        .await
+        update_channel_member(self.db.write_pool(), actor_id, slug, username, true).await
     }
 
     pub async fn remove_channel_member(
@@ -125,15 +118,7 @@ impl ServerState {
         slug: &str,
         username: &str,
     ) -> anyhow::Result<()> {
-        update_channel_member(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            slug,
-            username,
-            false,
-        )
-        .await
+        update_channel_member(self.db.write_pool(), actor_id, slug, username, false).await
     }
 
     pub async fn list_channels(
@@ -204,7 +189,7 @@ impl ServerState {
             serde_json::json!({"channel": channel.slug}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&channel.id),
             None,
@@ -214,7 +199,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -248,7 +232,7 @@ impl ServerState {
             serde_json::json!({"from": channel.slug, "to": next_slug}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&channel.id),
             None,
@@ -258,7 +242,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -288,7 +271,7 @@ impl ServerState {
             serde_json::json!({"channel": channel.slug, "topic": topic}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&channel.id),
             None,
@@ -298,7 +281,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -337,7 +319,7 @@ impl ServerState {
             serde_json::json!({"channel": channel.slug}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&channel.id),
             None,
@@ -347,9 +329,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
-
-
 }

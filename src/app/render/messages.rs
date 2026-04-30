@@ -1,9 +1,10 @@
-struct MessageCard<'a> {
+use super::*;
+pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
 }
 
-struct MessageLinkHit {
+pub(crate) struct MessageLinkHit {
     row: u16,
     col: u16,
     width: u16,
@@ -12,7 +13,7 @@ struct MessageLinkHit {
     style: Style,
 }
 
-fn message_card<'a>(
+pub(crate) fn message_card<'a>(
     snapshot: &Snapshot,
     author: &str,
     created_at: Option<&str>,
@@ -81,12 +82,16 @@ fn message_card<'a>(
     }
 }
 
-fn append_plain_item<'a>(items: &mut Vec<ListItem<'a>>, content_row: &mut u16, item: ListItem<'a>) {
+pub(crate) fn append_plain_item<'a>(
+    items: &mut Vec<ListItem<'a>>,
+    content_row: &mut u16,
+    item: ListItem<'a>,
+) {
     *content_row = content_row.saturating_add(item.height().min(u16::MAX as usize) as u16);
     items.push(item);
 }
 
-fn append_message_card<'a>(
+pub(crate) fn append_message_card<'a>(
     items: &mut Vec<ListItem<'a>>,
     link_hits: &mut Vec<MessageLinkHit>,
     content_row: &mut u16,
@@ -100,7 +105,12 @@ fn append_message_card<'a>(
     items.push(card.item);
 }
 
-fn register_link_hits(ui: &mut UiState, area: Rect, link_hits: Vec<MessageLinkHit>, offset_y: u16) {
+pub(crate) fn register_link_hits(
+    ui: &mut UiState,
+    area: Rect,
+    link_hits: Vec<MessageLinkHit>,
+    offset_y: u16,
+) {
     let bottom = offset_y.saturating_add(area.height);
     for link in link_hits {
         if link.row < offset_y || link.row >= bottom {
@@ -126,11 +136,14 @@ fn register_link_hits(ui: &mut UiState, area: Rect, link_hits: Vec<MessageLinkHi
     }
 }
 
-fn format_message_created_at(created_at: &str) -> Option<String> {
+pub(crate) fn format_message_created_at(created_at: &str) -> Option<String> {
     format_message_created_at_at(created_at, OffsetDateTime::now_utc())
 }
 
-fn format_message_created_at_at(created_at: &str, now: OffsetDateTime) -> Option<String> {
+pub(crate) fn format_message_created_at_at(
+    created_at: &str,
+    now: OffsetDateTime,
+) -> Option<String> {
     let created_at =
         OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339).ok()?;
     let seconds = (now - created_at).whole_seconds().max(0);
@@ -147,17 +160,16 @@ fn format_message_created_at_at(created_at: &str, now: OffsetDateTime) -> Option
     }
 }
 
-fn message_gap<'a>() -> ListItem<'a> {
+pub(crate) fn message_gap<'a>() -> ListItem<'a> {
     ListItem::new(Line::from("")).style(theme::panel())
 }
 
-fn message_card_line<'a>(gutter: Style, content: Vec<Span<'a>>) -> Line<'a> {
+pub(crate) fn message_card_line<'a>(gutter: Style, content: Vec<Span<'a>>) -> Line<'a> {
     let mut spans = vec![Span::styled("│ ", gutter)];
     spans.extend(content);
     Line::from(spans)
 }
 
-fn message_content_width(area: Rect) -> usize {
+pub(crate) fn message_content_width(area: Rect) -> usize {
     area.width.saturating_sub(4).max(8) as usize
 }
-

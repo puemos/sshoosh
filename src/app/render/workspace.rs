@@ -1,4 +1,5 @@
-fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+use super::*;
+pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
     let row_width = area.width as usize;
@@ -90,7 +91,7 @@ fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut U
     render_scroll_items(frame, scroll_area, items, &mut ui.workspace_scroll);
 }
 
-fn channel_label(visibility: &str, slug: &str) -> String {
+pub(crate) fn channel_label(visibility: &str, slug: &str) -> String {
     if visibility == "private" {
         format!("#{slug} · private")
     } else {
@@ -98,7 +99,7 @@ fn channel_label(visibility: &str, slug: &str) -> String {
     }
 }
 
-fn channel_privacy_badge(visibility: &str) -> &'static str {
+pub(crate) fn channel_privacy_badge(visibility: &str) -> &'static str {
     if visibility == "private" {
         " · private"
     } else {
@@ -106,7 +107,7 @@ fn channel_privacy_badge(visibility: &str) -> &'static str {
     }
 }
 
-fn thread_item<'a>(
+pub(crate) fn thread_item<'a>(
     snapshot: &Snapshot,
     thread: &'a crate::service::ThreadItem,
     row_width: usize,
@@ -126,7 +127,7 @@ fn thread_item<'a>(
     ]))
 }
 
-fn thread_state_badge(thread: &crate::service::ThreadItem) -> String {
+pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String {
     let mut out = String::new();
     if thread.pinned_at.is_some() {
         out.push_str(" pin");
@@ -147,7 +148,7 @@ fn thread_state_badge(thread: &crate::service::ThreadItem) -> String {
     out
 }
 
-fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::Conversation) -> String {
+pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::Conversation) -> String {
     let mut out = String::new();
     out.push(' ');
     out.push_str(match snapshot.presence_for(&dm.peer_username) {
@@ -164,7 +165,7 @@ fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::Conversation) -> Str
     out
 }
 
-fn workspace_label_style(selected: bool, unread_count: i64) -> Style {
+pub(crate) fn workspace_label_style(selected: bool, unread_count: i64) -> Style {
     if selected {
         theme::title()
     } else if unread_count > 0 {
@@ -174,7 +175,7 @@ fn workspace_label_style(selected: bool, unread_count: i64) -> Style {
     }
 }
 
-fn unread_badge(count: i64) -> String {
+pub(crate) fn unread_badge(count: i64) -> String {
     if count > 0 {
         format!(" [{count}]")
     } else {
@@ -182,7 +183,7 @@ fn unread_badge(count: i64) -> String {
     }
 }
 
-fn truncate_text(value: impl AsRef<str>, max_chars: usize) -> String {
+pub(crate) fn truncate_text(value: impl AsRef<str>, max_chars: usize) -> String {
     let value = value.as_ref();
     if value.chars().count() <= max_chars {
         return value.to_string();
@@ -197,4 +198,3 @@ fn truncate_text(value: impl AsRef<str>, max_chars: usize) -> String {
     truncated.push_str("...");
     truncated
 }
-

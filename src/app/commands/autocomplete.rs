@@ -1,4 +1,5 @@
-fn autocomplete_after_command(
+use super::*;
+pub(crate) fn autocomplete_after_command(
     buffer: &str,
     cursor: usize,
     token_end: usize,
@@ -89,7 +90,7 @@ fn autocomplete_after_command(
     )
 }
 
-fn argument_suggestions(
+pub(crate) fn argument_suggestions(
     command: &str,
     subcommand: &str,
     snapshot: &Snapshot,
@@ -112,7 +113,7 @@ fn argument_suggestions(
         _ => Vec::new(),
     }
 }
-fn autocomplete_arguments(
+pub(crate) fn autocomplete_arguments(
     replacement_range: Range<usize>,
     arg_prefix: &str,
     suggestions: Vec<(String, String)>,
@@ -146,4 +147,3 @@ fn autocomplete_arguments(
         selected: 0,
     }
 }
-

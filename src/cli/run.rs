@@ -1,10 +1,11 @@
+use super::*;
 use sshoosh::output::cli::{
     format_accounts, format_audit, format_channel_members, format_channels, format_invites,
-    format_keys, format_notifications, format_webhooks,
+    format_keys, format_notifications,
 };
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+pub async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("sshoosh=info".parse()?))
         .init();
@@ -233,29 +234,6 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Webhooks { command } => {
-            let state = service::ServerState::new(db).await?;
-            let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
-            match command {
-                WebhooksCommand::List => {
-                    let (webhooks, deliveries) = state.list_webhooks(&actor_id).await?;
-                    print!("{}", format_webhooks(&webhooks, &deliveries));
-                }
-                WebhooksCommand::Add { name, url } => {
-                    let id = state.add_webhook(&actor_id, &name, &url).await?;
-                    println!("added webhook {id}");
-                }
-                WebhooksCommand::Remove { webhook_id } => {
-                    state.remove_webhook(&actor_id, &webhook_id).await?;
-                    println!("removed webhook {webhook_id}");
-                }
-                WebhooksCommand::Test { webhook_id } => {
-                    state.test_webhook(&actor_id, &webhook_id).await?;
-                    println!("queued test delivery for webhook {webhook_id}");
-                }
-            }
-            Ok(())
-        }
         Command::Audit { command } => {
             let state = service::ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
@@ -284,8 +262,12 @@ async fn main() -> anyhow::Result<()> {
             println!("export written: {out}");
             Ok(())
         }
-        Command::Doctor => {
+        Command::Doctor { repair_search } => {
             db.doctor().await?;
+            if repair_search {
+                db.repair_search_index().await?;
+                println!("search index repaired");
+            }
             println!("database ok: {}", cfg.db_path.display());
             Ok(())
         }
@@ -294,10 +276,15 @@ async fn main() -> anyhow::Result<()> {
             println!("backup written: {out}");
             Ok(())
         }
+        Command::BootstrapToken => {
+            let state = service::ServerState::new(db).await?;
+            println!("{}", state.create_bootstrap_token().await?);
+            Ok(())
+        }
     }
 }
 
-async fn admin_actor_id(
+pub(crate) async fn admin_actor_id(
     state: &service::ServerState,
     actor: Option<&str>,
 ) -> anyhow::Result<String> {
@@ -319,22 +306,10 @@ async fn admin_actor_id(
         return id.context("actor must be an active owner/admin");
     }
 
-    let actor_id: Option<String> = sqlx::query_scalar(
-        "SELECT id
-         FROM accounts
-         WHERE activated_at IS NOT NULL
-           AND disabled_at IS NULL
-           AND role IN ('owner', 'admin')
-         ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at
-         LIMIT 1",
-    )
-    .fetch_optional(state.db.read_pool())
-    .await?;
-    actor_id
-        .context("no owner/admin account exists; connect once first to bootstrap the owner account")
+    anyhow::bail!("protected admin commands require --actor")
 }
 
-async fn user_actor_id(
+pub(crate) async fn user_actor_id(
     state: &service::ServerState,
     actor: Option<&str>,
 ) -> anyhow::Result<String> {
@@ -355,20 +330,10 @@ async fn user_actor_id(
         return id.context("actor must be an active user");
     }
 
-    let actor_id: Option<String> = sqlx::query_scalar(
-        "SELECT id
-         FROM accounts
-         WHERE activated_at IS NOT NULL
-           AND disabled_at IS NULL
-         ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at
-         LIMIT 1",
-    )
-    .fetch_optional(state.db.read_pool())
-    .await?;
-    actor_id.context("no active account exists; connect once first")
+    anyhow::bail!("protected user commands require --actor")
 }
 
-fn parse_role(role: &str) -> anyhow::Result<service::Role> {
+pub(crate) fn parse_role(role: &str) -> anyhow::Result<service::Role> {
     match role {
         "owner" => Ok(service::Role::Owner),
         "admin" => Ok(service::Role::Admin),
@@ -377,7 +342,7 @@ fn parse_role(role: &str) -> anyhow::Result<service::Role> {
     }
 }
 
-fn parse_export_format(format: &str) -> anyhow::Result<service::ExportFormat> {
+pub(crate) fn parse_export_format(format: &str) -> anyhow::Result<service::ExportFormat> {
     match format {
         "json" => Ok(service::ExportFormat::Json),
         "markdown" | "md" => Ok(service::ExportFormat::Markdown),

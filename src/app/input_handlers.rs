@@ -1,3 +1,4 @@
+use super::*;
 impl App {
     pub fn handle_input(&mut self, bytes: &[u8]) {
         let keys = self.decoder.push(bytes);
@@ -9,7 +10,7 @@ impl App {
         }
     }
 
-    fn handle_key(&mut self, key: Key) {
+    pub(crate) fn handle_key(&mut self, key: Key) {
         if let Key::Mouse(mouse) = key {
             self.handle_mouse(mouse);
             return;
@@ -58,7 +59,7 @@ impl App {
         }
     }
 
-    fn handle_mouse(&mut self, mouse: MouseEvent) {
+    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) {
         if self
             .ui
             .banner
@@ -92,7 +93,7 @@ impl App {
         }
     }
 
-    fn update_pointer_shape(&mut self, mouse: MouseEvent) {
+    pub(crate) fn update_pointer_shape(&mut self, mouse: MouseEvent) {
         self.desired_pointer_shape = match self.ui.hit_map.hit(mouse.column, mouse.row) {
             Some(HitRegion {
                 target: HitTarget::MessageLink(_),
@@ -102,7 +103,7 @@ impl App {
         };
     }
 
-    fn handle_mouse_scroll(&mut self, target: &HitTarget, delta: isize) {
+    pub(crate) fn handle_mouse_scroll(&mut self, target: &HitTarget, delta: isize) {
         match target {
             HitTarget::WorkspaceScroll
             | HitTarget::WorkspaceChannel(_)
@@ -133,7 +134,7 @@ impl App {
         }
     }
 
-    fn start_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
+    pub(crate) fn start_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
         self.ui.selection.clear();
         self.ui.selection.pending = Some(SelectionAnchor {
             at: mouse_position(mouse),
@@ -143,7 +144,7 @@ impl App {
         });
     }
 
-    fn update_mouse_selection(&mut self, mouse: MouseEvent) {
+    pub(crate) fn update_mouse_selection(&mut self, mouse: MouseEvent) {
         let Some(anchor) = self.ui.selection.pending.as_mut() else {
             return;
         };
@@ -158,7 +159,7 @@ impl App {
         });
     }
 
-    fn finish_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
+    pub(crate) fn finish_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
         let Some(mut anchor) = self.ui.selection.pending.take() else {
             return;
         };
@@ -187,7 +188,7 @@ impl App {
         }
     }
 
-    fn handle_mouse_click(&mut self, region: HitRegion, mouse: MouseEvent) {
+    pub(crate) fn handle_mouse_click(&mut self, region: HitRegion, mouse: MouseEvent) {
         match region.target {
             HitTarget::WorkspaceChannel(channel_id) => self.select_channel(channel_id),
             HitTarget::WorkspaceThread(thread_id) => {
@@ -242,7 +243,7 @@ impl App {
         }
     }
 
-    fn place_composer_cursor(&mut self, rect: Rect, scroll_y: u16, mouse: MouseEvent) {
+    pub(crate) fn place_composer_cursor(&mut self, rect: Rect, scroll_y: u16, mouse: MouseEvent) {
         let local_col = mouse.column.saturating_sub(rect.x) as usize;
         let display_line = mouse.row.saturating_sub(rect.y).saturating_add(scroll_y) as usize;
         self.ui.composer.cursor = cursor_for_display_position(
@@ -254,7 +255,7 @@ impl App {
         self.update_completions();
     }
 
-    fn run_bottom_bar_action(&mut self, action: BottomBarAction) {
+    pub(crate) fn run_bottom_bar_action(&mut self, action: BottomBarAction) {
         match action {
             BottomBarAction::ToggleDetail => self.toggle_workspace_detail(),
             BottomBarAction::OpenCommand => self.enter_compose("/"),
@@ -282,7 +283,7 @@ impl App {
         }
     }
 
-    fn handle_onboarding_key(&mut self, key: Key) {
+    pub(crate) fn handle_onboarding_key(&mut self, key: Key) {
         match key {
             Key::Enter | Key::ShiftEnter => self.submit_onboarding(),
             Key::Backspace => self.ui.composer.backspace(),
@@ -299,7 +300,7 @@ impl App {
         }
     }
 
-    fn handle_normal_key(&mut self, key: Key) {
+    pub(crate) fn handle_normal_key(&mut self, key: Key) {
         match key {
             Key::Char('q') => self.ui.mode = UiMode::ConfirmQuit,
             Key::Char('?') | Key::CtrlSeq('x', 'h') => self.ui.mode = UiMode::Help,
@@ -338,7 +339,7 @@ impl App {
         }
     }
 
-    fn handle_compose_key(&mut self, key: Key) {
+    pub(crate) fn handle_compose_key(&mut self, key: Key) {
         match key {
             Key::Esc => {
                 if self.ui.composer.autocomplete.open {
@@ -394,7 +395,7 @@ impl App {
         self.update_completions();
     }
 
-    fn handle_palette_key(&mut self, key: Key) {
+    pub(crate) fn handle_palette_key(&mut self, key: Key) {
         match key {
             Key::Esc => self.ui.mode = UiMode::Normal,
             Key::Enter | Key::ShiftEnter => self.run_palette_selection(),
@@ -416,7 +417,7 @@ impl App {
         }
     }
 
-    fn handle_prompt_key(&mut self, key: Key) {
+    pub(crate) fn handle_prompt_key(&mut self, key: Key) {
         match key {
             Key::Esc => self.ui.mode = UiMode::Normal,
             Key::Enter | Key::ShiftEnter => {
@@ -435,7 +436,7 @@ impl App {
         }
     }
 
-    fn handle_help_key(&mut self, key: Key) {
+    pub(crate) fn handle_help_key(&mut self, key: Key) {
         if matches!(
             key,
             Key::Esc | Key::Enter | Key::ShiftEnter | Key::Char('?') | Key::Char('q')
@@ -444,7 +445,7 @@ impl App {
         }
     }
 
-    fn handle_confirm_quit_key(&mut self, key: Key) {
+    pub(crate) fn handle_confirm_quit_key(&mut self, key: Key) {
         match key {
             Key::Char('y') | Key::Char('Y') | Key::Enter | Key::ShiftEnter => self.running = false,
             Key::Esc | Key::Char('n') | Key::Char('N') | Key::Char('q') => {
@@ -453,5 +454,4 @@ impl App {
             _ => {}
         }
     }
-
 }

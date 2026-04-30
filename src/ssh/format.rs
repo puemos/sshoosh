@@ -1,4 +1,5 @@
-async fn clean_disconnect(
+use super::*;
+pub(crate) async fn clean_disconnect(
     handle: &russh::server::Handle,
     channel_id: ChannelId,
     mouse_enabled: bool,
@@ -13,25 +14,24 @@ async fn clean_disconnect(
     let _ = handle.close(channel_id).await;
 }
 
-fn reject_publickey_only() -> Auth {
+pub(crate) fn reject_publickey_only() -> Auth {
     Auth::Reject {
         proceed_with_methods: Some(russh::MethodSet::from(&[russh::MethodKind::PublicKey][..])),
         partial_success: false,
     }
 }
 
-fn mute_message(ttl_hours: Option<i64>, label: &str) -> String {
+pub(crate) fn mute_message(ttl_hours: Option<i64>, label: &str) -> String {
     match ttl_hours {
         Some(hours) => format!("{label} muted for {hours}h"),
         None => format!("{label} unmuted"),
     }
 }
 
-fn saved_message(saved: bool, label: &str) -> String {
+pub(crate) fn saved_message(saved: bool, label: &str) -> String {
     if saved {
         format!("{label} saved")
     } else {
         format!("{label} unsaved")
     }
 }
-

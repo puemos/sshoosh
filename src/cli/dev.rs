@@ -1,12 +1,13 @@
+use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FileStamp {
+pub(crate) struct FileStamp {
     modified_nanos: Option<u128>,
     len: u64,
 }
 
 type SourceFingerprint = BTreeMap<PathBuf, FileStamp>;
 
-async fn run_dev(cfg: config::Config) -> anyhow::Result<()> {
+pub(crate) async fn run_dev(cfg: config::Config) -> anyhow::Result<()> {
     eprintln!("dev: watching Cargo.toml, Cargo.lock, and src/");
 
     let watch_paths = DEV_WATCH_PATHS
@@ -51,7 +52,9 @@ async fn run_dev(cfg: config::Config) -> anyhow::Result<()> {
     }
 }
 
-async fn rebuild_and_spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Option<Child>> {
+pub(crate) async fn rebuild_and_spawn_dev_server(
+    cfg: &config::Config,
+) -> anyhow::Result<Option<Child>> {
     eprintln!("dev: building");
     let status = ProcessCommand::new("cargo")
         .arg("build")
@@ -70,7 +73,7 @@ async fn rebuild_and_spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Op
     spawn_dev_server(cfg).map(Some)
 }
 
-async fn run_dev_ssh(
+pub(crate) async fn run_dev_ssh(
     cfg: &config::Config,
     user: Option<String>,
     ssh_bin: PathBuf,
@@ -104,7 +107,7 @@ async fn run_dev_ssh(
     }
 }
 
-fn spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Child> {
+pub(crate) fn spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Child> {
     let exe = std::env::current_exe().context("locating sshoosh executable")?;
     eprintln!("dev: starting serve on {}:{}", cfg.host, cfg.port);
     ProcessCommand::new(exe)
@@ -125,7 +128,7 @@ fn spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Child> {
         .context("starting dev server")
 }
 
-fn spawn_dev_ssh_client(
+pub(crate) fn spawn_dev_ssh_client(
     ssh_bin: &Path,
     ssh_args: &[String],
     user: &str,
@@ -156,7 +159,7 @@ fn spawn_dev_ssh_client(
         .with_context(|| format!("starting ssh client {}", ssh_bin.display()))
 }
 
-async fn wait_for_ssh_port(host: &str, port: u16) -> anyhow::Result<bool> {
+pub(crate) async fn wait_for_ssh_port(host: &str, port: u16) -> anyhow::Result<bool> {
     let mut printed = false;
     loop {
         match tokio::net::TcpStream::connect((host, port)).await {
@@ -178,7 +181,7 @@ async fn wait_for_ssh_port(host: &str, port: u16) -> anyhow::Result<bool> {
     }
 }
 
-fn dev_ssh_host(host: &str) -> String {
+pub(crate) fn dev_ssh_host(host: &str) -> String {
     match host {
         "" | "0.0.0.0" => "127.0.0.1".to_string(),
         "::" | "[::]" => "::1".to_string(),
@@ -186,7 +189,7 @@ fn dev_ssh_host(host: &str) -> String {
     }
 }
 
-async fn stop_child(child: &mut Child, label: &str) -> anyhow::Result<()> {
+pub(crate) async fn stop_child(child: &mut Child, label: &str) -> anyhow::Result<()> {
     if child
         .try_wait()
         .with_context(|| format!("checking {label} before stopping"))?
@@ -202,7 +205,7 @@ async fn stop_child(child: &mut Child, label: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn source_fingerprint(paths: &[PathBuf]) -> anyhow::Result<SourceFingerprint> {
+pub(crate) fn source_fingerprint(paths: &[PathBuf]) -> anyhow::Result<SourceFingerprint> {
     let mut fingerprint = SourceFingerprint::new();
     for path in paths {
         collect_fingerprint(path, &mut fingerprint)
@@ -211,7 +214,10 @@ fn source_fingerprint(paths: &[PathBuf]) -> anyhow::Result<SourceFingerprint> {
     Ok(fingerprint)
 }
 
-fn collect_fingerprint(path: &Path, fingerprint: &mut SourceFingerprint) -> anyhow::Result<()> {
+pub(crate) fn collect_fingerprint(
+    path: &Path,
+    fingerprint: &mut SourceFingerprint,
+) -> anyhow::Result<()> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

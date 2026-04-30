@@ -1,5 +1,7 @@
 #[cfg(test)]
-mod tests {
+use super::*;
+#[cfg(test)]
+mod cases {
     use std::path::PathBuf;
 
     use uuid::Uuid;
@@ -20,9 +22,13 @@ mod tests {
         let db = Database::connect(&db_path).await.expect("connect db");
         db.init().await.expect("init db");
         let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
         let account = state
             .ensure_account_for_key(
-                "owner",
+                &format!("owner+{token}"),
                 &format!("SHA256:{name}"),
                 &format!("ssh-ed25519 {name}"),
             )

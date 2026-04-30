@@ -1,4 +1,5 @@
-fn parse_invite(input: &str) -> Result<Action, String> {
+use super::*;
+pub(crate) fn parse_invite(input: &str) -> Result<Action, String> {
     let mut parts = input.split_whitespace();
     let role = match parts.next() {
         Some("admin") => Role::Admin,
@@ -16,7 +17,7 @@ fn parse_invite(input: &str) -> Result<Action, String> {
     Ok(Action::CreateInviteWithOptions { role, ttl_hours })
 }
 
-fn parse_user_role(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_user_role(input: &str) -> Result<Action, String> {
     let (username, role) = parse_two_args(input, "Username and role are required")?;
     let role = match role.as_str() {
         "owner" => Role::Owner,
@@ -27,7 +28,7 @@ fn parse_user_role(input: &str) -> Result<Action, String> {
     Ok(Action::SetUserRole { username, role })
 }
 
-fn parse_two_args(input: &str, message: &str) -> Result<(String, String), String> {
+pub(crate) fn parse_two_args(input: &str, message: &str) -> Result<(String, String), String> {
     let mut parts = input.split_whitespace();
     let Some(first) = parts.next() else {
         return Err(message.to_string());
@@ -38,12 +39,12 @@ fn parse_two_args(input: &str, message: &str) -> Result<(String, String), String
     Ok((first.to_string(), second.to_string()))
 }
 
-fn optional_arg(input: &str) -> Option<String> {
+pub(crate) fn optional_arg(input: &str) -> Option<String> {
     let value = input.trim();
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn parse_optional_slug_text(
+pub(crate) fn parse_optional_slug_text(
     input: &str,
     message: &str,
 ) -> Result<(Option<String>, String), String> {
@@ -61,7 +62,7 @@ fn parse_optional_slug_text(
     }
 }
 
-fn parse_key_add(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_key_add(input: &str) -> Result<Action, String> {
     let input = require(input, "Public key is required")?;
     let (public_key, label) = if let Some((key, label)) = input.split_once('|') {
         (key.trim().to_string(), optional_arg(label))
@@ -71,7 +72,7 @@ fn parse_key_add(input: &str) -> Result<Action, String> {
     Ok(Action::AddKey { public_key, label })
 }
 
-fn parse_reaction(input: &str) -> Result<(String, Option<i64>), String> {
+pub(crate) fn parse_reaction(input: &str) -> Result<(String, Option<i64>), String> {
     let input = require(input, "Emoji is required")?;
     let mut parts = input.split_whitespace();
     let emoji = parts.next().unwrap_or_default().to_string();
@@ -87,12 +88,7 @@ fn parse_reaction(input: &str) -> Result<(String, Option<i64>), String> {
     Ok((emoji, index))
 }
 
-fn parse_webhook_add(input: &str) -> Result<Action, String> {
-    let (name, url) = parse_two_args(input, "Webhook name and URL are required")?;
-    Ok(Action::AddWebhook { name, url })
-}
-
-fn parse_index(input: &str, message: &str) -> Result<i64, String> {
+pub(crate) fn parse_index(input: &str, message: &str) -> Result<i64, String> {
     let value = require(input, message)?;
     value
         .split_whitespace()
@@ -103,7 +99,7 @@ fn parse_index(input: &str, message: &str) -> Result<i64, String> {
         .map_err(|_| "Index must be a number".to_string())
 }
 
-fn parse_index_body(input: &str, message: &str) -> Result<(i64, String), String> {
+pub(crate) fn parse_index_body(input: &str, message: &str) -> Result<(i64, String), String> {
     let input = require(input, message)?;
     let mut parts = input.splitn(2, char::is_whitespace);
     let index = parts
@@ -119,7 +115,7 @@ fn parse_index_body(input: &str, message: &str) -> Result<(i64, String), String>
     Ok((index, body))
 }
 
-fn parse_optional_hours(input: &str) -> Result<Option<i64>, String> {
+pub(crate) fn parse_optional_hours(input: &str) -> Result<Option<i64>, String> {
     let value = input.trim();
     if value.is_empty() {
         return Ok(Some(24));
@@ -130,7 +126,7 @@ fn parse_optional_hours(input: &str) -> Result<Option<i64>, String> {
         .map_err(|_| "Hours must be a number".to_string())
 }
 
-fn known_users(snapshot: &Snapshot) -> Vec<String> {
+pub(crate) fn known_users(snapshot: &Snapshot) -> Vec<String> {
     let mut users: Vec<String> = snapshot
         .users
         .iter()
@@ -164,7 +160,7 @@ fn known_users(snapshot: &Snapshot) -> Vec<String> {
     users
 }
 
-fn dm_suggestions(snapshot: &Snapshot) -> Vec<(String, String)> {
+pub(crate) fn dm_suggestions(snapshot: &Snapshot) -> Vec<(String, String)> {
     let mut suggestions: Vec<(String, String)> = snapshot
         .users
         .iter()
@@ -194,6 +190,6 @@ fn dm_suggestions(snapshot: &Snapshot) -> Vec<(String, String)> {
 }
 
 #[allow(dead_code)]
-fn _range(start: usize, end: usize) -> Range<usize> {
+pub(crate) fn _range(start: usize, end: usize) -> Range<usize> {
     start..end
 }

@@ -1,171 +1,5 @@
+use super::*;
 impl ServerState {
-    pub async fn list_webhooks(
-        &self,
-        actor_id: &str,
-    ) -> anyhow::Result<(Vec<WebhookSummary>, Vec<WebhookDeliverySummary>)> {
-        let mut tx = begin(self.db.write_pool()).await?;
-        require_admin_tx(&mut tx, actor_id).await?;
-        let webhook_rows = sqlx::query(
-            "SELECT id, name, url, enabled, created_at, updated_at, disabled_at
-             FROM webhook_subscriptions
-             ORDER BY created_at DESC",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        let delivery_rows = sqlx::query(
-            "SELECT j.id, w.name AS webhook_name, j.status, j.attempts, j.next_attempt_at,
-                    j.last_error, j.created_at, j.delivered_at
-             FROM webhook_jobs j
-             JOIN webhook_subscriptions w ON w.id = j.webhook_id
-             ORDER BY j.created_at DESC
-             LIMIT 50",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok((
-            webhook_rows
-                .into_iter()
-                .map(|row| WebhookSummary {
-                    id: row.get("id"),
-                    name: row.get("name"),
-                    url: row.get("url"),
-                    enabled: row.get::<i64, _>("enabled") != 0,
-                    created_at: row.get("created_at"),
-                    updated_at: row.get("updated_at"),
-                    disabled_at: row.get("disabled_at"),
-                })
-                .collect(),
-            delivery_rows
-                .into_iter()
-                .map(|row| WebhookDeliverySummary {
-                    id: row.get("id"),
-                    webhook_name: row.get("webhook_name"),
-                    status: row.get("status"),
-                    attempts: row.get("attempts"),
-                    next_attempt_at: row.get("next_attempt_at"),
-                    last_error: row.get("last_error"),
-                    created_at: row.get("created_at"),
-                    delivered_at: row.get("delivered_at"),
-                })
-                .collect(),
-        ))
-    }
-
-    pub async fn add_webhook(
-        &self,
-        actor_id: &str,
-        name: &str,
-        url: &str,
-    ) -> anyhow::Result<String> {
-        anyhow::ensure!(
-            url.starts_with("http://") || url.starts_with("https://"),
-            "Webhook URL must be http(s)"
-        );
-        let mut tx = begin(self.db.write_pool()).await?;
-        require_admin_tx(&mut tx, actor_id).await?;
-        let now = now();
-        let id = id();
-        sqlx::query(
-            "INSERT INTO webhook_subscriptions
-             (id, created_by_account_id, name, url, enabled, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 1, ?, ?)",
-        )
-        .bind(&id)
-        .bind(actor_id)
-        .bind(name.trim())
-        .bind(url.trim())
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut *tx)
-        .await?;
-        insert_audit(
-            &mut tx,
-            Some(actor_id),
-            "webhook.added",
-            Some(&id),
-            serde_json::json!({"name": name.trim(), "url": url.trim()}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(id)
-    }
-
-    pub async fn remove_webhook(&self, actor_id: &str, webhook: &str) -> anyhow::Result<()> {
-        let mut tx = begin(self.db.write_pool()).await?;
-        require_admin_tx(&mut tx, actor_id).await?;
-        let row = sqlx::query(
-            "SELECT id, name FROM webhook_subscriptions WHERE id LIKE ? AND disabled_at IS NULL",
-        )
-        .bind(format!("{}%", webhook.trim()))
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(row) = row else {
-            bail!("Active webhook not found");
-        };
-        let id: String = row.get("id");
-        let now = now();
-        sqlx::query("UPDATE webhook_subscriptions SET enabled = 0, disabled_at = ?, updated_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(&now)
-            .bind(&id)
-            .execute(&mut *tx)
-            .await?;
-        insert_audit(
-            &mut tx,
-            Some(actor_id),
-            "webhook.removed",
-            Some(&id),
-            serde_json::json!({"name": row.get::<String, _>("name")}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn test_webhook(&self, actor_id: &str, webhook: &str) -> anyhow::Result<()> {
-        let mut tx = begin(self.db.write_pool()).await?;
-        require_admin_tx(&mut tx, actor_id).await?;
-        let row = sqlx::query("SELECT id, name FROM webhook_subscriptions WHERE id LIKE ? AND enabled = 1 AND disabled_at IS NULL")
-            .bind(format!("{}%", webhook.trim()))
-            .fetch_optional(&mut *tx)
-            .await?;
-        let Some(row) = row else {
-            bail!("Active webhook not found");
-        };
-        let webhook_id: String = row.get("id");
-        let webhook_name: String = row.get("name");
-        let now = now();
-        let payload = serde_json::json!({
-            "kind": "webhook_test",
-            "title": "sshoosh webhook test",
-            "body": "Webhook delivery test",
-        });
-        sqlx::query(
-            "INSERT INTO webhook_jobs
-             (id, webhook_id, payload_json, status, attempts, next_attempt_at, created_at, updated_at)
-             VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)",
-        )
-        .bind(id())
-        .bind(&webhook_id)
-        .bind(serde_json::to_string(&payload)?)
-        .bind(&now)
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut *tx)
-        .await?;
-        insert_audit(
-            &mut tx,
-            Some(actor_id),
-            "webhook.test_queued",
-            Some(&webhook_id),
-            serde_json::json!({"name": webhook_name}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
     pub async fn list_audit(&self, actor_id: &str, limit: i64) -> anyhow::Result<Vec<AuditEntry>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
@@ -247,11 +81,6 @@ impl ServerState {
                 .fetch_all(&mut *tx)
                 .await?,
         )?;
-        let webhooks = rows_to_json(
-            sqlx::query("SELECT id, name, url, enabled, created_at, updated_at, disabled_at FROM webhook_subscriptions ORDER BY created_at")
-                .fetch_all(&mut *tx)
-                .await?,
-        )?;
         let audit = if include_audit {
             rows_to_json(
                 sqlx::query("SELECT * FROM audit_log ORDER BY created_at")
@@ -273,7 +102,6 @@ impl ServerState {
             "mentions": mentions,
             "reactions": reactions,
             "notifications": notifications,
-            "webhooks": webhooks,
             "audit": audit,
         });
         match format {

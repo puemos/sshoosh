@@ -1,4 +1,5 @@
-async fn set_reaction_tx(
+use super::*;
+pub(crate) async fn set_reaction_tx(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     source_kind: &str,
@@ -37,7 +38,7 @@ async fn set_reaction_tx(
     Ok(())
 }
 
-fn validate_emoji(emoji: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_emoji(emoji: &str) -> anyhow::Result<()> {
     anyhow::ensure!(!emoji.is_empty(), "Emoji is required");
     anyhow::ensure!(emoji.chars().count() <= 8, "Emoji is too long");
     anyhow::ensure!(
@@ -49,7 +50,7 @@ fn validate_emoji(emoji: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn insert_event(
+pub(crate) async fn insert_event(
     tx: &mut Transaction<'_, Sqlite>,
     channel_id: Option<&str>,
     thread_id: Option<&str>,
@@ -82,7 +83,7 @@ async fn insert_event(
     })
 }
 
-async fn insert_audit(
+pub(crate) async fn insert_audit(
     tx: &mut Transaction<'_, Sqlite>,
     actor_account_id: Option<&str>,
     action: &str,
@@ -105,18 +106,18 @@ async fn insert_audit(
     Ok(())
 }
 
-struct SearchIndexInput<'a> {
-    kind: &'a str,
-    object_id: &'a str,
-    channel_id: Option<&'a str>,
-    thread_id: Option<&'a str>,
-    conversation_id: Option<&'a str>,
-    title: &'a str,
-    body: &'a str,
-    context: &'a str,
+pub(crate) struct SearchIndexInput<'a> {
+    pub(crate) kind: &'a str,
+    pub(crate) object_id: &'a str,
+    pub(crate) channel_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) conversation_id: Option<&'a str>,
+    pub(crate) title: &'a str,
+    pub(crate) body: &'a str,
+    pub(crate) context: &'a str,
 }
 
-async fn upsert_search_index_tx(
+pub(crate) async fn upsert_search_index_tx(
     tx: &mut Transaction<'_, Sqlite>,
     input: SearchIndexInput<'_>,
 ) -> anyhow::Result<()> {
@@ -143,7 +144,7 @@ async fn upsert_search_index_tx(
     Ok(())
 }
 
-async fn delete_search_index_tx(
+pub(crate) async fn delete_search_index_tx(
     tx: &mut Transaction<'_, Sqlite>,
     kind: &str,
     object_id: &str,
@@ -156,7 +157,7 @@ async fn delete_search_index_tx(
     Ok(())
 }
 
-fn fts_query(query: &str) -> String {
+pub(crate) fn fts_query(query: &str) -> String {
     let mut terms = Vec::new();
     let mut current = String::new();
     for ch in query.chars() {
@@ -181,18 +182,18 @@ fn fts_query(query: &str) -> String {
 }
 
 #[derive(Clone, Copy)]
-struct NotificationInput<'a> {
-    kind: &'a str,
-    source_kind: &'a str,
-    source_id: &'a str,
-    channel_id: Option<&'a str>,
-    thread_id: Option<&'a str>,
-    conversation_id: Option<&'a str>,
-    title: &'a str,
-    body: &'a str,
+pub(crate) struct NotificationInput<'a> {
+    pub(crate) kind: &'a str,
+    pub(crate) source_kind: &'a str,
+    pub(crate) source_id: &'a str,
+    pub(crate) channel_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) conversation_id: Option<&'a str>,
+    pub(crate) title: &'a str,
+    pub(crate) body: &'a str,
 }
 
-async fn create_notification_tx(
+pub(crate) async fn create_notification_tx(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     actor_id: Option<&str>,
@@ -253,61 +254,21 @@ async fn create_notification_tx(
     .bind(&created_at)
     .execute(&mut **tx)
     .await?;
-    queue_webhook_jobs_tx(tx, &id, input.kind, input.title, input.body).await?;
     Ok(id)
 }
 
-async fn queue_webhook_jobs_tx(
-    tx: &mut Transaction<'_, Sqlite>,
-    notification_id: &str,
-    kind: &str,
-    title: &str,
-    body: &str,
-) -> anyhow::Result<()> {
-    let webhooks = sqlx::query(
-        "SELECT id, name, url FROM webhook_subscriptions WHERE enabled = 1 AND disabled_at IS NULL",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
-    let now = now();
-    for webhook in webhooks {
-        let payload = serde_json::json!({
-            "notification_id": notification_id,
-            "kind": kind,
-            "title": title,
-            "body": body,
-            "webhook": webhook.get::<String, _>("name"),
-        });
-        sqlx::query(
-            "INSERT INTO webhook_jobs
-             (id, webhook_id, notification_id, payload_json, status, attempts, next_attempt_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
-        )
-        .bind(id())
-        .bind(webhook.get::<String, _>("id"))
-        .bind(notification_id)
-        .bind(serde_json::to_string(&payload)?)
-        .bind(&now)
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut **tx)
-        .await?;
-    }
-    Ok(())
+pub(crate) struct MentionInput<'a> {
+    pub(crate) source_kind: &'a str,
+    pub(crate) source_id: &'a str,
+    pub(crate) channel_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) conversation_id: Option<&'a str>,
+    pub(crate) obj_index: Option<i64>,
+    pub(crate) title: &'a str,
+    pub(crate) body: &'a str,
 }
 
-struct MentionInput<'a> {
-    source_kind: &'a str,
-    source_id: &'a str,
-    channel_id: Option<&'a str>,
-    thread_id: Option<&'a str>,
-    conversation_id: Option<&'a str>,
-    obj_index: Option<i64>,
-    title: &'a str,
-    body: &'a str,
-}
-
-async fn create_mention_notifications_tx(
+pub(crate) async fn create_mention_notifications_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     input: MentionInput<'_>,
@@ -370,16 +331,16 @@ async fn create_mention_notifications_tx(
     Ok(targets)
 }
 
-struct ReplyNotificationInput<'a> {
-    thread_id: &'a str,
-    channel_id: &'a str,
-    comment_id: &'a str,
-    obj_index: i64,
-    title: &'a str,
-    body: &'a str,
+pub(crate) struct ReplyNotificationInput<'a> {
+    pub(crate) thread_id: &'a str,
+    pub(crate) channel_id: &'a str,
+    pub(crate) comment_id: &'a str,
+    pub(crate) obj_index: i64,
+    pub(crate) title: &'a str,
+    pub(crate) body: &'a str,
 }
 
-async fn create_thread_reply_notifications_tx(
+pub(crate) async fn create_thread_reply_notifications_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     input: ReplyNotificationInput<'_>,
@@ -418,7 +379,7 @@ async fn create_thread_reply_notifications_tx(
     Ok(())
 }
 
-async fn create_dm_notifications_tx(
+pub(crate) async fn create_dm_notifications_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor_id: &str,
     conversation_id: &str,
@@ -456,4 +417,3 @@ async fn create_dm_notifications_tx(
     }
     Ok(())
 }
-

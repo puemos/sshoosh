@@ -1,4 +1,5 @@
-fn subcommands_for(command: &str) -> &'static [SubcommandSpec] {
+use super::*;
+pub(crate) fn subcommands_for(command: &str) -> &'static [SubcommandSpec] {
     match command {
         "invite" => INVITE_SUBCOMMANDS,
         "channel" => CHANNEL_SUBCOMMANDS,
@@ -8,14 +9,13 @@ fn subcommands_for(command: &str) -> &'static [SubcommandSpec] {
         "key" => KEY_SUBCOMMANDS,
         "comment" => COMMENT_SUBCOMMANDS,
         "notification" => NOTIFICATION_SUBCOMMANDS,
-        "webhook" => WEBHOOK_SUBCOMMANDS,
         "audit" => AUDIT_SUBCOMMANDS,
         "reaction" => REACTION_SUBCOMMANDS,
         _ => &[],
     }
 }
 
-fn require(input: &str, message: &str) -> Result<String, String> {
+pub(crate) fn require(input: &str, message: &str) -> Result<String, String> {
     let value = input.trim();
     if value.is_empty() {
         Err(message.to_string())
@@ -24,7 +24,7 @@ fn require(input: &str, message: &str) -> Result<String, String> {
     }
 }
 
-fn split_word(input: &str) -> (&str, &str) {
+pub(crate) fn split_word(input: &str) -> (&str, &str) {
     let input = input.trim();
     let mut parts = input.splitn(2, char::is_whitespace);
     let first = parts.next().unwrap_or_default();
@@ -32,11 +32,11 @@ fn split_word(input: &str) -> (&str, &str) {
     (first, rest)
 }
 
-fn is_subcommand(spec: &SubcommandSpec, value: &str) -> bool {
+pub(crate) fn is_subcommand(spec: &SubcommandSpec, value: &str) -> bool {
     spec.name == value || spec.aliases.contains(&value)
 }
 
-fn split_thread_title(input: &str) -> String {
+pub(crate) fn split_thread_title(input: &str) -> String {
     input
         .split_once('|')
         .map(|(title, _)| title)
@@ -45,7 +45,7 @@ fn split_thread_title(input: &str) -> String {
         .to_string()
 }
 
-fn parse_invite_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_invite_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "new" | "create" => parse_invite(rest),
@@ -57,7 +57,7 @@ fn parse_invite_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_channel_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_channel_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "new" | "create" => {
@@ -106,15 +106,12 @@ fn parse_channel_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_thread_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_thread_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "new" | "create" => {
             let title = split_thread_title(&require(rest, "Thread title is required")?);
-            Ok(Action::CreateThread {
-                title,
-                body: String::new(),
-            })
+            Ok(Action::CreateThread { title })
         }
         "rename" | "edit" => {
             let title = split_thread_title(&require(rest, "Thread title is required")?);
@@ -138,7 +135,7 @@ fn parse_thread_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_dm_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_dm_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "open" => require(rest, "Username is required").map(|target| Action::OpenDm { target }),
@@ -163,7 +160,7 @@ fn parse_dm_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_user_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_user_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "list" | "ls" => Ok(Action::ListUsers),
@@ -188,7 +185,7 @@ fn parse_user_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_key_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_key_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "list" | "ls" => Ok(Action::ListKeys),
@@ -204,7 +201,7 @@ fn parse_key_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_comment_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_comment_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "edit" => parse_index_body(rest, "Comment index and body are required")
@@ -216,7 +213,7 @@ fn parse_comment_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_notification_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_notification_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "list" | "ls" => Ok(Action::ListNotifications),
@@ -229,19 +226,7 @@ fn parse_notification_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_webhook_command(input: &str) -> Result<Action, String> {
-    let (name, rest) = split_word(input);
-    match name {
-        "list" | "ls" => Ok(Action::ListWebhooks),
-        "add" => parse_webhook_add(rest),
-        "remove" | "delete" => require(rest, "Webhook id is required")
-            .map(|webhook_id| Action::RemoveWebhook { webhook_id }),
-        "" => Err("Webhook subcommand is required".to_string()),
-        _ => Err(format!("Unknown subcommand: {name}")),
-    }
-}
-
-fn parse_audit_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_audit_command(input: &str) -> Result<Action, String> {
     let (name, _) = split_word(input);
     match name {
         "list" | "ls" => Ok(Action::ListAudit),
@@ -250,7 +235,7 @@ fn parse_audit_command(input: &str) -> Result<Action, String> {
     }
 }
 
-fn parse_reaction_command(input: &str) -> Result<Action, String> {
+pub(crate) fn parse_reaction_command(input: &str) -> Result<Action, String> {
     let (name, rest) = split_word(input);
     match name {
         "add" => parse_reaction(rest).map(|(emoji, index)| Action::React { emoji, index }),

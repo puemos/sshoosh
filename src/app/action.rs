@@ -36,7 +36,6 @@ pub enum Action {
     },
     CreateThread {
         title: String,
-        body: String,
     },
     AddComment {
         body: String,
@@ -143,14 +142,6 @@ pub enum Action {
     ListNotifications,
     MarkNotificationRead {
         notification_id: Option<String>,
-    },
-    ListWebhooks,
-    AddWebhook {
-        name: String,
-        url: String,
-    },
-    RemoveWebhook {
-        webhook_id: String,
     },
     ListAudit,
     Search {

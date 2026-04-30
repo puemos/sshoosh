@@ -1,3 +1,4 @@
+use super::*;
 impl ServerState {
     pub async fn list_notifications(
         &self,
@@ -85,7 +86,7 @@ impl ServerState {
         let thread = load_thread_meta_tx(&mut tx, thread_id).await?;
         ensure_can_view_channel(&mut tx, account_id, &thread.channel_id).await?;
         set_reaction_tx(&mut tx, account_id, "thread", thread_id, emoji, remove).await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&thread.channel_id),
             Some(thread_id),
@@ -99,7 +100,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -116,7 +116,7 @@ impl ServerState {
         ensure_can_view_channel(&mut tx, account_id, &thread.channel_id).await?;
         let comment = load_comment_meta_tx(&mut tx, thread_id, obj_index).await?;
         set_reaction_tx(&mut tx, account_id, "comment", &comment.id, emoji, remove).await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             Some(&thread.channel_id),
             Some(thread_id),
@@ -130,7 +130,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -146,7 +145,7 @@ impl ServerState {
         let message =
             load_dm_message_meta_tx(&mut tx, account_id, conversation_id, obj_index).await?;
         set_reaction_tx(&mut tx, account_id, "dm", &message.id, emoji, remove).await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -160,9 +159,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
-
-
 }

@@ -14,7 +14,7 @@ use crate::service::{Account, SearchKind, Snapshot};
 use super::{
     commands::CommandSpec,
     state::{
-        ActivePane, BannerPresentation, BottomBarAction, HitTarget, LinkOverlay, Route,
+        ActivePane, Banner, BannerPresentation, BottomBarAction, HitTarget, LinkOverlay, Route,
         SelectionRange, UiMode, UiState,
     },
     theme,
@@ -22,13 +22,18 @@ use super::{
 
 const WORKSPACE_PANE_WIDTH: u16 = 38;
 
-include!("render/shell.rs");
-include!("render/selection.rs");
-include!("render/chrome.rs");
-include!("render/workspace.rs");
-include!("render/detail.rs");
-include!("render/messages.rs");
-include!("render/markdown.rs");
-include!("render/composer.rs");
-include!("render/overlays.rs");
-include!("render/tests.rs");
+mod chrome;
+mod composer;
+mod detail;
+mod markdown;
+mod messages;
+mod overlays;
+mod selection;
+mod shell;
+mod tests;
+mod workspace;
+
+pub(crate) use self::{
+    chrome::*, composer::*, detail::*, markdown::*, messages::*, overlays::*, selection::*,
+    shell::*, workspace::*,
+};

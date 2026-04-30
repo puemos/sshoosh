@@ -1,3 +1,4 @@
+use super::*;
 pub fn apply_selection(frame: &mut Frame, ui: &mut UiState) {
     let Some(range) = ui.selection.active_range() else {
         ui.selection.text.clear();
@@ -47,7 +48,10 @@ pub fn apply_selection(frame: &mut Frame, ui: &mut UiState) {
     ui.selection.text = lines.join("\n");
 }
 
-fn normalize_selection_range(range: SelectionRange, area: Rect) -> Option<(Position, Position)> {
+pub(crate) fn normalize_selection_range(
+    range: SelectionRange,
+    area: Rect,
+) -> Option<(Position, Position)> {
     if area.is_empty() {
         return None;
     }

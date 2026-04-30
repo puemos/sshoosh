@@ -67,6 +67,45 @@ impl Database {
         Ok(())
     }
 
+    pub async fn repair_search_index(&self) -> anyhow::Result<()> {
+        let mut tx = self.write_pool().begin().await?;
+        sqlx::query("DELETE FROM search_index")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO search_index
+             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT 'thread', t.id, t.channel_id, t.id, NULL, t.title, t.body, '#' || c.slug
+             FROM threads t
+             JOIN channels c ON c.id = t.channel_id
+             WHERE t.deleted_at IS NULL",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO search_index
+             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT 'comment', cm.id, cm.channel_id, cm.thread_id, NULL, t.title, cm.body, '#' || c.slug
+             FROM comments cm
+             JOIN threads t ON t.id = cm.thread_id
+             JOIN channels c ON c.id = cm.channel_id
+             WHERE cm.deleted_at IS NULL AND t.deleted_at IS NULL",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO search_index
+             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT 'dm', m.id, NULL, NULL, m.conversation_id, 'DM', m.body, 'DM'
+             FROM conversation_messages m
+             WHERE m.deleted_at IS NULL",
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn backup_to(&self, out: &str) -> anyhow::Result<()> {
         let escaped = out.replace('\'', "''");
         let sql = format!("VACUUM INTO '{escaped}'");

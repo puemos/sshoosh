@@ -1,20 +1,21 @@
+use super::*;
 #[derive(Parser, Debug)]
 #[command(name = "sshoosh")]
 #[command(about = "A self-hosted SSH/TUI thread-first workspace chat")]
-struct Cli {
+pub(crate) struct Cli {
     #[arg(
         long,
         env = "SSHOOSH_DB",
         default_value = "./sshoosh.sqlite",
         global = true
     )]
-    db: String,
+    pub(crate) db: String,
 
     #[arg(long, env = "SSHOOSH_HOST", default_value = "0.0.0.0", global = true)]
-    host: String,
+    pub(crate) host: String,
 
     #[arg(long, env = "SSHOOSH_PORT", default_value_t = 2222, global = true)]
-    port: u16,
+    pub(crate) port: u16,
 
     #[arg(
         long,
@@ -22,7 +23,7 @@ struct Cli {
         default_value = "./sshoosh_server_ed25519",
         global = true
     )]
-    server_key: String,
+    pub(crate) server_key: String,
 
     #[arg(
         long = "no-mouse",
@@ -30,17 +31,17 @@ struct Cli {
         action = ArgAction::SetTrue,
         global = true
     )]
-    no_mouse: bool,
+    pub(crate) no_mouse: bool,
 
     #[arg(long, env = "SSHOOSH_ACTOR", global = true)]
-    actor: Option<String>,
+    pub(crate) actor: Option<String>,
 
     #[command(subcommand)]
-    command: Option<Command>,
+    pub(crate) command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
-enum Command {
+pub(crate) enum Command {
     Serve,
     #[command(about = "Run the SSH server and restart it when source files change")]
     Dev,
@@ -81,10 +82,6 @@ enum Command {
         #[command(subcommand)]
         command: NotificationsCommand,
     },
-    Webhooks {
-        #[command(subcommand)]
-        command: WebhooksCommand,
-    },
     Audit {
         #[command(subcommand)]
         command: AuditCommand,
@@ -97,14 +94,19 @@ enum Command {
         #[arg(long)]
         include_audit: bool,
     },
-    Doctor,
+    Doctor {
+        #[arg(long)]
+        repair_search: bool,
+    },
     Backup {
         out: String,
     },
+    #[command(about = "Create a one-time token for the first SSH owner")]
+    BootstrapToken,
 }
 
 #[derive(Subcommand, Debug)]
-enum UsersCommand {
+pub(crate) enum UsersCommand {
     List,
     Disable {
         username: String,
@@ -127,7 +129,7 @@ enum UsersCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum KeysCommand {
+pub(crate) enum KeysCommand {
     List,
     Add {
         public_key: String,
@@ -150,7 +152,7 @@ enum KeysCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum InvitesCommand {
+pub(crate) enum InvitesCommand {
     Create {
         #[arg(long, default_value = "member")]
         role: String,
@@ -164,7 +166,7 @@ enum InvitesCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum ChannelsCommand {
+pub(crate) enum ChannelsCommand {
     List {
         #[arg(long)]
         archived: bool,
@@ -208,7 +210,7 @@ enum ChannelsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum NotificationsCommand {
+pub(crate) enum NotificationsCommand {
     List {
         #[arg(long, default_value_t = 50)]
         limit: i64,
@@ -219,15 +221,7 @@ enum NotificationsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum WebhooksCommand {
-    List,
-    Add { name: String, url: String },
-    Remove { webhook_id: String },
-    Test { webhook_id: String },
-}
-
-#[derive(Subcommand, Debug)]
-enum AuditCommand {
+pub(crate) enum AuditCommand {
     List {
         #[arg(long, default_value_t = 100)]
         limit: i64,

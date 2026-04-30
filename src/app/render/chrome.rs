@@ -1,4 +1,5 @@
-fn bottombar_height(ui: &UiState) -> u16 {
+use super::*;
+pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
     let input_lines = if ui.mode == UiMode::Compose {
         ui.composer
             .buffer
@@ -12,7 +13,7 @@ fn bottombar_height(ui: &UiState) -> u16 {
     input_lines.min(5) + 4
 }
 
-fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
+pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
     let modal = centered(area, 72, 13);
     let block = panel(" sshoosh setup ", true);
     let text = vec![
@@ -48,7 +49,7 @@ fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut Ui
         .push(input, HitTarget::ComposerInput { scroll_y: 0 });
 }
 
-fn draw_topbar(
+pub(crate) fn draw_topbar(
     frame: &mut Frame,
     area: Rect,
     account: &Account,
@@ -94,7 +95,7 @@ fn draw_topbar(
     frame.render_widget(Paragraph::new(line).style(theme::topbar()), area);
 }
 
-fn draw_horizontal_divider(frame: &mut Frame, area: Rect, color: ratatui::style::Color) {
+pub(crate) fn draw_horizontal_divider(frame: &mut Frame, area: Rect, color: ratatui::style::Color) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -105,7 +106,7 @@ fn draw_horizontal_divider(frame: &mut Frame, area: Rect, color: ratatui::style:
     );
 }
 
-fn active_label(snapshot: &Snapshot, ui: &UiState) -> String {
+pub(crate) fn active_label(snapshot: &Snapshot, ui: &UiState) -> String {
     match &ui.route {
         Route::Channel(id) => snapshot
             .channels
@@ -127,7 +128,7 @@ fn active_label(snapshot: &Snapshot, ui: &UiState) -> String {
     }
 }
 
-fn draw_body(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+pub(crate) fn draw_body(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if area.width >= 80 {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
@@ -148,11 +149,11 @@ fn draw_body(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiStat
     }
 }
 
-fn pane_divider_x(area: Rect) -> Option<u16> {
+pub(crate) fn pane_divider_x(area: Rect) -> Option<u16> {
     (area.width >= 80).then(|| area.x.saturating_add(WORKSPACE_PANE_WIDTH))
 }
 
-fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
+pub(crate) fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
     if area.is_empty() {
         return;
     }
@@ -163,7 +164,7 @@ fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
     );
 }
 
-fn draw_pane_divider_intersections(
+pub(crate) fn draw_pane_divider_intersections(
     frame: &mut Frame,
     area: Rect,
     top_separator: Rect,
@@ -181,7 +182,7 @@ fn draw_pane_divider_intersections(
     }
 }
 
-fn draw_divider_cell(
+pub(crate) fn draw_divider_cell(
     frame: &mut Frame,
     x: u16,
     y: u16,
@@ -194,7 +195,7 @@ fn draw_divider_cell(
     );
 }
 
-fn pane_inner(area: Rect) -> Rect {
+pub(crate) fn pane_inner(area: Rect) -> Rect {
     Rect::new(
         area.x.saturating_add(1),
         area.y.saturating_add(1),
@@ -202,4 +203,3 @@ fn pane_inner(area: Rect) -> Rect {
         area.height.saturating_sub(2),
     )
 }
-

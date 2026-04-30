@@ -1,15 +1,20 @@
 #[cfg(test)]
+use super::*;
+#[cfg(test)]
 #[allow(clippy::field_reassign_with_default)]
-mod tests {
+mod cases {
     use ratatui::{
         Terminal,
         backend::TestBackend,
         buffer::{Buffer, Cell},
     };
 
-    use crate::service::{
-        Channel, CommentItem, Conversation, ConversationMessage, Role, SearchKind, SearchResult,
-        ThreadItem,
+    use crate::{
+        app::state,
+        service::{
+            Channel, CommentItem, Conversation, ConversationMessage, Role, SearchKind,
+            SearchResult, ThreadItem,
+        },
     };
 
     use super::*;
@@ -166,7 +171,7 @@ mod tests {
         let mut ui = UiState::default();
         ui.composer.autocomplete.open = true;
         ui.composer.autocomplete.items = vec![
-            super::super::state::AutocompleteItem {
+            state::AutocompleteItem {
                 replacement_range: 0..7,
                 replacement: "/invite".to_string(),
                 label: "/invite".to_string(),
@@ -175,7 +180,7 @@ mod tests {
                 accept_on_enter: false,
                 accept_on_tab: true,
             },
-            super::super::state::AutocompleteItem {
+            state::AutocompleteItem {
                 replacement_range: 0..14,
                 replacement: "/channel topic ".to_string(),
                 label: "/channel topic".to_string(),
@@ -278,7 +283,7 @@ mod tests {
             activated: true,
         };
         let mut ui = UiState::default();
-        ui.banner = Some(super::super::state::Banner::modal_ok("Invite code: abc123"));
+        ui.banner = Some(state::Banner::modal_ok("Invite code: abc123"));
 
         terminal
             .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
@@ -388,7 +393,7 @@ mod tests {
             activated: true,
         };
         let mut ui = UiState::default();
-        ui.banner = Some(super::super::state::Banner::ok("Selection copied"));
+        ui.banner = Some(state::Banner::ok("Selection copied"));
 
         terminal
             .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
@@ -426,7 +431,7 @@ mod tests {
             activated: true,
         };
         let mut ui = UiState::default();
-        ui.banner = Some(super::super::state::Banner::err("refresh failed"));
+        ui.banner = Some(state::Banner::err("refresh failed"));
 
         terminal
             .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))

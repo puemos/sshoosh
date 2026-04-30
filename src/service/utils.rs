@@ -1,3 +1,4 @@
+use super::*;
 pub fn parse_mentions(body: &str) -> Vec<String> {
     let mut mentions = Vec::new();
     let mut chars = body.char_indices().peekable();
@@ -31,7 +32,7 @@ pub fn parse_mentions(body: &str) -> Vec<String> {
     mentions
 }
 
-async fn search_visible(
+pub(crate) async fn search_visible(
     pool: &SqlitePool,
     account_id: &str,
     query: &str,
@@ -105,22 +106,18 @@ async fn search_visible(
     Ok(SearchPage { results, has_more })
 }
 
-fn publish(live_tx: &broadcast::Sender<LiveEvent>, event: LiveEvent) {
-    let _ = live_tx.send(event);
-}
-
-fn account_from_row(row: sqlx::sqlite::SqliteRow) -> Account {
+pub(crate) fn account_from_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<Account> {
     let activated: Option<String> = row.get("activated_at");
-    Account {
+    Ok(Account {
         id: row.get("id"),
         username: row.get("username"),
         display_name: row.get("display_name"),
-        role: Role::from_db(row.get::<String, _>("role").as_str()),
+        role: Role::from_db(row.get::<String, _>("role").as_str())?,
         activated: activated.is_some(),
-    }
+    })
 }
 
-fn ssh_key_summary_from_row(row: sqlx::sqlite::SqliteRow) -> SshKeySummary {
+pub(crate) fn ssh_key_summary_from_row(row: sqlx::sqlite::SqliteRow) -> SshKeySummary {
     SshKeySummary {
         id: row.get("id"),
         username: row.get("username"),
@@ -132,12 +129,12 @@ fn ssh_key_summary_from_row(row: sqlx::sqlite::SqliteRow) -> SshKeySummary {
     }
 }
 
-struct ParsedPublicKey {
-    fingerprint: String,
-    public_key: String,
+pub(crate) struct ParsedPublicKey {
+    pub(crate) fingerprint: String,
+    pub(crate) public_key: String,
 }
 
-fn parse_public_key(public_key: &str) -> anyhow::Result<ParsedPublicKey> {
+pub(crate) fn parse_public_key(public_key: &str) -> anyhow::Result<ParsedPublicKey> {
     let key = russh::keys::PublicKey::from_openssh(public_key.trim())
         .context("public key must be an OpenSSH public key")?;
     Ok(ParsedPublicKey {
@@ -146,7 +143,9 @@ fn parse_public_key(public_key: &str) -> anyhow::Result<ParsedPublicKey> {
     })
 }
 
-fn rows_to_json(rows: Vec<sqlx::sqlite::SqliteRow>) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn rows_to_json(
+    rows: Vec<sqlx::sqlite::SqliteRow>,
+) -> anyhow::Result<serde_json::Value> {
     let mut out = Vec::new();
     for row in rows {
         let mut object = serde_json::Map::new();
@@ -170,7 +169,7 @@ fn rows_to_json(rows: Vec<sqlx::sqlite::SqliteRow>) -> anyhow::Result<serde_json
     Ok(serde_json::Value::Array(out))
 }
 
-fn export_markdown(bundle: &serde_json::Value) -> String {
+pub(crate) fn export_markdown(bundle: &serde_json::Value) -> String {
     let mut out = String::from("# sshoosh export\n\n");
     if let Some(exported_at) = bundle
         .get("exported_at")
@@ -188,7 +187,6 @@ fn export_markdown(bundle: &serde_json::Value) -> String {
         "mentions",
         "reactions",
         "notifications",
-        "webhooks",
         "audit",
     ] {
         let rows = bundle
@@ -211,29 +209,11 @@ fn export_markdown(bundle: &serde_json::Value) -> String {
     out
 }
 
-fn compact_json(value: &serde_json::Value) -> String {
+pub(crate) fn compact_json(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
 }
 
-async fn next_username(tx: &mut Transaction<'_, Sqlite>, desired: &str) -> anyhow::Result<String> {
-    let base = normalize_username(desired).unwrap_or_else(|_| "user".to_string());
-    let mut candidate = base.clone();
-    let mut suffix = 2;
-    loop {
-        let exists: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE lower(username) = lower(?)")
-                .bind(&candidate)
-                .fetch_one(&mut **tx)
-                .await?;
-        if exists == 0 {
-            return Ok(candidate);
-        }
-        candidate = format!("{base}-{suffix}");
-        suffix += 1;
-    }
-}
-
-fn normalize_username(input: &str) -> anyhow::Result<String> {
+pub(crate) fn normalize_username(input: &str) -> anyhow::Result<String> {
     let mut out = String::new();
     for ch in input.trim().to_lowercase().chars() {
         if ch.is_ascii_alphanumeric() {
@@ -250,7 +230,7 @@ fn normalize_username(input: &str) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn normalize_slug(input: &str) -> anyhow::Result<String> {
+pub(crate) fn normalize_slug(input: &str) -> anyhow::Result<String> {
     let out = normalize_name_key(input);
     anyhow::ensure!(
         (2..=48).contains(&out.len()),
@@ -259,7 +239,7 @@ fn normalize_slug(input: &str) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn normalize_name_key(input: &str) -> String {
+pub(crate) fn normalize_name_key(input: &str) -> String {
     let mut out = String::new();
     for ch in input.trim().to_lowercase().chars() {
         if ch.is_ascii_alphanumeric() {
@@ -271,17 +251,17 @@ fn normalize_name_key(input: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn id() -> String {
+pub(crate) fn id() -> String {
     Uuid::now_v7().to_string()
 }
 
-fn now() -> String {
+pub(crate) fn now() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .expect("format timestamp")
 }
 
-fn timestamp_after_hours(hours: i64) -> Option<String> {
+pub(crate) fn timestamp_after_hours(hours: i64) -> Option<String> {
     if hours <= 0 {
         return None;
     }
@@ -290,7 +270,7 @@ fn timestamp_after_hours(hours: i64) -> Option<String> {
         .ok()
 }
 
-fn snippet(text: &str, query: &str) -> String {
+pub(crate) fn snippet(text: &str, query: &str) -> String {
     let text = text.replace('\n', " ");
     let lower = text.to_lowercase();
     let needle = query.to_lowercase();
@@ -308,21 +288,20 @@ fn snippet(text: &str, query: &str) -> String {
     out
 }
 
-fn invite_code() -> String {
+pub(crate) fn invite_code() -> String {
     let mut bytes = [0u8; 18];
     rand::thread_rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn code_hash(code: &str) -> String {
+pub(crate) fn code_hash(code: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(code.trim().as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
-fn dm_key(a: &str, b: &str) -> String {
+pub(crate) fn dm_key(a: &str, b: &str) -> String {
     let mut ids = [a.to_string(), b.to_string()];
     ids.sort();
     format!("{}:{}", ids[0], ids[1])
 }
-

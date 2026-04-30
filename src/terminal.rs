@@ -1,8 +1,6 @@
 use std::{
     io::{self, Write},
-    process::Command,
     sync::{Arc, Mutex},
-    thread,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -118,47 +116,6 @@ pub fn osc8_hyperlink_at(rect: Rect, url: &str, text: &str, style: Style) -> Vec
         text
     )
     .into_bytes()
-}
-
-pub fn open_url(url: &str) -> io::Result<()> {
-    let url = url.trim();
-    if !is_openable_url(url) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "unsupported link URL",
-        ));
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "opening links is not supported on this platform",
-        ));
-    }
-
-    #[cfg(target_os = "macos")]
-    let mut child = Command::new("open").arg(url).spawn()?;
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut child = Command::new("xdg-open").arg(url).spawn()?;
-
-    #[cfg(windows)]
-    let mut child = Command::new("rundll32")
-        .arg("url.dll,FileProtocolHandler")
-        .arg(url)
-        .spawn()?;
-
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
-
-    Ok(())
-}
-
-pub fn is_openable_url(url: &str) -> bool {
-    let url = url.trim();
-    url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")
 }
 
 fn sanitize_osc8(value: &str) -> String {

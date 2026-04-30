@@ -1,15 +1,16 @@
 # sshoosh
 
-`sshoosh` is a self-hosted SSH/TUI workspace chat. Users connect with an SSH key and get a terminal UI for explicit-membership channels, thread-first discussions, direct messages, notifications, mentions, reactions, unread state, FTS search, presence, export, webhooks, and administration.
+`sshoosh` is a self-hosted SSH/TUI workspace chat. Users connect with an SSH key and get a terminal UI for explicit-membership channels, thread-first discussions, direct messages, notifications, mentions, reactions, unread state, FTS search, presence, export, and administration.
 
 ## Quick Start
 
 ```sh
+sshoosh bootstrap-token
 cargo run -- serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER@127.0.0.1"
+ssh -p 2222 "$USER+<bootstrap-token>@127.0.0.1"
 ```
 
-The first SSH key to connect becomes the owner, creates `#general`, and is auto-joined to it. Additional SSH keys create pending accounts until the user accepts an invite or an admin attaches the key to an existing account. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+The bootstrap token is one-time and creates the first owner, creates `#general`, and auto-joins the owner to it. Additional unknown SSH keys must connect as `username+invite-token` or be attached to an existing account by an owner/admin. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
 ## Configuration
 
@@ -29,12 +30,14 @@ Core commands:
 
 ```sh
 sshoosh serve
+sshoosh bootstrap-token
 sshoosh doctor
+sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
 sshoosh invite --role member --ttl-hours 24
 ```
 
-Admin commands default to the first active owner/admin. Use `--actor ownername` to attribute an action to a specific owner/admin.
+Protected CLI commands require `--actor ownername` to attribute the action to a specific active account.
 
 ```sh
 sshoosh users list
@@ -68,10 +71,6 @@ sshoosh channels remove-member ops-secret alice
 
 sshoosh notifications list --actor alice
 sshoosh notifications mark-read --actor alice
-sshoosh webhooks list
-sshoosh webhooks add ops https://example.com/sshoosh
-sshoosh webhooks test <webhook-id>
-sshoosh webhooks remove <webhook-id>
 sshoosh audit list --limit 100
 sshoosh export --format json --out /path/to/export.json --include-audit
 sshoosh export --format markdown --out /path/to/export.md
@@ -137,9 +136,6 @@ Admin and lifecycle commands:
 /notification mentions
 /notification list
 /notification read [notification-id]
-/webhook list
-/webhook add name url
-/webhook remove webhook-id
 /audit list
 /more
 /older
@@ -149,13 +145,9 @@ Threads and DMs are marked read when opened in the detail view. Manual unread re
 
 Bare URLs and Markdown links render as OSC8 terminal hyperlinks where supported. `sshoosh` does not open links on the server; use terminal link support or copy the visible URL.
 
-## Notifications and Webhooks
+## Notifications
 
 V1 creates durable in-app notifications for `@username` mentions, new DMs, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires. Use `/notification list`, `/notification mentions`, and `/notification read` in the TUI or `sshoosh notifications ...` from the CLI.
-
-Outgoing webhooks are admin-managed. Each notification queues delivery jobs for enabled webhooks, and a background worker retries failed deliveries with exponential backoff before marking them failed. Delivery history is visible with `/webhook list` or `sshoosh webhooks list`.
-
-Webhook payloads are JSON and include the notification kind, title, body, and notification id. Use HTTPS endpoints in production.
 
 ## Backup and Export
 
@@ -167,7 +159,7 @@ sshoosh export --format json --out /var/backups/sshoosh.json --include-audit
 sshoosh export --format markdown --out /var/backups/sshoosh.md
 ```
 
-The JSON/Markdown export includes users, channels, threads, comments, DMs, mentions, reactions, notifications, webhooks, and optionally audit rows. It is not an import format.
+The JSON/Markdown export includes users, channels, threads, comments, DMs, mentions, reactions, notifications, and optionally audit rows. It is not an import format.
 
 ## Terminal Requirements
 

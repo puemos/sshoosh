@@ -1,7 +1,9 @@
-async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Action) {
-    let (account_id, channel_id, channel_slug, thread_id, conversation_id) = {
+use super::*;
+pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
+    let (session, account_id, channel_id, channel_slug, thread_id, conversation_id) = {
         let app = app.lock().await;
         (
+            app.client_session(),
             app.account.id.clone(),
             app.selected_channel_id(),
             app.selected_channel_slug(),
@@ -11,20 +13,20 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
     };
 
     let result = match action {
-        Action::CreateInvite => state
+        Action::CreateInvite => session
             .create_invite(account_id)
             .await
             .map(|code| format!("Invite code: {code}")),
-        Action::CreateInviteWithOptions { role, ttl_hours } => state
+        Action::CreateInviteWithOptions { role, ttl_hours } => session
             .create_invite_with_options(&account_id, role, ttl_hours)
             .await
             .map(|code| format!("Invite code: {code}")),
-        Action::AcceptInvite { code, username } => state
+        Action::AcceptInvite { code, username } => session
             .accept_invite(account_id, code, username)
             .await
             .map(|_| "Invite accepted".to_string()),
         Action::CreateChannel { name, private } => {
-            match state.create_channel(account_id, name, private).await {
+            match session.create_channel(account_id, name, private).await {
                 Ok(channel_id) => {
                     app.lock().await.select_channel(channel_id);
                     Ok("Channel created".to_string())
@@ -32,7 +34,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                 Err(err) => Err(err),
             }
         }
-        Action::JoinChannel { slug } => match state.join_channel(account_id, slug).await {
+        Action::JoinChannel { slug } => match session.join_channel(account_id, slug).await {
             Ok(channel_id) => {
                 app.lock().await.select_channel(channel_id);
                 Ok("Joined channel".to_string())
@@ -41,7 +43,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         },
         Action::LeaveChannel { slug } => {
             if let Some(slug) = slug.or(channel_slug.clone()) {
-                state
+                session
                     .leave_channel(&account_id, &slug)
                     .await
                     .map(|_| format!("Left {slug}"))
@@ -49,13 +51,13 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                 Err(anyhow::anyhow!("No channel selected"))
             }
         }
-        Action::ListChannels => state
+        Action::ListChannels => session
             .list_channels(&account_id, false)
             .await
             .map(|rows| format_channels(&rows)),
         Action::RenameChannel { slug, name } => {
             if let Some(slug) = slug.or(channel_slug.clone()) {
-                state
+                session
                     .rename_channel(&account_id, &slug, &name)
                     .await
                     .map(|_| format!("Renamed {slug}"))
@@ -65,7 +67,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         }
         Action::SetChannelTopic { slug, topic } => {
             if let Some(slug) = slug.or(channel_slug.clone()) {
-                state
+                session
                     .set_channel_topic(&account_id, &slug, &topic)
                     .await
                     .map(|_| format!("Updated {slug} topic"))
@@ -75,7 +77,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         }
         Action::SetChannelArchived { slug, archived } => {
             if let Some(slug) = slug.or(channel_slug.clone()) {
-                state
+                session
                     .set_channel_archived(&account_id, &slug, archived)
                     .await
                     .map(|_| {
@@ -89,9 +91,9 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                 Err(anyhow::anyhow!("No channel selected"))
             }
         }
-        Action::CreateThread { title, body } => match channel_id {
-            Some(channel_id) => match state
-                .create_thread(account_id, channel_id.clone(), title, body)
+        Action::CreateThread { title } => match channel_id {
+            Some(channel_id) => match session
+                .create_thread(account_id, channel_id.clone(), title)
                 .await
             {
                 Ok(thread_id) => {
@@ -104,7 +106,10 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         },
         Action::AddComment { body } => match (channel_id, thread_id) {
             (Some(channel_id), Some(thread_id)) => {
-                match state.add_comment(account_id, thread_id.clone(), body).await {
+                match session
+                    .add_comment(account_id, thread_id.clone(), body)
+                    .await
+                {
                     Ok(()) => {
                         app.lock()
                             .await
@@ -114,13 +119,13 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                     Err(err) => Err(err),
                 }
             }
-            (None, Some(thread_id)) => state
+            (None, Some(thread_id)) => session
                 .add_comment(account_id, thread_id, body)
                 .await
                 .map(|_| "Comment added".to_string()),
             (_, None) => Err(anyhow::anyhow!("No thread selected; use /thread new title")),
         },
-        Action::OpenDm { target } => match state.open_dm(account_id, target).await {
+        Action::OpenDm { target } => match session.open_dm(account_id, target).await {
             Ok(conversation_id) => {
                 app.lock().await.select_conversation(conversation_id);
                 Ok("DM opened".to_string())
@@ -129,7 +134,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         },
         Action::SendDm { body } => match conversation_id {
             Some(conversation_id) => {
-                match state
+                match session
                     .send_dm(account_id, conversation_id.clone(), body)
                     .await
                 {
@@ -145,34 +150,34 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             None => Err(anyhow::anyhow!("No DM selected; use /dm open @user")),
         },
         Action::MarkThreadRead => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .mark_thread_read(&account_id, &thread_id)
                 .await
                 .map(|_| "Marked read".to_string()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkThreadUnread => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .mark_thread_unread(&account_id, &thread_id)
                 .await
                 .map(|_| "Marked unread".to_string()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkDmRead => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .mark_conversation_read(&account_id, &conversation_id)
                 .await
                 .map(|_| "DM marked read".to_string()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::MarkDmUnread => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .mark_conversation_unread(&account_id, &conversation_id)
                 .await
                 .map(|_| "DM marked unread".to_string()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
-        Action::NextUnread => match state.next_unread(&account_id).await {
+        Action::NextUnread => match session.next_unread(&account_id).await {
             Ok(Some(NextUnread::Thread {
                 channel_id,
                 thread_id,
@@ -189,19 +194,19 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             Ok(None) => Ok("No unread activity".to_string()),
             Err(err) => Err(err),
         },
-        Action::ListUsers => state
+        Action::ListUsers => session
             .list_accounts(&account_id)
             .await
             .map(|rows| format_accounts(&rows)),
-        Action::SetUsername { username } => state
+        Action::SetUsername { username } => session
             .rename_user(&account_id, &account_id, &username)
             .await
             .map(|_| format!("Username updated to @{username}")),
-        Action::SetProfile { display_name } => state
+        Action::SetProfile { display_name } => session
             .set_display_name(&account_id, &account_id, &display_name)
             .await
             .map(|_| "Profile updated".to_string()),
-        Action::SetUserDisabled { username, disabled } => state
+        Action::SetUserDisabled { username, disabled } => session
             .set_user_disabled(&account_id, &username, disabled)
             .await
             .map(|_| {
@@ -211,66 +216,66 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                     format!("Enabled @{username}")
                 }
             }),
-        Action::SetUserRole { username, role } => state
+        Action::SetUserRole { username, role } => session
             .set_user_role(&account_id, &username, role)
             .await
             .map(|_| format!("Set @{username} role to {}", role.as_str())),
-        Action::ListKeys => state
+        Action::ListKeys => session
             .list_ssh_keys(&account_id)
             .await
             .map(|rows| format_keys(&rows)),
-        Action::ListMyKeys => state
+        Action::ListMyKeys => session
             .list_my_ssh_keys(&account_id)
             .await
             .map(|rows| format_keys(&rows)),
-        Action::AddKey { public_key, label } => state
+        Action::AddKey { public_key, label } => session
             .add_ssh_key(&account_id, None, &public_key, label.as_deref())
             .await
             .map(|row| format!("Added key {}", row.fingerprint)),
-        Action::LabelKey { key, label } => state
+        Action::LabelKey { key, label } => session
             .label_ssh_key(&account_id, &key, &label)
             .await
             .map(|_| "SSH key label updated".to_string()),
-        Action::RevokeKey { key } => state
+        Action::RevokeKey { key } => session
             .revoke_ssh_key(&account_id, &key)
             .await
             .map(|_| "SSH key revoked".to_string()),
-        Action::ListInvites => state
+        Action::ListInvites => session
             .list_invites(&account_id)
             .await
             .map(|rows| format_invites(&rows)),
-        Action::RevokeInvite { invite_id } => state
+        Action::RevokeInvite { invite_id } => session
             .revoke_invite(&account_id, &invite_id)
             .await
             .map(|_| "Invite revoked".to_string()),
-        Action::ListChannelMembers { slug } => state
+        Action::ListChannelMembers { slug } => session
             .list_channel_members(&account_id, &slug)
             .await
             .map(|rows| format_channel_members(&rows)),
-        Action::AddChannelMember { slug, username } => state
+        Action::AddChannelMember { slug, username } => session
             .add_channel_member(&account_id, &slug, &username)
             .await
             .map(|_| format!("Added @{username} to {slug}")),
-        Action::RemoveChannelMember { slug, username } => state
+        Action::RemoveChannelMember { slug, username } => session
             .remove_channel_member(&account_id, &slug, &username)
             .await
             .map(|_| format!("Removed @{username} from {slug}")),
         Action::RenameThread { title } => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .rename_thread(&account_id, &thread_id, &title)
                 .await
                 .map(|_| "Thread renamed".to_string()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::DeleteThread => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .delete_thread(&account_id, &thread_id)
                 .await
                 .map(|_| "Thread deleted".to_string()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::SetThreadArchived { archived } => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .set_thread_archived(&account_id, &thread_id, archived)
                 .await
                 .map(|_| {
@@ -283,7 +288,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::SetThreadPinned { pinned } => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .set_thread_pinned(&account_id, &thread_id, pinned)
                 .await
                 .map(|_| {
@@ -296,64 +301,64 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::SetThreadMuted { ttl_hours } => match (conversation_id, thread_id) {
-            (Some(conversation_id), _) => state
+            (Some(conversation_id), _) => session
                 .set_conversation_muted(&account_id, &conversation_id, ttl_hours)
                 .await
                 .map(|_| mute_message(ttl_hours, "DM")),
-            (None, Some(thread_id)) => state
+            (None, Some(thread_id)) => session
                 .set_thread_muted(&account_id, &thread_id, ttl_hours)
                 .await
                 .map(|_| mute_message(ttl_hours, "Thread")),
             _ => Err(anyhow::anyhow!("No thread or DM selected")),
         },
         Action::SetThreadSaved { saved } => match (conversation_id, thread_id) {
-            (Some(conversation_id), _) => state
+            (Some(conversation_id), _) => session
                 .set_conversation_saved(&account_id, &conversation_id, saved)
                 .await
                 .map(|_| saved_message(saved, "DM")),
-            (None, Some(thread_id)) => state
+            (None, Some(thread_id)) => session
                 .set_thread_saved(&account_id, &thread_id, saved)
                 .await
                 .map(|_| saved_message(saved, "Thread")),
             _ => Err(anyhow::anyhow!("No thread or DM selected")),
         },
         Action::EditComment { index, body } => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .edit_comment(&account_id, &thread_id, index, &body)
                 .await
                 .map(|_| format!("Comment #{index} edited")),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::DeleteComment { index } => match thread_id {
-            Some(thread_id) => state
+            Some(thread_id) => session
                 .delete_comment(&account_id, &thread_id, index)
                 .await
                 .map(|_| format!("Comment #{index} deleted")),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::EditDm { index, body } => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .edit_dm(&account_id, &conversation_id, index, &body)
                 .await
                 .map(|_| format!("DM #{index} edited")),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::DeleteDm { index } => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .delete_dm(&account_id, &conversation_id, index)
                 .await
                 .map(|_| format!("DM #{index} deleted")),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::SetDmMuted { ttl_hours } => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .set_conversation_muted(&account_id, &conversation_id, ttl_hours)
                 .await
                 .map(|_| mute_message(ttl_hours, "DM")),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::SetDmSaved { saved } => match conversation_id {
-            Some(conversation_id) => state
+            Some(conversation_id) => session
                 .set_conversation_saved(&account_id, &conversation_id, saved)
                 .await
                 .map(|_| saved_message(saved, "DM")),
@@ -361,7 +366,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         },
         Action::React { emoji, index } => {
             react_or_unreact(
-                state,
+                &session,
                 &account_id,
                 thread_id.as_deref(),
                 conversation_id.as_deref(),
@@ -373,7 +378,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
         }
         Action::Unreact { emoji, index } => {
             react_or_unreact(
-                state,
+                &session,
                 &account_id,
                 thread_id.as_deref(),
                 conversation_id.as_deref(),
@@ -383,37 +388,25 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             )
             .await
         }
-        Action::ListMentions => state
+        Action::ListMentions => session
             .list_mentions(&account_id, 50)
             .await
             .map(|rows| format_mentions(&rows)),
-        Action::ListNotifications => state
+        Action::ListNotifications => session
             .list_notifications(&account_id, 50)
             .await
             .map(|rows| format_notifications(&rows)),
-        Action::MarkNotificationRead { notification_id } => state
+        Action::MarkNotificationRead { notification_id } => session
             .mark_notification_read(&account_id, notification_id.as_deref())
             .await
             .map(|_| "Notifications marked read".to_string()),
-        Action::ListWebhooks => state
-            .list_webhooks(&account_id)
-            .await
-            .map(|(webhooks, deliveries)| format_webhooks(&webhooks, &deliveries)),
-        Action::AddWebhook { name, url } => state
-            .add_webhook(&account_id, &name, &url)
-            .await
-            .map(|id| format!("Webhook added: {id}")),
-        Action::RemoveWebhook { webhook_id } => state
-            .remove_webhook(&account_id, &webhook_id)
-            .await
-            .map(|_| "Webhook removed".to_string()),
-        Action::ListAudit => state
+        Action::ListAudit => session
             .list_audit(&account_id, 100)
             .await
             .map(|rows| format_audit(&rows)),
         Action::Search { query } => {
             let limit = app.lock().await.reset_search_limit();
-            match state.search_page(&account_id, &query, limit).await {
+            match session.search_page(&account_id, &query, limit).await {
                 Ok(page) => {
                     app.lock()
                         .await
@@ -434,7 +427,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                 }
             };
             if let Some((query, limit)) = search_request {
-                match state.search_page(&account_id, &query, limit).await {
+                match session.search_page(&account_id, &query, limit).await {
                     Ok(page) => {
                         app.lock().await.set_search_results(
                             query,
@@ -471,8 +464,8 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
     }
 }
 
-async fn react_or_unreact(
-    state: &ServerState,
+pub(crate) async fn react_or_unreact(
+    session: &ClientSession,
     account_id: &str,
     thread_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -482,16 +475,16 @@ async fn react_or_unreact(
 ) -> anyhow::Result<String> {
     if let Some(conversation_id) = conversation_id {
         let index = index.ok_or_else(|| anyhow::anyhow!("DM reaction requires a message index"))?;
-        state
+        session
             .react_to_dm(account_id, conversation_id, index, &emoji, remove)
             .await?;
     } else if let Some(thread_id) = thread_id {
         if let Some(index) = index {
-            state
+            session
                 .react_to_comment(account_id, thread_id, index, &emoji, remove)
                 .await?;
         } else {
-            state
+            session
                 .react_to_thread(account_id, thread_id, &emoji, remove)
                 .await?;
         }
@@ -504,4 +497,3 @@ async fn react_or_unreact(
         format!("Reacted {emoji}")
     })
 }
-

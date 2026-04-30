@@ -23,12 +23,13 @@ use tokio::{
 
 use crate::{
     app::{Action, App},
+    client::ClientSession,
     config::Config,
     output::ssh::{
         format_accounts, format_audit, format_channel_members, format_channels, format_invites,
-        format_keys, format_mentions, format_notifications, format_webhooks,
+        format_keys, format_mentions, format_notifications,
     },
-    service::{Account, NextUnread, ServerState},
+    service::{Account, NextUnread, ServerRuntime, ServerState},
     terminal,
 };
 
@@ -38,8 +39,12 @@ const MIN_RENDER_GAP: Duration = Duration::from_millis(20);
 const PRESENCE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(45);
 const EXIT_MESSAGE: &str = "\r\nBye from sshoosh.\r\n";
 
-include!("ssh/server.rs");
-include!("ssh/session.rs");
-include!("ssh/render_loop.rs");
-include!("ssh/actions.rs");
-include!("ssh/format.rs");
+mod actions;
+mod format;
+mod render_loop;
+mod server;
+mod session;
+
+pub use server::{run, run_with_listener};
+
+pub(crate) use self::{actions::*, format::*, render_loop::*, server::*};

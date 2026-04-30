@@ -193,7 +193,7 @@ pub enum BottomBarAction {
     CancelQuit,
 }
 
-fn contains(rect: Rect, column: u16, row: u16) -> bool {
+pub(crate) fn contains(rect: Rect, column: u16, row: u16) -> bool {
     column >= rect.x
         && row >= rect.y
         && column < rect.x.saturating_add(rect.width)

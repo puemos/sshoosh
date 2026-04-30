@@ -1,4 +1,5 @@
-async fn load_user_presence(
+use super::*;
+pub(crate) async fn load_user_presence(
     pool: &SqlitePool,
     active_account_ids: &HashSet<String>,
 ) -> anyhow::Result<Vec<UserPresence>> {
@@ -24,7 +25,7 @@ async fn load_user_presence(
         .collect())
 }
 
-async fn load_notifications(
+pub(crate) async fn load_notifications(
     pool: &SqlitePool,
     account_id: &str,
     limit: i64,
@@ -57,7 +58,10 @@ async fn load_notifications(
         .collect())
 }
 
-async fn load_channels(pool: &SqlitePool, account_id: &str) -> anyhow::Result<Vec<Channel>> {
+pub(crate) async fn load_channels(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> anyhow::Result<Vec<Channel>> {
     let current_time = now();
     let rows = sqlx::query(
         "SELECT c.id, c.slug, c.name, c.visibility, c.topic,
@@ -103,7 +107,7 @@ async fn load_channels(pool: &SqlitePool, account_id: &str) -> anyhow::Result<Ve
         .collect())
 }
 
-async fn load_threads(
+pub(crate) async fn load_threads(
     pool: &SqlitePool,
     account_id: &str,
     channel_id: &str,
@@ -168,7 +172,7 @@ async fn load_threads(
         .collect())
 }
 
-async fn load_comments(
+pub(crate) async fn load_comments(
     pool: &SqlitePool,
     thread_id: &str,
     limit: i64,
@@ -219,7 +223,7 @@ async fn load_comments(
     Ok((comments, has_more))
 }
 
-async fn load_conversations(
+pub(crate) async fn load_conversations(
     pool: &SqlitePool,
     account_id: &str,
 ) -> anyhow::Result<Vec<Conversation>> {
@@ -274,7 +278,7 @@ async fn load_conversations(
         .collect())
 }
 
-async fn load_conversation_messages(
+pub(crate) async fn load_conversation_messages(
     pool: &SqlitePool,
     conversation_id: &str,
     limit: i64,
@@ -325,7 +329,7 @@ async fn load_conversation_messages(
     Ok((messages, has_more))
 }
 
-async fn load_account_tx(
+pub(crate) async fn load_account_tx(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
 ) -> anyhow::Result<Account> {
@@ -336,10 +340,10 @@ async fn load_account_tx(
     .bind(account_id)
     .fetch_one(&mut **tx)
     .await?;
-    Ok(account_from_row(row))
+    account_from_row(row)
 }
 
-async fn ensure_can_view_channel(
+pub(crate) async fn ensure_can_view_channel(
     tx: &mut Transaction<'_, Sqlite>,
     account_id: &str,
     channel_id: &str,
@@ -363,4 +367,3 @@ async fn ensure_can_view_channel(
     anyhow::ensure!(count > 0, "You do not have access to this channel");
     Ok(())
 }
-

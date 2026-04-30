@@ -1,11 +1,12 @@
+use super::*;
 impl App {
-    fn enter_compose(&mut self, initial: &str) {
+    pub(crate) fn enter_compose(&mut self, initial: &str) {
         self.ui.mode = UiMode::Compose;
         self.ui.composer = ComposerState::from(initial);
         self.update_completions();
     }
 
-    fn open_prompt(&mut self, title: &str, prefix: &str, placeholder: &str) {
+    pub(crate) fn open_prompt(&mut self, title: &str, prefix: &str, placeholder: &str) {
         self.ui.mode = UiMode::Prompt;
         self.ui.prompt = PromptState {
             title: title.to_string(),
@@ -15,19 +16,19 @@ impl App {
         };
     }
 
-    fn open_palette(&mut self) {
+    pub(crate) fn open_palette(&mut self) {
         self.ui.mode = UiMode::Palette;
         self.ui.palette = PaletteState::default();
         self.rebuild_palette();
     }
 
-    fn rebuild_palette(&mut self) {
+    pub(crate) fn rebuild_palette(&mut self) {
         self.ui.palette.items = self.commands.palette_items(&self.snapshot);
         let query = self.ui.palette.query.clone();
         self.ui.palette.apply_filter(&query);
     }
 
-    fn run_palette_selection(&mut self) {
+    pub(crate) fn run_palette_selection(&mut self) {
         let Some(item) = self.ui.palette.selected_item().cloned() else {
             return;
         };
@@ -72,7 +73,7 @@ impl App {
         }
     }
 
-    fn update_completions(&mut self) {
+    pub(crate) fn update_completions(&mut self) {
         self.ui.composer.autocomplete = self.commands.autocomplete(
             &self.ui.composer.buffer,
             self.ui.composer.cursor,
@@ -80,7 +81,7 @@ impl App {
         );
     }
 
-    fn accept_autocomplete_if_incomplete(&mut self) -> bool {
+    pub(crate) fn accept_autocomplete_if_incomplete(&mut self) -> bool {
         let replacement = self.ui.composer.autocomplete.selected_replacement();
         if let Some((range, value)) = replacement {
             if self.ui.composer.buffer.get(range.clone()) == Some(value.as_str()) {
@@ -93,7 +94,7 @@ impl App {
         false
     }
 
-    fn accept_autocomplete_tab(&mut self) -> bool {
+    pub(crate) fn accept_autocomplete_tab(&mut self) -> bool {
         let replacement = self.ui.composer.autocomplete.selected_tab_replacement();
         if let Some((range, value)) = replacement {
             self.ui.composer.replace_range(range, &value);
@@ -103,7 +104,7 @@ impl App {
         false
     }
 
-    fn submit_onboarding(&mut self) {
+    pub(crate) fn submit_onboarding(&mut self) {
         let body = self.ui.composer.buffer.trim().to_string();
         self.ui.composer = ComposerState::default();
         if body.is_empty() {
@@ -119,7 +120,7 @@ impl App {
         self.actions.push(Action::AcceptInvite { code, username });
     }
 
-    fn submit_composer(&mut self) {
+    pub(crate) fn submit_composer(&mut self) {
         let body = self.ui.composer.buffer.trim().to_string();
         if body.is_empty() {
             self.ui.mode = UiMode::Normal;
@@ -141,7 +142,7 @@ impl App {
         }
     }
 
-    fn dispatch_command_line(&mut self, line: String) {
+    pub(crate) fn dispatch_command_line(&mut self, line: String) {
         let command = line
             .trim()
             .trim_start_matches('/')

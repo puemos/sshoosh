@@ -106,39 +106,6 @@ pub mod cli {
         out
     }
 
-    pub fn format_webhooks(
-        webhooks: &[service::WebhookSummary],
-        deliveries: &[service::WebhookDeliverySummary],
-    ) -> String {
-        let mut out = String::from("Webhooks\nid\tname\tstate\turl\n");
-        for row in webhooks {
-            out.push_str(&format!(
-                "{}\t{}\t{}\t{}\n",
-                row.id,
-                row.name,
-                if row.enabled && row.disabled_at.is_none() {
-                    "enabled"
-                } else {
-                    "disabled"
-                },
-                row.url
-            ));
-        }
-        out.push_str("\nDeliveries\nid\twebhook\tstatus\tattempts\tnext\tlast_error\n");
-        for row in deliveries {
-            out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\n",
-                row.id,
-                row.webhook_name,
-                row.status,
-                row.attempts,
-                row.next_attempt_at,
-                row.last_error.as_deref().unwrap_or("-")
-            ));
-        }
-        out
-    }
-
     pub fn format_audit(rows: &[service::AuditEntry]) -> String {
         let mut out = String::from("created\tactor\taction\ttarget\tmetadata\n");
         for row in rows {
@@ -158,7 +125,7 @@ pub mod cli {
 pub mod ssh {
     use crate::service::{
         AccountSummary, AuditEntry, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
-        MentionSummary, NotificationSummary, SshKeySummary, WebhookDeliverySummary, WebhookSummary,
+        MentionSummary, NotificationSummary, SshKeySummary,
     };
 
     pub fn format_accounts(rows: &[AccountSummary]) -> String {
@@ -288,42 +255,6 @@ pub mod ssh {
                     "unread"
                 },
                 row.body.replace('\n', " ")
-            ));
-        }
-        out
-    }
-
-    pub fn format_webhooks(
-        webhooks: &[WebhookSummary],
-        deliveries: &[WebhookDeliverySummary],
-    ) -> String {
-        let mut out = String::from("Webhooks\n");
-        for row in webhooks {
-            out.push_str(&format!(
-                "{}  {}  {}  {}\n",
-                short_id(&row.id),
-                row.name,
-                if row.enabled && row.disabled_at.is_none() {
-                    "enabled"
-                } else {
-                    "disabled"
-                },
-                row.url
-            ));
-        }
-        out.push_str("\nDeliveries\n");
-        for row in deliveries {
-            out.push_str(&format!(
-                "{}  {}  {}  attempts:{}  next:{}{}\n",
-                short_id(&row.id),
-                row.webhook_name,
-                row.status,
-                row.attempts,
-                row.next_attempt_at,
-                row.last_error
-                    .as_ref()
-                    .map(|err| format!("  error:{err}"))
-                    .unwrap_or_default()
             ));
         }
         out

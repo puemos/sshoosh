@@ -1,3 +1,4 @@
+use super::*;
 impl App {
     pub async fn new(
         account: Account,
@@ -6,8 +7,12 @@ impl App {
         rows: u16,
     ) -> anyhow::Result<Self> {
         let (terminal, shared) = terminal::terminal(cols.max(80), rows.max(24))?;
-        let live_rx = state.subscribe();
-        let snapshot = state.snapshot(&account.id, None, None, None).await?;
+        let client = ClientSession::new(account, state);
+        let live_rx = client.subscribe();
+        let snapshot = client
+            .snapshot(None, None, None, DEFAULT_HISTORY_LIMIT)
+            .await?;
+        let account = client.account().clone();
         let mut ui = UiState::default();
         ui.sync_route_from_snapshot(&snapshot);
         Ok(Self {
@@ -15,7 +20,7 @@ impl App {
             terminal,
             shared,
             account,
-            state,
+            client,
             live_rx,
             snapshot,
             ui,
@@ -33,7 +38,7 @@ impl App {
     }
 
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
-        self.account = match self.state.reload_account(&self.account.id).await {
+        self.account = match self.client.refresh_account().await {
             Ok(account) => account,
             Err(err) => {
                 self.running = false;
@@ -44,9 +49,8 @@ impl App {
         let search_results = self.snapshot.search_results.clone();
         let search_has_more = self.snapshot.search_has_more;
         self.snapshot = self
-            .state
-            .snapshot_with_history_limit(
-                &self.account.id,
+            .client
+            .snapshot(
                 self.snapshot.selected_channel_id.as_deref(),
                 self.snapshot.selected_thread_id.as_deref(),
                 self.snapshot.selected_conversation_id.as_deref(),
@@ -90,6 +94,10 @@ impl App {
 
     pub fn take_refresh_requested(&mut self) -> bool {
         std::mem::take(&mut self.refresh_requested)
+    }
+
+    pub(crate) fn client_session(&self) -> ClientSession {
+        self.client.clone()
     }
 
     pub fn set_banner_ok(&mut self, text: impl Into<String>) {
@@ -226,5 +234,4 @@ impl App {
                 .min(self.snapshot.search_results.len().saturating_sub(1));
         }
     }
-
 }

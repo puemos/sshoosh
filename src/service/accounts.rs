@@ -1,3 +1,4 @@
+use super::*;
 impl ServerState {
     pub async fn create_invite_with_options(
         &self,
@@ -5,18 +6,7 @@ impl ServerState {
         role_on_accept: Role,
         ttl_hours: Option<i64>,
     ) -> anyhow::Result<String> {
-        let result = create_invite_with_options(
-            self.db.write_pool(),
-            &self.live_tx,
-            actor_id,
-            role_on_accept,
-            ttl_hours,
-        )
-        .await;
-        if let Ok(code) = &result {
-            let _ = code;
-        }
-        result
+        create_invite_with_options(self.db.write_pool(), actor_id, role_on_accept, ttl_hours).await
     }
 
     pub async fn list_accounts(&self, actor_id: &str) -> anyhow::Result<Vec<AccountSummary>> {
@@ -30,19 +20,20 @@ impl ServerState {
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| AccountSummary {
-                id: row.get("id"),
-                username: row.get("username"),
-                display_name: row.get("display_name"),
-                role: Role::from_db(row.get::<String, _>("role").as_str()),
-                activated: row.get::<Option<String>, _>("activated_at").is_some(),
-                disabled: row.get::<Option<String>, _>("disabled_at").is_some(),
-                created_at: row.get("created_at"),
-                last_seen_at: row.get("last_seen_at"),
+        rows.into_iter()
+            .map(|row| {
+                Ok(AccountSummary {
+                    id: row.get("id"),
+                    username: row.get("username"),
+                    display_name: row.get("display_name"),
+                    role: Role::from_db(row.get::<String, _>("role").as_str())?,
+                    activated: row.get::<Option<String>, _>("activated_at").is_some(),
+                    disabled: row.get::<Option<String>, _>("disabled_at").is_some(),
+                    created_at: row.get("created_at"),
+                    last_seen_at: row.get("last_seen_at"),
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn set_user_disabled(
@@ -77,7 +68,7 @@ impl ServerState {
             serde_json::json!({"username": target.username}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -91,7 +82,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -126,7 +116,7 @@ impl ServerState {
             serde_json::json!({"username": target.username, "role": role.as_str()}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -136,7 +126,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -180,7 +169,7 @@ impl ServerState {
             serde_json::json!({"from": target.username, "to": next_username}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -190,7 +179,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -230,7 +218,7 @@ impl ServerState {
             serde_json::json!({"username": target.username, "display_name": display_name}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -240,7 +228,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -300,7 +287,7 @@ impl ServerState {
             serde_json::json!({"username": target.username, "fingerprint": parsed.fingerprint}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -310,7 +297,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(SshKeySummary {
             id: key_id,
             username: target.username,
@@ -350,7 +336,7 @@ impl ServerState {
             id: row.get("account_id"),
             username: row.get("username"),
             display_name: String::new(),
-            role: Role::from_db(row.get::<String, _>("role").as_str()),
+            role: Role::from_db(row.get::<String, _>("role").as_str())?,
             activated: true,
         };
         if actor.id != target.id {
@@ -428,7 +414,7 @@ impl ServerState {
             serde_json::json!({"from_account_id": old_account_id, "to_username": target.username}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -438,7 +424,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -477,7 +462,7 @@ impl ServerState {
             id: row.get("account_id"),
             username: row.get("username"),
             display_name: String::new(),
-            role: Role::from_db(row.get::<String, _>("role").as_str()),
+            role: Role::from_db(row.get::<String, _>("role").as_str())?,
             activated: true,
         };
         if actor.id != target.id {
@@ -501,7 +486,7 @@ impl ServerState {
             serde_json::json!({"username": target.username, "fingerprint": row.get::<String, _>("fingerprint")}),
         )
         .await?;
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -511,9 +496,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
-
-
 }

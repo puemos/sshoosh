@@ -1,3 +1,4 @@
+use super::*;
 impl App {
     pub fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
         self.terminal
@@ -49,7 +50,7 @@ impl App {
         Ok(output)
     }
 
-    fn active_invite_code(&self) -> Option<&str> {
+    pub(crate) fn active_invite_code(&self) -> Option<&str> {
         self.ui
             .banner
             .as_ref()

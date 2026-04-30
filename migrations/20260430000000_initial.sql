@@ -34,6 +34,14 @@ CREATE TABLE invites (
   accepted_at TEXT
 );
 
+CREATE TABLE bootstrap_tokens (
+  id TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  used_by_account_id TEXT REFERENCES accounts(id),
+  used_at TEXT
+);
+
 CREATE TABLE channels (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
@@ -169,7 +177,7 @@ CREATE TABLE notifications (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   actor_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('mention', 'dm', 'reply', 'webhook_test')),
+  kind TEXT NOT NULL CHECK (kind IN ('mention', 'dm', 'reply')),
   source_kind TEXT,
   source_id TEXT,
   channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
@@ -182,34 +190,6 @@ CREATE TABLE notifications (
 );
 
 CREATE INDEX idx_notifications_account ON notifications(account_id, read_at, created_at DESC);
-
-CREATE TABLE webhook_subscriptions (
-  id TEXT PRIMARY KEY,
-  created_by_account_id TEXT NOT NULL REFERENCES accounts(id),
-  name TEXT NOT NULL,
-  url TEXT NOT NULL,
-  secret TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  disabled_at TEXT
-);
-
-CREATE TABLE webhook_jobs (
-  id TEXT PRIMARY KEY,
-  webhook_id TEXT NOT NULL REFERENCES webhook_subscriptions(id) ON DELETE CASCADE,
-  notification_id TEXT REFERENCES notifications(id) ON DELETE SET NULL,
-  payload_json TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'failed')),
-  attempts INTEGER NOT NULL DEFAULT 0,
-  next_attempt_at TEXT NOT NULL,
-  last_error TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  delivered_at TEXT
-);
-
-CREATE INDEX idx_webhook_jobs_due ON webhook_jobs(status, next_attempt_at);
 
 CREATE TABLE event_log (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,

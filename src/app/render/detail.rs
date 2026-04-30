@@ -1,4 +1,5 @@
-fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+use super::*;
+pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if matches!(ui.route, Route::Dms) {
         draw_dm_detail(frame, area, snapshot, ui);
         return;
@@ -103,7 +104,12 @@ fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiSt
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
 }
 
-fn draw_search_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+pub(crate) fn draw_search_detail(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
     let title = snapshot
@@ -152,7 +158,7 @@ fn draw_search_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &m
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
 }
 
-fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
+pub(crate) fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
     draw_pane_header(
         frame,
         area,
@@ -161,7 +167,7 @@ fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiStat
     );
 }
 
-fn draw_detail_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
+pub(crate) fn draw_detail_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
     draw_pane_header(
         frame,
         area,
@@ -174,7 +180,7 @@ fn draw_detail_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) 
     );
 }
 
-fn draw_pane_header(frame: &mut Frame, area: Rect, title: &str, style: Style) {
+pub(crate) fn draw_pane_header(frame: &mut Frame, area: Rect, title: &str, style: Style) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -185,7 +191,7 @@ fn draw_pane_header(frame: &mut Frame, area: Rect, title: &str, style: Style) {
     );
 }
 
-fn pane_scroll_area(area: Rect) -> Rect {
+pub(crate) fn pane_scroll_area(area: Rect) -> Rect {
     let header_height = area.height.min(1);
     Rect::new(
         area.x,
@@ -195,7 +201,11 @@ fn pane_scroll_area(area: Rect) -> Rect {
     )
 }
 
-fn ensure_scroll_row_visible(state: &mut ScrollViewState, row: Option<u16>, viewport_height: u16) {
+pub(crate) fn ensure_scroll_row_visible(
+    state: &mut ScrollViewState,
+    row: Option<u16>,
+    viewport_height: u16,
+) {
     let Some(row) = row else {
         return;
     };
@@ -216,7 +226,7 @@ fn ensure_scroll_row_visible(state: &mut ScrollViewState, row: Option<u16>, view
     }
 }
 
-fn register_scroll_hits(
+pub(crate) fn register_scroll_hits(
     ui: &mut UiState,
     area: Rect,
     scroll_target: HitTarget,
@@ -236,7 +246,7 @@ fn register_scroll_hits(
     }
 }
 
-fn render_scroll_items(
+pub(crate) fn render_scroll_items(
     frame: &mut Frame,
     area: Rect,
     items: Vec<ListItem>,
@@ -263,7 +273,7 @@ fn render_scroll_items(
     frame.render_stateful_widget(scroll_view, area, state);
 }
 
-fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
     let title = snapshot
@@ -315,7 +325,6 @@ fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut U
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
 }
 
-fn history_prompt(text: &'static str) -> ListItem<'static> {
+pub(crate) fn history_prompt(text: &'static str) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(text, theme::muted())))
 }
-

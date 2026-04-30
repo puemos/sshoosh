@@ -1,26 +1,12 @@
+use super::*;
 impl ServerState {
     pub async fn new(db: Database) -> anyhow::Result<Self> {
         let (live_tx, _) = broadcast::channel(1024);
-        let (tx, rx) = mpsc::channel(256);
-        let max_seq: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM event_log")
-            .fetch_one(db.read_pool())
-            .await
-            .unwrap_or(0);
-        let event_cursor = Arc::new(RwLock::new(max_seq));
-        let state = Self {
-            db: db.clone(),
-            writer: WriteHandle { tx },
+        Ok(Self {
+            db,
             live_tx,
             active_connections: Arc::new(RwLock::new(HashMap::new())),
-        };
-        start_writer(db.write_pool().clone(), state.live_tx.clone(), rx);
-        start_event_poller(
-            db.read_pool().clone(),
-            state.live_tx.clone(),
-            event_cursor.clone(),
-        );
-        start_webhook_worker(db.write_pool().clone());
-        Ok(state)
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<LiveEvent> {
@@ -40,7 +26,10 @@ impl ServerState {
             "SELECT a.id, a.username, a.display_name, a.role, a.activated_at
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
-             WHERE k.fingerprint = ? AND k.revoked_at IS NULL AND a.disabled_at IS NULL",
+             WHERE k.fingerprint = ?
+               AND k.revoked_at IS NULL
+               AND a.activated_at IS NOT NULL
+               AND a.disabled_at IS NULL",
         )
         .bind(fingerprint)
         .fetch_optional(&mut *tx)
@@ -59,23 +48,70 @@ impl ServerState {
                 .execute(&mut *tx)
                 .await?;
             tx.commit().await?;
-            return Ok(account_from_row(row));
+            return account_from_row(row);
         }
 
-        let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
-            .fetch_one(&mut *tx)
-            .await?;
+        let Some((desired_username, token)) = login_username.split_once('+') else {
+            bail!("Unknown SSH key; use username+token to bootstrap or accept an invite");
+        };
+        let username = normalize_username(desired_username)?;
+        let token_hash = code_hash(token);
+        let active_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM accounts
+             WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
         let account_id = id();
-        let username = next_username(&mut tx, login_username).await?;
-        let role = if existing_count == 0 {
+        let mut bootstrap_token_id = None;
+        let mut invite_id = None;
+        let role = if active_count == 0 {
+            let token_id: Option<String> = sqlx::query_scalar(
+                "SELECT id
+                 FROM bootstrap_tokens
+                 WHERE code_hash = ? AND used_at IS NULL
+                 LIMIT 1",
+            )
+            .bind(&token_hash)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(token_id) = token_id else {
+                bail!("Bootstrap token is invalid or already used");
+            };
+            let existing: Option<String> =
+                sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
+                    .bind(&username)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            anyhow::ensure!(existing.is_none(), "Username is already taken");
+            bootstrap_token_id = Some(token_id);
             Role::Owner
         } else {
-            Role::Member
-        };
-        let activated_at = if existing_count == 0 {
-            Some(now.clone())
-        } else {
-            None
+            let invite = sqlx::query(
+                "SELECT id, role_on_accept
+                 FROM invites
+                 WHERE code_hash = ?
+                   AND accepted_at IS NULL
+                   AND revoked_at IS NULL
+                   AND (expires_at IS NULL OR expires_at > ?)
+                 LIMIT 1",
+            )
+            .bind(&token_hash)
+            .bind(&now)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(invite) = invite else {
+                bail!("Invite token is invalid, expired, or already used");
+            };
+            let existing: Option<String> =
+                sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
+                    .bind(&username)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            anyhow::ensure!(existing.is_none(), "Username is already taken");
+            invite_id = Some(invite.get::<String, _>("id"));
+            Role::from_db(invite.get::<String, _>("role_on_accept").as_str())?
         };
 
         sqlx::query(
@@ -90,7 +126,7 @@ impl ServerState {
         .bind(&now)
         .bind(&now)
         .bind(&now)
-        .bind(&activated_at)
+        .bind(&now)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
@@ -106,28 +142,50 @@ impl ServerState {
         .execute(&mut *tx)
         .await?;
 
-        if existing_count == 0 {
+        if let Some(token_id) = bootstrap_token_id {
+            sqlx::query(
+                "UPDATE bootstrap_tokens
+                 SET used_by_account_id = ?, used_at = ?
+                 WHERE id = ? AND used_at IS NULL",
+            )
+            .bind(&account_id)
+            .bind(&now)
+            .bind(&token_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if let Some(invite_id) = invite_id {
+            sqlx::query(
+                "UPDATE invites
+                 SET accepted_by_account_id = ?, accepted_at = ?
+                 WHERE id = ? AND accepted_at IS NULL",
+            )
+            .bind(&account_id)
+            .bind(&now)
+            .bind(&invite_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let general_id = if let Some(general_id) =
+            sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE slug = 'general'")
+                .fetch_optional(&mut *tx)
+                .await?
+        {
+            general_id
+        } else {
             let channel_id = id();
             sqlx::query(
-                "INSERT INTO channels
-                 (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
-                 VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
-            )
-            .bind(&channel_id)
-            .bind(&account_id)
-            .bind(&now)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query(
-                "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
-                 VALUES (?, ?, 'owner', ?)",
-            )
-            .bind(&channel_id)
-            .bind(&account_id)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
+                    "INSERT INTO channels
+                     (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
+                     VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
+                )
+                .bind(&channel_id)
+                .bind(&account_id)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await?;
             insert_event(
                 &mut tx,
                 None,
@@ -135,6 +193,44 @@ impl ServerState {
                 None,
                 "channel.created",
                 serde_json::json!({"channel_id": channel_id, "slug": "general"}),
+            )
+            .await?;
+            channel_id
+        };
+        sqlx::query(
+            "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(channel_id, account_id) DO NOTHING",
+        )
+        .bind(&general_id)
+        .bind(&account_id)
+        .bind(if role == Role::Owner {
+            "owner"
+        } else {
+            "member"
+        })
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+
+        if role == Role::Owner {
+            insert_event(
+                &mut tx,
+                None,
+                None,
+                None,
+                "account.bootstrapped",
+                serde_json::json!({"account_id": account_id, "username": username}),
+            )
+            .await?;
+        } else {
+            insert_event(
+                &mut tx,
+                None,
+                None,
+                None,
+                "invite.accepted",
+                serde_json::json!({"account_id": account_id, "username": username}),
             )
             .await?;
         }
@@ -145,7 +241,7 @@ impl ServerState {
             username: username.clone(),
             display_name: username,
             role,
-            activated: activated_at.is_some(),
+            activated: true,
         })
     }
 
@@ -157,7 +253,7 @@ impl ServerState {
         .bind(account_id)
         .fetch_one(self.db.read_pool())
         .await?;
-        Ok(account_from_row(row))
+        account_from_row(row)
     }
 
     pub async fn snapshot(
@@ -332,7 +428,7 @@ impl ServerState {
                 .await?;
             }
         }
-        let event = insert_event(
+        insert_event(
             &mut tx,
             None,
             None,
@@ -342,7 +438,6 @@ impl ServerState {
         )
         .await?;
         tx.commit().await?;
-        publish(&self.live_tx, event);
         Ok(())
     }
 
@@ -432,7 +527,7 @@ impl ServerState {
     }
 
     pub async fn create_invite(&self, actor_id: String) -> anyhow::Result<String> {
-        self.writer.create_invite(actor_id).await
+        create_invite(self.db.write_pool(), &actor_id).await
     }
 
     pub async fn accept_invite(
@@ -441,7 +536,7 @@ impl ServerState {
         code: String,
         username: String,
     ) -> anyhow::Result<()> {
-        self.writer.accept_invite(account_id, code, username).await
+        accept_invite(self.db.write_pool(), &account_id, &code, &username).await
     }
 
     pub async fn create_channel(
@@ -450,11 +545,11 @@ impl ServerState {
         name: String,
         private: bool,
     ) -> anyhow::Result<String> {
-        self.writer.create_channel(actor_id, name, private).await
+        create_channel(self.db.write_pool(), &actor_id, &name, private).await
     }
 
     pub async fn join_channel(&self, actor_id: String, slug: String) -> anyhow::Result<String> {
-        self.writer.join_channel(actor_id, slug).await
+        join_channel(self.db.write_pool(), &actor_id, &slug).await
     }
 
     pub async fn create_thread(
@@ -462,11 +557,8 @@ impl ServerState {
         actor_id: String,
         channel_id: String,
         title: String,
-        body: String,
     ) -> anyhow::Result<String> {
-        self.writer
-            .create_thread(actor_id, channel_id, title, body)
-            .await
+        create_thread(self.db.write_pool(), &actor_id, &channel_id, &title).await
     }
 
     pub async fn add_comment(
@@ -475,11 +567,11 @@ impl ServerState {
         thread_id: String,
         body: String,
     ) -> anyhow::Result<()> {
-        self.writer.add_comment(actor_id, thread_id, body).await
+        add_comment(self.db.write_pool(), &actor_id, &thread_id, &body).await
     }
 
     pub async fn open_dm(&self, actor_id: String, target: String) -> anyhow::Result<String> {
-        self.writer.open_dm(actor_id, target).await
+        open_dm(self.db.write_pool(), &actor_id, &target).await
     }
 
     pub async fn send_dm(
@@ -488,8 +580,6 @@ impl ServerState {
         conversation_id: String,
         body: String,
     ) -> anyhow::Result<()> {
-        self.writer.send_dm(actor_id, conversation_id, body).await
+        send_dm(self.db.write_pool(), &actor_id, &conversation_id, &body).await
     }
-
-
 }

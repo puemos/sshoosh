@@ -1,3 +1,4 @@
+use super::*;
 impl russh::server::Handler for ClientHandler {
     type Error = anyhow::Error;
 
@@ -135,7 +136,7 @@ impl russh::server::Handler for ClientHandler {
                 if last_render.elapsed() < MIN_RENDER_GAP {
                     tokio::time::sleep(MIN_RENDER_GAP - last_render.elapsed()).await;
                 }
-                match render_once(&state, &app, &mut input_rx, &handle, channel_id, &signal).await {
+                match render_once(&app, &mut input_rx, &handle, channel_id, &signal).await {
                     Ok(should_quit) => {
                         last_render = Instant::now();
                         if should_quit {

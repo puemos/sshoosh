@@ -1,11 +1,12 @@
-fn mouse_position(mouse: MouseEvent) -> Position {
+use super::*;
+pub(crate) fn mouse_position(mouse: MouseEvent) -> Position {
     Position {
         x: mouse.column,
         y: mouse.row,
     }
 }
 
-fn clamp_index(current: usize, delta: isize, len: usize) -> usize {
+pub(crate) fn clamp_index(current: usize, delta: isize, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
@@ -13,7 +14,7 @@ fn clamp_index(current: usize, delta: isize, len: usize) -> usize {
     next.clamp(0, len.saturating_sub(1) as isize) as usize
 }
 
-fn cursor_for_display_position(
+pub(crate) fn cursor_for_display_position(
     buffer: &str,
     width: usize,
     target_line: usize,

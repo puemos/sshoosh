@@ -1,3 +1,4 @@
+use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSpec {
     pub name: &'static str,
@@ -9,11 +10,11 @@ pub struct CommandSpec {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SubcommandSpec {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    description: &'static str,
-    args: &'static str,
+pub(crate) struct SubcommandSpec {
+    pub(crate) name: &'static str,
+    pub(crate) aliases: &'static [&'static str],
+    pub(crate) description: &'static str,
+    pub(crate) args: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,14 +120,6 @@ impl Default for CommandRegistry {
                     category: "Notifications",
                 },
                 CommandSpec {
-                    name: "webhook",
-                    aliases: &[],
-                    description: "Manage outgoing webhooks",
-                    args: "list|add|remove",
-                    shortcut: None,
-                    category: "Admin",
-                },
-                CommandSpec {
                     name: "audit",
                     aliases: &[],
                     description: "List audit log entries",
@@ -218,7 +211,6 @@ impl CommandRegistry {
             "key" => parse_key_command(rest).map(Some),
             "comment" => parse_comment_command(rest).map(Some),
             "notification" => parse_notification_command(rest).map(Some),
-            "webhook" => parse_webhook_command(rest).map(Some),
             "audit" => parse_audit_command(rest).map(Some),
             "reaction" => parse_reaction_command(rest).map(Some),
             "search" => require(rest, "Search query is required")
@@ -471,4 +463,3 @@ impl CommandRegistry {
             })
     }
 }
-

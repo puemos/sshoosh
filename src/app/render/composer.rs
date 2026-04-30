@@ -1,4 +1,5 @@
-fn draw_bottombar(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+use super::*;
+pub(crate) fn draw_bottombar(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::base()), area);
     if area.height == 0 || area.width == 0 {
         return;
@@ -110,11 +111,11 @@ fn draw_bottombar(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut U
     register_keybar_actions(ui, status, keybar, keybar_start);
 }
 
-fn bottom_separator_color(_ui: &UiState) -> ratatui::style::Color {
+pub(crate) fn bottom_separator_color(_ui: &UiState) -> ratatui::style::Color {
     theme::BORDER
 }
 
-fn mode_label(ui: &UiState) -> &'static str {
+pub(crate) fn mode_label(ui: &UiState) -> &'static str {
     match ui.mode {
         UiMode::Compose => "compose",
         UiMode::Normal => "normal",
@@ -125,7 +126,7 @@ fn mode_label(ui: &UiState) -> &'static str {
     }
 }
 
-fn keybar_text(ui: &UiState) -> &'static str {
+pub(crate) fn keybar_text(ui: &UiState) -> &'static str {
     match ui.mode {
         UiMode::Normal => "tab detail  / command  ? help  q quit",
         UiMode::Compose => "enter send  shift-enter newline  tab accept  esc normal",
@@ -136,7 +137,12 @@ fn keybar_text(ui: &UiState) -> &'static str {
     }
 }
 
-fn register_keybar_actions(ui: &mut UiState, status: Rect, keybar: &str, keybar_start: u16) {
+pub(crate) fn register_keybar_actions(
+    ui: &mut UiState,
+    status: Rect,
+    keybar: &str,
+    keybar_start: u16,
+) {
     let actions: &[(&str, BottomBarAction)] = match ui.mode {
         UiMode::Normal => &[
             ("tab detail", BottomBarAction::ToggleDetail),
@@ -179,7 +185,7 @@ fn register_keybar_actions(ui: &mut UiState, status: Rect, keybar: &str, keybar_
     }
 }
 
-fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {
+pub(crate) fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {
     buffer
         .char_indices()
         .take_while(|(idx, _)| *idx < cursor)
@@ -187,7 +193,7 @@ fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {
         .count() as u16
 }
 
-fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut UiState) {
+pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut UiState) {
     let visible_count = ui.composer.autocomplete.items.len().min(8);
     let height = visible_count as u16 + 2;
     let visible_items = &ui.composer.autocomplete.items[..visible_count];
@@ -249,4 +255,3 @@ fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut UiState) {
         );
     }
 }
-

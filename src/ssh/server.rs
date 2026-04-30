@@ -1,5 +1,6 @@
+use super::*;
 #[derive(Clone)]
-struct Server {
+pub(crate) struct Server {
     state: ServerState,
     mouse_enabled: bool,
 }
@@ -14,6 +15,7 @@ pub async fn run_with_listener(
     config: Config,
     state: ServerState,
 ) -> anyhow::Result<()> {
+    let _runtime = ServerRuntime::start(state.clone()).await?;
     let keys = vec![load_or_generate_key(&config.server_key_path)?];
     let ssh_config = Arc::new(russh::server::Config {
         inactivity_timeout: Some(Duration::from_secs(60 * 60)),
@@ -51,7 +53,7 @@ pub async fn run_with_listener(
     }
 }
 
-fn load_or_generate_key(path: &Path) -> anyhow::Result<PrivateKey> {
+pub(crate) fn load_or_generate_key(path: &Path) -> anyhow::Result<PrivateKey> {
     if path.exists() {
         return Ok(russh::keys::load_secret_key(path, None)?);
     }
@@ -72,13 +74,13 @@ fn load_or_generate_key(path: &Path) -> anyhow::Result<PrivateKey> {
     Ok(key)
 }
 
-struct RenderSignal {
-    dirty: AtomicBool,
-    notify: Notify,
+pub(crate) struct RenderSignal {
+    pub(crate) dirty: AtomicBool,
+    pub(crate) notify: Notify,
 }
 
 impl RenderSignal {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             dirty: AtomicBool::new(true),
             notify: Notify::new(),
@@ -86,20 +88,24 @@ impl RenderSignal {
     }
 }
 
-struct ClientHandler {
-    state: ServerState,
-    mouse_enabled: bool,
-    account: Option<Account>,
-    peer_addr: Option<SocketAddr>,
-    channel: Option<Channel<Msg>>,
-    app: Option<Arc<Mutex<App>>>,
-    input_tx: Option<mpsc::Sender<Vec<u8>>>,
-    input_rx: Option<mpsc::Receiver<Vec<u8>>>,
-    render_signal: Option<Arc<RenderSignal>>,
+pub(crate) struct ClientHandler {
+    pub(crate) state: ServerState,
+    pub(crate) mouse_enabled: bool,
+    pub(crate) account: Option<Account>,
+    pub(crate) peer_addr: Option<SocketAddr>,
+    pub(crate) channel: Option<Channel<Msg>>,
+    pub(crate) app: Option<Arc<Mutex<App>>>,
+    pub(crate) input_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pub(crate) input_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    pub(crate) render_signal: Option<Arc<RenderSignal>>,
 }
 
 impl ClientHandler {
-    fn new(state: ServerState, peer_addr: Option<SocketAddr>, mouse_enabled: bool) -> Self {
+    pub(crate) fn new(
+        state: ServerState,
+        peer_addr: Option<SocketAddr>,
+        mouse_enabled: bool,
+    ) -> Self {
         Self {
             state,
             mouse_enabled,
@@ -120,4 +126,3 @@ impl russh::server::Server for Server {
         ClientHandler::new(self.state.clone(), peer_addr, self.mouse_enabled)
     }
 }
-

@@ -1,7 +1,9 @@
-pub mod app;
+mod app;
+pub mod client;
 pub mod config;
 pub mod db;
+pub mod domain;
 pub mod output;
 pub mod service;
 pub mod ssh;
-pub mod terminal;
+mod terminal;
