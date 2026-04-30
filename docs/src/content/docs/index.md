@@ -17,6 +17,72 @@ ssh -p 2222 "$USER@127.0.0.1"
 
 Enter the one-time bootstrap token in the setup screen to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys connect as `username@host` and stay blocked in setup until they enter an invite token, or the key can be attached to an existing account by an owner/admin. The legacy `username+token@host` form is still supported. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
+## Quick Deploy
+
+`sshoosh` is a raw SSH/TCP server, not an HTTP app. Deploy it on a host that can run a long-lived process and expose TCP to the port where `sshoosh serve` listens. Keep `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY` on persistent storage; the optional `SSHOOSH_ENCRYPTION_KEY` must also be stable if encryption is enabled. Losing the server key makes SSH clients warn that the host key changed.
+
+| Target | Good fit | Setup notes |
+| --- | --- | --- |
+| Local or LAN | Testing, homelab, private network use | Bind `0.0.0.0:2222`, open the firewall if needed, and connect by host name or LAN IP. |
+| Local plus expose | Temporary sharing from a laptop or workstation | Use a raw TCP tunnel such as [ngrok TCP](https://ngrok.com/docs/universal-gateway/tcp), [Cloudflare Tunnel arbitrary TCP](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/non-http/cloudflared-authentication/arbitrary-tcp/), Tailscale, or an SSH reverse tunnel. |
+| VPS with systemd | Recommended production path | Install the release binary, store state under `/var/lib/sshoosh`, then use `packaging/sshoosh.service`. |
+| PaaS or container host | Works only with raw TCP and persistent storage | Railway TCP Proxy and Fly public TCP services can fit. HTTP-only app hosts need a raw TCP feature. |
+| Static or serverless hosts | Usually not a fit | `sshoosh` needs inbound SSH/TCP and process state, not request/response HTTP execution. |
+
+Local or LAN:
+
+```sh
+SSHOOSH_DB=./sshoosh.sqlite \
+SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
+sshoosh serve --host 0.0.0.0 --port 2222
+
+ssh -p 2222 "$USER@<host-or-lan-ip>"
+```
+
+Expose a local server with ngrok TCP:
+
+```sh
+ngrok tcp 2222
+ssh -p <ngrok-port> "$USER@<ngrok-host>"
+```
+
+Expose through Cloudflare Tunnel TCP. The server keeps an outbound tunnel open; clients run `cloudflared access tcp` locally and then SSH to the local forwarded port:
+
+```sh
+cloudflared tunnel --hostname sshoosh.example.com --url tcp://localhost:2222
+cloudflared access tcp --hostname sshoosh.example.com --url localhost:9222
+ssh -p 9222 "$USER@127.0.0.1"
+```
+
+For Tailscale, prefer private tailnet access to the machine running `sshoosh`. Tailscale Funnel can be used only when its allowed public TCP ports and TLS behavior fit your client path:
+
+```sh
+ssh -p 2222 "$USER@<tailscale-machine-name-or-ip>"
+tailscale funnel --tcp=<allowed-funnel-port> tcp://localhost:2222
+```
+
+An SSH reverse tunnel is useful when you control a relay host that allows remote forwarded ports:
+
+```sh
+ssh -N -R <public-port>:localhost:2222 user@bastion.example.com
+ssh -p <public-port> "$USER@bastion.example.com"
+```
+
+For a VPS, bootstrap against the same production paths the service will use, then enable the systemd service below:
+
+```sh
+cargo build --release
+sudo install -m 0755 target/release/sshoosh /usr/local/bin/sshoosh
+sudo useradd --system --home /var/lib/sshoosh --shell /usr/sbin/nologin sshoosh 2>/dev/null || true
+sudo install -d -o sshoosh -g sshoosh /var/lib/sshoosh
+sudo -u sshoosh env \
+  SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite \
+  SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519 \
+  /usr/local/bin/sshoosh bootstrap-token
+```
+
+On Railway, set a fixed internal port such as `SSHOOSH_PORT=2222`, mount persistent storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`, then enable TCP Proxy to that port and connect to the generated proxy host and port. On Fly, use a persistent volume such as `/data`, set `SSHOOSH_DB=/data/sshoosh.sqlite` and `SSHOOSH_SERVER_KEY=/data/sshoosh_server_ed25519`, and configure a raw TCP pass-through service with no HTTP/TLS handlers or PROXY protocol in front of `sshoosh`.
+
 ## Configuration
 
 Every server flag can also be set with an environment variable:
