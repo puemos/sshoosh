@@ -18,6 +18,7 @@ pub const TEXT: Color = Color::Rgb(214, 214, 214); // #D6D6D6
 pub const SUBTLE: Color = Color::Rgb(219, 213, 188); // #DBD5BC
 pub const ACCENT: Color = Color::Rgb(120, 182, 173); // #78B6AD
 pub const ACCENT_SOFT: Color = Color::Rgb(135, 201, 229); // #87C9E5
+pub const MENTION: Color = Color::Rgb(182, 160, 222); // #B6A0DE
 pub const MESSAGE_ROOT_GUTTER: Color = Color::Rgb(90, 162, 255); // #5AA2FF
 pub const MESSAGE_GUTTER: Color = ACCENT;
 pub const MESSAGE_CURRENT_USER_GUTTER: Color = ACCENT_SOFT;
@@ -163,3 +164,4 @@ pub fn message_gutter(color: Color, bg: Color) -> Style {
 pub fn message_separator() -> Style {
     Style::default().fg(MESSAGE_SEPARATOR).bg(PANEL)
 }
+

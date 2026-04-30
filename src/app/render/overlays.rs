@@ -14,8 +14,19 @@ pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &
             Constraint::Min(1),
         ])
         .split(inner);
+    let query_line: Line<'static> = if ui.palette.query.is_empty() {
+        Line::from(vec![
+            Span::styled("▸ ", theme::elevated_accent()),
+            Span::styled("Type to filter commands…", theme::elevated_muted()),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("▸ ", theme::elevated_accent()),
+            Span::styled(ui.palette.query.clone(), theme::elevated_panel()),
+        ])
+    };
     frame.render_widget(
-        Paragraph::new(format!("> {}", ui.palette.query)).style(theme::elevated_panel()),
+        Paragraph::new(query_line).style(theme::elevated_panel()),
         chunks[0],
     );
     ui.hit_map.push(chunks[0], HitTarget::PaletteInput);
@@ -298,28 +309,42 @@ fn help_group_style(value: &str) -> Style {
 pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
     ui.hit_map.push(full_area, HitTarget::ConfirmQuitBackdrop);
     let inner = elevated_panel(frame, area, "Quit");
+    let prompt = "Disconnect from sshoosh?";
+    let yes_label = " confirm";
+    let no_label = " cancel";
+    let total_chars = prompt.chars().count() + 3 + 3 + yes_label.chars().count() + 3 + 3 + no_label.chars().count();
+    let keycap = Style::default()
+        .fg(theme::TEXT)
+        .bg(theme::KEYCAP)
+        .add_modifier(Modifier::BOLD);
+    let line = Line::from(vec![
+        Span::styled(prompt.to_string(), theme::elevated_panel()),
+        Span::styled("   ", theme::elevated_panel()),
+        Span::styled(" y ", keycap),
+        Span::styled(yes_label.to_string(), theme::elevated_muted()),
+        Span::styled("   ", theme::elevated_panel()),
+        Span::styled(" n ", keycap),
+        Span::styled(no_label.to_string(), theme::elevated_muted()),
+    ]);
     frame.render_widget(
-        Paragraph::new("Disconnect from sshoosh?  y / n")
+        Paragraph::new(line)
             .alignment(Alignment::Center)
             .style(theme::elevated_panel()),
         inner,
     );
-    let text = "Disconnect from sshoosh?  y / n";
-    let text_x = inner.x + inner.width.saturating_sub(text.chars().count() as u16) / 2;
+    let text_x = inner.x + inner.width.saturating_sub(total_chars as u16) / 2;
     let text_y = inner.y;
+    let y_offset = (prompt.chars().count() + 3 + 1) as u16;
+    let n_offset = (prompt.chars().count() + 3 + 3 + yes_label.chars().count() + 3 + 1) as u16;
     ui.hit_map.push(area, HitTarget::ConfirmQuitNo);
-    if let Some(y_pos) = text.find('y') {
-        ui.hit_map.push(
-            Rect::new(text_x + y_pos as u16, text_y, 1, 1),
-            HitTarget::ConfirmQuitYes,
-        );
-    }
-    if let Some(n_pos) = text.rfind('n') {
-        ui.hit_map.push(
-            Rect::new(text_x + n_pos as u16, text_y, 1, 1),
-            HitTarget::ConfirmQuitNo,
-        );
-    }
+    ui.hit_map.push(
+        Rect::new(text_x + y_offset, text_y, 1, 1),
+        HitTarget::ConfirmQuitYes,
+    );
+    ui.hit_map.push(
+        Rect::new(text_x + n_offset, text_y, 1, 1),
+        HitTarget::ConfirmQuitNo,
+    );
 }
 
 pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState) {
@@ -451,9 +476,9 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
         .text
         .chars()
         .count()
-        .saturating_add(4)
+        .saturating_add(6)
         .min(u16::MAX as usize) as u16;
-    let min_width = 12.min(max_width);
+    let min_width = 24.min(max_width);
     let width = text_width.max(min_width).min(max_width);
     let content_width = width.saturating_sub(4).max(1) as usize;
 
@@ -480,8 +505,10 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
     };
 
     let inner = elevated_panel(frame, rect, "");
+    let glyph = if banner.error { "! " } else { "✓ " };
+    let body = format!("{glyph}{}", banner.text);
     frame.render_widget(
-        Paragraph::new(banner.text.clone())
+        Paragraph::new(body)
             .style(
                 Style::default()
                     .fg(color)

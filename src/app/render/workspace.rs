@@ -41,14 +41,16 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                     Span::styled("no threads", theme::muted()),
                 ])));
             } else {
-                for thread in &snapshot.threads {
+                let last_idx = snapshot.threads.len().saturating_sub(1);
+                for (idx, thread) in snapshot.threads.iter().enumerate() {
                     let row = items.len() as u16;
                     if ui.active_pane != ActivePane::Rail
                         && snapshot.selected_thread_id.as_deref() == Some(thread.id.as_str())
                     {
                         selected_y = Some(items.len() as u16);
                     }
-                    items.push(thread_item(snapshot, thread, row_width));
+                    let connector = if idx == last_idx { "└─ " } else { "├─ " };
+                    items.push(thread_item(snapshot, thread, row_width, connector));
                     row_hits.push((row, HitTarget::WorkspaceThread(thread.id.clone())));
                 }
             }
@@ -111,16 +113,19 @@ pub(crate) fn thread_item<'a>(
     snapshot: &Snapshot,
     thread: &'a crate::service::ThreadItem,
     row_width: usize,
+    connector: &'static str,
 ) -> ListItem<'a> {
     let selected = snapshot.selected_thread_id.as_deref() == Some(thread.id.as_str());
     let unread_badge = unread_badge(thread.unread_count);
     let state_badge = thread_state_badge(thread);
+    let prefix_len = 2 + connector.chars().count();
     let title = truncate_text(
         &thread.title,
-        row_width.saturating_sub(4 + unread_badge.len() + state_badge.len()),
+        row_width.saturating_sub(prefix_len + unread_badge.len() + state_badge.len()),
     );
     ListItem::new(Line::from(vec![
-        Span::raw("  ↳ "),
+        Span::raw("  "),
+        Span::styled(connector, theme::muted()),
         Span::styled(title, workspace_label_style(selected, thread.unread_count)),
         Span::styled(state_badge, theme::muted()),
         Span::styled(unread_badge, theme::unread()),
@@ -177,7 +182,7 @@ pub(crate) fn workspace_label_style(selected: bool, unread_count: i64) -> Style 
 
 pub(crate) fn unread_badge(count: i64) -> String {
     if count > 0 {
-        format!(" [{count}]")
+        format!(" {count}")
     } else {
         String::new()
     }

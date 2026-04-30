@@ -267,7 +267,7 @@ mod cases {
         assert!(!top_row.contains("sshoosh"));
         assert!(!top_row.contains("workspace main"));
         let bottom_status = row_text(buffer, 120, 23);
-        assert!(bottom_status.contains("normal"));
+        assert!(bottom_status.contains("NORMAL"));
         assert!(bottom_status.contains("#general"));
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("2 notifications"));

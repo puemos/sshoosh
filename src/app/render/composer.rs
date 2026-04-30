@@ -40,6 +40,7 @@ pub(crate) fn draw_bottombar(
     } else {
         ""
     };
+    let show_placeholder = ui.mode == UiMode::Normal && ui.composer.buffer.is_empty();
     let mut prompt = ui.composer.buffer.clone();
     if !cursor.is_empty() {
         let cursor_index = ui.composer.cursor.min(prompt.len());
@@ -58,8 +59,19 @@ pub(crate) fn draw_bottombar(
         .saturating_sub(input.height);
     ui.hit_map
         .push(input, HitTarget::ComposerInput { scroll_y });
+    let line = if show_placeholder {
+        Line::from(vec![
+            Span::styled(prompt, theme::composer()),
+            Span::styled(
+                "  Press / for a command, Enter to write…",
+                theme::composer().fg(theme::MUTED),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled(prompt, theme::composer()))
+    };
     frame.render_widget(
-        Paragraph::new(prompt)
+        Paragraph::new(line)
             .style(theme::composer())
             .scroll((scroll_y, 0))
             .wrap(Wrap { trim: false }),
@@ -197,29 +209,30 @@ fn draw_status_cluster(
     let unread = snapshot.total_unread();
     let notifications = snapshot.notification_unread_count;
     let mentions = snapshot.mention_unread_count;
-    let compact_width = char_width(mode_label(ui)).saturating_add(char_width(&active)) + 3;
+    let compact_width = char_width(mode_label(ui)).saturating_add(char_width(&active)) + 5;
     let show_badges = area.width as usize >= compact_width.saturating_add(38);
     let show_account = area.width as usize >= compact_width.saturating_add(62);
 
     let mut spans = Vec::new();
+    let mode_pill_text = mode_label(ui).to_uppercase();
     spans.push(Span::styled(
-        mode_label(ui),
+        format!(" {mode_pill_text} "),
         Style::default()
-            .fg(mode_color)
-            .bg(theme::COMPOSER)
+            .fg(theme::BG)
+            .bg(mode_color)
             .add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::styled(" · ", theme::composer().fg(theme::MUTED)));
     spans.push(Span::styled(active, theme::composer().fg(theme::SUBTLE)));
     if show_badges {
-        spans.push(Span::styled("  ", theme::composer()));
-        push_badge(&mut spans, format!("{unread} unread"), unread > 0);
         spans.push(Span::styled(" ", theme::composer()));
+        push_badge(&mut spans, format!("{unread} unread"), unread > 0, theme::WARN);
         let notification_start = spans_width(&spans) as u16;
         push_badge(
             &mut spans,
             format!("{notifications} notifications"),
             notifications > 0,
+            theme::ACCENT_SOFT,
         );
         ui.hit_map.push(
             Rect::new(
@@ -230,9 +243,13 @@ fn draw_status_cluster(
             ),
             HitTarget::TopbarNotifications,
         );
-        spans.push(Span::styled(" ", theme::composer()));
         let mention_start = spans_width(&spans) as u16;
-        push_badge(&mut spans, format!("{mentions} mentions"), mentions > 0);
+        push_badge(
+            &mut spans,
+            format!("{mentions} mentions"),
+            mentions > 0,
+            theme::MENTION,
+        );
         ui.hit_map.push(
             Rect::new(
                 area.x.saturating_add(mention_start),
@@ -264,11 +281,16 @@ fn draw_status_cluster(
     );
 }
 
-fn push_badge(spans: &mut Vec<Span<'static>>, label: String, active: bool) {
+fn push_badge(
+    spans: &mut Vec<Span<'static>>,
+    label: String,
+    active: bool,
+    active_color: ratatui::style::Color,
+) {
     spans.push(Span::styled(
         format!(" {label} "),
         Style::default()
-            .fg(if active { theme::WARN } else { theme::MUTED })
+            .fg(if active { active_color } else { theme::MUTED })
             .bg(theme::BADGE),
     ));
 }
@@ -319,12 +341,15 @@ pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut
         .iter()
         .enumerate()
         .map(|(idx, item)| {
-            let style = if idx == ui.composer.autocomplete.selected {
+            let selected = idx == ui.composer.autocomplete.selected;
+            let style = if selected {
                 theme::selection()
             } else {
                 theme::elevated_panel()
             };
+            let glyph = if selected { "▸ " } else { "  " };
             ListItem::new(Line::from(vec![
+                Span::styled(glyph, style),
                 Span::styled(format!("{:<label_width$}", item.label), style),
                 Span::styled(format!("{:<detail_width$}", item.detail), style),
                 Span::styled(item.preview.clone(), style),
