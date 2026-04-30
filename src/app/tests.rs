@@ -168,6 +168,10 @@ mod cases {
         app.handle_input(format!("\x1b[<35;{};{}M", column + 1, row + 1).as_bytes());
     }
 
+    fn scroll_down_at(app: &mut App, column: u16, row: u16) {
+        app.handle_input(format!("\x1b[<65;{};{}M", column + 1, row + 1).as_bytes());
+    }
+
     fn drag_at(app: &mut App, start: Position, end: Position) {
         app.handle_input(
             format!(
@@ -728,6 +732,69 @@ mod cases {
         move_at(&mut app, 0, 0);
         let output = String::from_utf8_lossy(&app.render().expect("render default")).into_owned();
         assert!(output.contains("\x1b]22;default\x1b\\"), "{output:?}");
+    }
+
+    #[tokio::test]
+    async fn mouse_wheel_scrolls_detail_when_over_message_card() {
+        let mut app = test_app("scroll-message-card").await;
+        app.snapshot.comments = (1..=12)
+            .map(|idx| comment(idx, "alice", &format!("comment {idx}\nsecond line")))
+            .collect();
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::EditableMessage(_)))
+            .cloned()
+            .expect("editable message hit region");
+
+        scroll_down_at(&mut app, region.rect.x, region.rect.y);
+
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.ui.detail_scroll.offset().y > 0);
+    }
+
+    #[tokio::test]
+    async fn keyboard_scrolling_respects_focused_pane() {
+        let mut app = test_app("focused-pane-scroll").await;
+        app.snapshot.threads.push(ThreadItem {
+            id: "thread-2".to_string(),
+            channel_id: "general".to_string(),
+            title: "Second thread".to_string(),
+            body: "Another post".to_string(),
+            author: "alice".to_string(),
+            comment_count: 0,
+            last_comment_index: 1,
+            unread_count: 0,
+            last_activity_at: None,
+            created_at: "2020-01-02T03:05:00Z".to_string(),
+            edited_at: None,
+            archived_at: None,
+            pinned_at: None,
+            muted_until: None,
+            saved_at: None,
+            reactions: String::new(),
+        });
+        app.snapshot.comments = (1..=12)
+            .map(|idx| comment(idx, "alice", &format!("comment {idx}\nsecond line")))
+            .collect();
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.detail_scroll.offset().y, 1);
+        app.handle_input(b"\x1b[6~");
+        assert!(app.ui.detail_scroll.offset().y > 1);
+
+        app.ui.detail_scroll.scroll_to_top();
+        app.ui.active_pane = ActivePane::List;
+        app.handle_input(b"\x1b[B");
+
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
+        assert_eq!(app.ui.detail_scroll.offset().y, 0);
     }
 
     #[tokio::test]

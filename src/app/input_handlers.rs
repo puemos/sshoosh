@@ -136,7 +136,9 @@ impl App {
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
-            HitTarget::DetailScroll | HitTarget::MessageLink(_) => self.move_detail(delta),
+            HitTarget::DetailScroll | HitTarget::EditableMessage(_) | HitTarget::MessageLink(_) => {
+                self.move_detail(delta);
+            }
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
                 for _ in 0..steps {
