@@ -95,16 +95,19 @@ impl russh::server::Handler for ClientHandler {
         let channel_id = chan.id();
         let handle = session.handle();
         let mouse_enabled = self.mouse_enabled;
-        let init = terminal::enter_alt_screen(mouse_enabled);
+        let mut init = terminal::enter_alt_screen(mouse_enabled);
+        let account_id = {
+            let mut app = app.lock().await;
+            if let Some(title) = app.terminal_title_update() {
+                init.extend(title);
+            }
+            app.account.id.clone()
+        };
         let _ = timeout(Duration::from_millis(100), handle.data(channel_id, init)).await;
 
         let state = self.state.clone();
         let signal = Arc::new(RenderSignal::new());
         self.render_signal = Some(signal.clone());
-        let account_id = {
-            let app = app.lock().await;
-            app.account.id.clone()
-        };
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(WORLD_TICK_INTERVAL);
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);

@@ -37,6 +37,7 @@ impl App {
             search_limit: DEFAULT_SEARCH_LIMIT,
             seen_notification_ids,
             pending_terminal_notifications: VecDeque::new(),
+            emitted_terminal_title: None,
         })
     }
 
@@ -147,6 +148,16 @@ impl App {
 
     pub fn selected_conversation_id(&self) -> Option<String> {
         self.snapshot.selected_conversation_id.clone()
+    }
+
+    pub(crate) fn terminal_title_update(&mut self) -> Option<Vec<u8>> {
+        let title = self.current_terminal_title();
+        if self.emitted_terminal_title.as_deref() == Some(title.as_str()) {
+            None
+        } else {
+            self.emitted_terminal_title = Some(title.clone());
+            Some(terminal::terminal_title(&title))
+        }
     }
 
     pub fn search_query(&self) -> Option<String> {
@@ -262,6 +273,20 @@ impl App {
             }
             self.seen_notification_ids.insert(notification.id.clone());
         }
+    }
+
+    fn current_terminal_title(&self) -> String {
+        let Some(slug) = self.selected_channel_slug() else {
+            return "sshoosh".to_string();
+        };
+        let mut title = format!("sshoosh • #{slug}");
+        if self.snapshot.notification_unread_count > 0 {
+            title.push_str(&format!(
+                " • {} unread",
+                self.snapshot.notification_unread_count
+            ));
+        }
+        title
     }
 }
 

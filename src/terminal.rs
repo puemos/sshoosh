@@ -90,6 +90,15 @@ pub fn osc52_copy(text: &str) -> Vec<u8> {
     format!("\x1b]52;c;{}\x07", STANDARD.encode(text)).into_bytes()
 }
 
+pub fn terminal_title(title: &str) -> Vec<u8> {
+    let title = sanitize_terminal_title(title);
+    if title.is_empty() {
+        Vec::new()
+    } else {
+        format!("\x1b]0;{title}\x07").into_bytes()
+    }
+}
+
 pub fn pointer_shape(shape: &str) -> Vec<u8> {
     let shape = shape
         .chars()
@@ -165,6 +174,23 @@ fn sanitize_visible_text(value: &str) -> String {
         .chars()
         .filter(|ch| !ch.is_control())
         .collect::<String>()
+}
+
+fn sanitize_terminal_title(value: &str) -> String {
+    value
+        .chars()
+        .filter_map(|ch| {
+            if ch == '\n' || ch == '\r' || ch == '\t' {
+                Some(' ')
+            } else if ch.is_control() || matches!(ch, '\u{1b}' | '\u{7}') {
+                None
+            } else {
+                Some(ch)
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn sanitize_notification_text(value: &str, limit: usize) -> String {
@@ -272,6 +298,15 @@ mod tests {
             String::from_utf8_lossy(&osc52_copy("hello")),
             "\x1b]52;c;aGVsbG8=\x07"
         );
+    }
+
+    #[test]
+    fn terminal_title_sanitizes_control_characters() {
+        assert_eq!(
+            String::from_utf8_lossy(&terminal_title(" sshoosh\n#general\u{1b}\u{7} ")),
+            "\x1b]0;sshoosh #general\x07"
+        );
+        assert_eq!(terminal_title("\u{1b}\u{7}"), Vec::<u8>::new());
     }
 
     #[test]

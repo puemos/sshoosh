@@ -57,6 +57,7 @@ pub struct App {
     search_limit: i64,
     seen_notification_ids: HashSet<String>,
     pending_terminal_notifications: VecDeque<TerminalNotification>,
+    emitted_terminal_title: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

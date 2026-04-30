@@ -47,6 +47,9 @@ impl App {
         {
             output.extend(terminal::osc52_copy(&text));
         }
+        if let Some(title) = self.terminal_title_update() {
+            output.extend(title);
+        }
         while let Some(notification) = self.pending_terminal_notifications.pop_front() {
             output.extend(terminal::desktop_notification(
                 &notification.title,

@@ -230,6 +230,32 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn first_render_emits_terminal_title_for_selected_channel() {
+        let mut app = test_app("initial-title").await;
+
+        let output = String::from_utf8_lossy(&app.render().expect("render")).into_owned();
+
+        assert!(
+            output.contains("\x1b]0;sshoosh • #general\x07"),
+            "{output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_updates_terminal_title_when_notification_count_changes() {
+        let mut app = test_app("notification-title").await;
+        app.render().expect("initial render");
+
+        app.snapshot.notification_unread_count = 3;
+        let output = String::from_utf8_lossy(&app.render().expect("render")).into_owned();
+
+        assert!(
+            output.contains("\x1b]0;sshoosh • #general • 3 unread\x07"),
+            "{output:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn mouse_clicks_workspace_thread_and_dm_rows() {
         let mut app = test_app("workspace-clicks").await;
         app.ui.active_pane = ActivePane::Rail;
