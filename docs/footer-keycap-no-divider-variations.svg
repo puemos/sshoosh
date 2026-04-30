@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1540" viewBox="0 0 1600 1540">
+  <defs>
+    <style>
+      .sheet { fill: #1b1e22; }
+      .title { fill: #d6d6d6; font: 700 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .section { fill: #d6d6d6; font: 700 26px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .label { fill: #859289; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .term { fill: #222529; stroke: #464949; stroke-width: 1; }
+      .main { fill: #222529; }
+      .footer { fill: #292c2f; }
+      .footer-soft { fill: #272a2d; }
+      .footer-deep { fill: #24272a; }
+      .topline { stroke: #464949; stroke-width: 1; shape-rendering: crispEdges; }
+      .cursor { fill: #d6d6d6; font: 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .placeholder { fill: #69756f; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .muted { fill: #859289; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .text { fill: #d6d6d6; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .subtle { fill: #dbd5bc; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .accent { fill: #78b6ad; font: 700 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .accent-soft { fill: #87c9e5; font: 700 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .keycap { fill: #34383b; stroke: #565c5c; stroke-width: 1; }
+      .keycap-soft { fill: #303437; stroke: #474d4d; stroke-width: 1; }
+      .keycap-accent { fill: #78b6ad; stroke: #78b6ad; stroke-width: 1; }
+      .keytext { fill: #d6d6d6; font: 700 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .keytext-dark { fill: #222529; font: 700 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .hint { fill: #859289; font: 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .pill { fill: #24272a; stroke: #3e4345; stroke-width: 1; }
+      .rail { fill: #78b6ad; }
+      .shadow { fill: #202327; }
+    </style>
+  </defs>
+
+  <rect class="sheet" width="1600" height="1540"/>
+  <text class="title" x="72" y="72">Keycap command zone - no internal divider</text>
+  <text class="label" x="72" y="104">These remove the input/status divider and use spacing, grouping, and contrast to keep the bottom readable.</text>
+
+  <!-- Variation 1 -->
+  <g transform="translate(72 152)">
+    <text class="section" x="0" y="0">01 Air Gap</text>
+    <text class="label" x="0" y="28">The cleanest version: one continuous footer surface, with hierarchy made by vertical spacing only.</text>
+    <rect class="term" x="0" y="54" width="1456" height="184"/>
+    <rect class="main" x="1" y="55" width="1454" height="84"/>
+    <rect class="footer" x="1" y="139" width="1454" height="98"/>
+    <line class="topline" x1="0" y1="139" x2="1456" y2="139"/>
+    <text class="cursor" x="32" y="176">▌</text>
+    <text class="accent" x="32" y="218">normal</text>
+    <text class="muted" x="105" y="218">·</text>
+    <text class="subtle" x="130" y="218">#general</text>
+
+    <rect class="keycap" x="926" y="202" width="42" height="24"/>
+    <text class="keytext" x="936" y="220">tab</text>
+    <text class="hint" x="978" y="220">detail</text>
+    <rect class="keycap" x="1058" y="202" width="24" height="24"/>
+    <text class="keytext" x="1066" y="220">/</text>
+    <text class="hint" x="1092" y="220">command</text>
+    <rect class="keycap" x="1190" y="202" width="24" height="24"/>
+    <text class="keytext" x="1198" y="220">?</text>
+    <text class="hint" x="1224" y="220">help</text>
+    <rect class="keycap" x="1292" y="202" width="24" height="24"/>
+    <text class="keytext" x="1300" y="220">q</text>
+    <text class="hint" x="1326" y="220">quit</text>
+  </g>
+
+  <!-- Variation 2 -->
+  <g transform="translate(72 432)">
+    <text class="section" x="0" y="0">02 Command Island</text>
+    <text class="label" x="0" y="28">The shortcut group becomes a quiet island, so the left status can stay unboxed.</text>
+    <rect class="term" x="0" y="54" width="1456" height="184"/>
+    <rect class="main" x="1" y="55" width="1454" height="84"/>
+    <rect class="footer" x="1" y="139" width="1454" height="98"/>
+    <line class="topline" x1="0" y1="139" x2="1456" y2="139"/>
+    <text class="cursor" x="32" y="176">▌</text>
+    <text class="accent" x="32" y="218">normal</text>
+    <text class="muted" x="105" y="218">·</text>
+    <text class="subtle" x="130" y="218">#general</text>
+
+    <rect class="pill" x="894" y="193" width="536" height="42"/>
+    <rect class="keycap-soft" x="918" y="202" width="42" height="24"/>
+    <text class="keytext" x="928" y="220">tab</text>
+    <text class="hint" x="970" y="220">detail</text>
+    <rect class="keycap-soft" x="1050" y="202" width="24" height="24"/>
+    <text class="keytext" x="1058" y="220">/</text>
+    <text class="hint" x="1084" y="220">command</text>
+    <rect class="keycap-soft" x="1182" y="202" width="24" height="24"/>
+    <text class="keytext" x="1190" y="220">?</text>
+    <text class="hint" x="1216" y="220">help</text>
+    <rect class="keycap-soft" x="1284" y="202" width="24" height="24"/>
+    <text class="keytext" x="1292" y="220">q</text>
+    <text class="hint" x="1318" y="220">quit</text>
+  </g>
+
+  <!-- Variation 3 -->
+  <g transform="translate(72 712)">
+    <text class="section" x="0" y="0">03 Accent First Key</text>
+    <text class="label" x="0" y="28">Guides the eye toward the primary shortcut while keeping secondary commands subdued.</text>
+    <rect class="term" x="0" y="54" width="1456" height="184"/>
+    <rect class="main" x="1" y="55" width="1454" height="84"/>
+    <rect class="footer" x="1" y="139" width="1454" height="98"/>
+    <line class="topline" x1="0" y1="139" x2="1456" y2="139"/>
+    <text class="cursor" x="32" y="176">▌</text>
+    <text class="accent" x="32" y="218">normal</text>
+    <text class="muted" x="105" y="218">·</text>
+    <text class="subtle" x="130" y="218">#general</text>
+
+    <rect class="keycap-accent" x="926" y="202" width="42" height="24"/>
+    <text class="keytext-dark" x="936" y="220">tab</text>
+    <text class="hint" x="978" y="220">detail</text>
+    <rect class="keycap-soft" x="1058" y="202" width="24" height="24"/>
+    <text class="keytext" x="1066" y="220">/</text>
+    <text class="hint" x="1092" y="220">command</text>
+    <rect class="keycap-soft" x="1190" y="202" width="24" height="24"/>
+    <text class="keytext" x="1198" y="220">?</text>
+    <text class="hint" x="1224" y="220">help</text>
+    <rect class="keycap-soft" x="1292" y="202" width="24" height="24"/>
+    <text class="keytext" x="1300" y="220">q</text>
+    <text class="hint" x="1326" y="220">quit</text>
+  </g>
+
+  <!-- Variation 4 -->
+  <g transform="translate(72 992)">
+    <text class="section" x="0" y="0">04 Left Context Pill</text>
+    <text class="label" x="0" y="28">Boxes the context instead of the commands. Useful when channel/mode should be easier to spot.</text>
+    <rect class="term" x="0" y="54" width="1456" height="184"/>
+    <rect class="main" x="1" y="55" width="1454" height="84"/>
+    <rect class="footer" x="1" y="139" width="1454" height="98"/>
+    <line class="topline" x1="0" y1="139" x2="1456" y2="139"/>
+    <text class="cursor" x="32" y="176">▌</text>
+    <rect class="pill" x="24" y="193" width="258" height="42"/>
+    <rect class="rail" x="24" y="193" width="4" height="42"/>
+    <text class="accent" x="44" y="220">normal</text>
+    <text class="muted" x="117" y="220">·</text>
+    <text class="subtle" x="142" y="220">#general</text>
+
+    <rect class="keycap-soft" x="926" y="202" width="42" height="24"/>
+    <text class="keytext" x="936" y="220">tab</text>
+    <text class="hint" x="978" y="220">detail</text>
+    <rect class="keycap-soft" x="1058" y="202" width="24" height="24"/>
+    <text class="keytext" x="1066" y="220">/</text>
+    <text class="hint" x="1092" y="220">command</text>
+    <rect class="keycap-soft" x="1190" y="202" width="24" height="24"/>
+    <text class="keytext" x="1198" y="220">?</text>
+    <text class="hint" x="1224" y="220">help</text>
+    <rect class="keycap-soft" x="1292" y="202" width="24" height="24"/>
+    <text class="keytext" x="1300" y="220">q</text>
+    <text class="hint" x="1326" y="220">quit</text>
+  </g>
+
+  <!-- Variation 5 -->
+  <g transform="translate(72 1272)">
+    <text class="section" x="0" y="0">05 Flush Dock</text>
+    <text class="label" x="0" y="28">More compact and terminal-native. Good if you want less UI object-ness.</text>
+    <rect class="term" x="0" y="54" width="1456" height="126"/>
+    <rect class="main" x="1" y="55" width="1454" height="54"/>
+    <rect class="footer-deep" x="1" y="109" width="1454" height="70"/>
+    <line class="topline" x1="0" y1="109" x2="1456" y2="109"/>
+    <text class="cursor" x="28" y="148">▌</text>
+    <text class="accent" x="68" y="148">normal</text>
+    <text class="muted" x="141" y="148">·</text>
+    <text class="subtle" x="166" y="148">#general</text>
+
+    <rect class="keycap-soft" x="938" y="130" width="42" height="24"/>
+    <text class="keytext" x="948" y="148">tab</text>
+    <text class="hint" x="990" y="148">detail</text>
+    <rect class="keycap-soft" x="1070" y="130" width="24" height="24"/>
+    <text class="keytext" x="1078" y="148">/</text>
+    <text class="hint" x="1104" y="148">command</text>
+    <rect class="keycap-soft" x="1202" y="130" width="24" height="24"/>
+    <text class="keytext" x="1210" y="148">?</text>
+    <text class="hint" x="1236" y="148">help</text>
+    <rect class="keycap-soft" x="1304" y="130" width="24" height="24"/>
+    <text class="keytext" x="1312" y="148">q</text>
+    <text class="hint" x="1338" y="148">quit</text>
+  </g>
+</svg>

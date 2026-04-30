@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120">
+  <defs>
+    <style>
+      .sheet { fill: #1b1e22; }
+      .title { fill: #d6d6d6; font: 700 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .label { fill: #859289; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .term { fill: #222529; stroke: #464949; stroke-width: 1; }
+      .composer { fill: #292c2f; }
+      .panel-soft { fill: #25282c; }
+      .rule { stroke: #464949; stroke-width: 1; shape-rendering: crispEdges; }
+      .rule-soft { stroke: #383c3e; stroke-width: 1; shape-rendering: crispEdges; }
+      .cursor { fill: #d6d6d6; font: 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .muted { fill: #859289; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .text { fill: #d6d6d6; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .subtle { fill: #dbd5bc; font: 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .accent { fill: #78b6ad; font: 700 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .accent-soft { fill: #87c9e5; font: 700 18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .keycap { fill: #34383b; stroke: #565c5c; stroke-width: 1; }
+      .keytext { fill: #d6d6d6; font: 700 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .hint { fill: #859289; font: 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .micro { fill: #69756f; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect class="sheet" width="1600" height="1120"/>
+  <text class="title" x="72" y="74">Option C: Split Footer With Command Zone - high fidelity variations</text>
+  <text class="label" x="72" y="105">All four keep a one-row composer, a separator, and a dedicated command/status row.</text>
+
+  <!-- Variation 1 -->
+  <g transform="translate(72 150)">
+    <text class="title" x="0" y="0">01 Quiet Rule</text>
+    <text class="label" x="0" y="28">Most faithful to the current app. Less vertical padding, cleaner hierarchy, no decorative chrome.</text>
+    <rect class="term" x="0" y="54" width="1456" height="178" rx="0"/>
+    <rect class="panel-soft" x="1" y="55" width="1454" height="92"/>
+    <line class="rule" x1="0" y1="147" x2="1456" y2="147"/>
+    <rect class="composer" x="1" y="148" width="1454" height="83"/>
+    <text class="cursor" x="32" y="187">▌</text>
+    <line class="rule-soft" x1="24" y1="200" x2="1432" y2="200"/>
+    <text class="accent" x="32" y="220">normal</text>
+    <text class="muted" x="105" y="220">·</text>
+    <text class="subtle" x="130" y="220">#general</text>
+    <text class="muted" x="1058" y="220">tab detail   / command   ? help   q quit</text>
+  </g>
+
+  <!-- Variation 2 -->
+  <g transform="translate(72 408)">
+    <text class="title" x="0" y="0">02 Keycap Cluster</text>
+    <text class="label" x="0" y="28">Best discoverability. Keys read as controls while labels stay quiet.</text>
+    <rect class="term" x="0" y="54" width="1456" height="178" rx="0"/>
+    <rect class="panel-soft" x="1" y="55" width="1454" height="88"/>
+    <rect class="composer" x="1" y="143" width="1454" height="88"/>
+    <line class="rule" x1="0" y1="143" x2="1456" y2="143"/>
+    <text class="cursor" x="32" y="182">▌</text>
+    <line class="rule-soft" x1="24" y1="196" x2="1432" y2="196"/>
+    <text class="accent" x="32" y="218">normal</text>
+    <text class="muted" x="105" y="218">·</text>
+    <text class="subtle" x="130" y="218">#general</text>
+
+    <rect class="keycap" x="926" y="202" width="42" height="24"/>
+    <text class="keytext" x="936" y="220">tab</text>
+    <text class="hint" x="978" y="220">detail</text>
+    <rect class="keycap" x="1058" y="202" width="24" height="24"/>
+    <text class="keytext" x="1066" y="220">/</text>
+    <text class="hint" x="1092" y="220">command</text>
+    <rect class="keycap" x="1190" y="202" width="24" height="24"/>
+    <text class="keytext" x="1198" y="220">?</text>
+    <text class="hint" x="1224" y="220">help</text>
+    <rect class="keycap" x="1292" y="202" width="24" height="24"/>
+    <text class="keytext" x="1300" y="220">q</text>
+    <text class="hint" x="1326" y="220">quit</text>
+  </g>
+
+  <!-- Variation 3 -->
+  <g transform="translate(72 666)">
+    <text class="title" x="0" y="0">03 Mode Rail</text>
+    <text class="label" x="0" y="28">Adds a left rail for mode state. Stronger focus signal without making the whole composer heavy.</text>
+    <rect class="term" x="0" y="54" width="1456" height="178" rx="0"/>
+    <rect class="panel-soft" x="1" y="55" width="1454" height="88"/>
+    <rect class="composer" x="1" y="143" width="1454" height="88"/>
+    <line class="rule" x1="0" y1="143" x2="1456" y2="143"/>
+    <rect x="1" y="143" width="5" height="88" fill="#78b6ad"/>
+    <text class="cursor" x="34" y="182">▌</text>
+    <line class="rule-soft" x1="26" y1="196" x2="1432" y2="196"/>
+    <text class="accent" x="34" y="218">normal</text>
+    <text class="muted" x="107" y="218">·</text>
+    <text class="subtle" x="132" y="218">#general</text>
+    <text class="muted" x="948" y="218">tab</text>
+    <text class="hint" x="990" y="218">detail</text>
+    <text class="muted" x="1068" y="218">/</text>
+    <text class="hint" x="1094" y="218">command</text>
+    <text class="muted" x="1212" y="218">?</text>
+    <text class="hint" x="1238" y="218">help</text>
+    <text class="muted" x="1316" y="218">q</text>
+    <text class="hint" x="1342" y="218">quit</text>
+  </g>
+
+  <!-- Variation 4 -->
+  <g transform="translate(72 924)">
+    <text class="title" x="0" y="0">04 Dense Pro</text>
+    <text class="label" x="0" y="28">Lowest height. Best when terminal rows are precious; trades some affordance for information density.</text>
+    <rect class="term" x="0" y="54" width="1456" height="126" rx="0"/>
+    <rect class="panel-soft" x="1" y="55" width="1454" height="54"/>
+    <rect class="composer" x="1" y="109" width="1454" height="70"/>
+    <line class="rule" x1="0" y1="109" x2="1456" y2="109"/>
+    <text class="cursor" x="28" y="147">▌</text>
+    <text class="accent" x="64" y="147">normal</text>
+    <text class="muted" x="137" y="147">·</text>
+    <text class="subtle" x="162" y="147">#general</text>
+    <text class="micro" x="278" y="147">idle</text>
+    <text class="muted" x="1018" y="147">tab detail   / command   ? help   q quit</text>
+  </g>
+</svg>
