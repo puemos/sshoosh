@@ -114,10 +114,11 @@ impl russh::server::Handler for ClientHandler {
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut last_render = Instant::now() - MIN_RENDER_GAP;
             let mut last_presence_touch = Instant::now();
-            let mut presence_session_id = if {
+            let account_is_activated = {
                 let app = app.lock().await;
                 app.account.activated
-            } {
+            };
+            let mut presence_session_id = if account_is_activated {
                 match state.begin_account_session(&account_id).await {
                     Ok(session_id) => Some(session_id),
                     Err(err) => {
@@ -143,11 +144,10 @@ impl russh::server::Handler for ClientHandler {
                     }
                 }
                 if last_presence_touch.elapsed() >= PRESENCE_HEARTBEAT_INTERVAL {
-                    if let Some(session_id) = presence_session_id.as_deref() {
-                        if let Err(err) = state.touch_account_session(&account_id, session_id).await
-                        {
-                            tracing::debug!(error = ?err, "presence heartbeat failed");
-                        }
+                    if let Some(session_id) = presence_session_id.as_deref()
+                        && let Err(err) = state.touch_account_session(&account_id, session_id).await
+                    {
+                        tracing::debug!(error = ?err, "presence heartbeat failed");
                     }
                     last_presence_touch = Instant::now();
                 }
@@ -173,10 +173,10 @@ impl russh::server::Handler for ClientHandler {
                     }
                 }
             }
-            if let Some(session_id) = presence_session_id.as_deref() {
-                if let Err(err) = state.end_presence_session(&account_id, session_id).await {
-                    tracing::debug!(error = ?err, "presence disconnect failed");
-                }
+            if let Some(session_id) = presence_session_id.as_deref()
+                && let Err(err) = state.end_presence_session(&account_id, session_id).await
+            {
+                tracing::debug!(error = ?err, "presence disconnect failed");
             }
         });
         Ok(())

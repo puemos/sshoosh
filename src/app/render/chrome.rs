@@ -105,11 +105,13 @@ fn sshoosh_splash_logo_lines(area: Rect) -> Vec<Line<'static>> {
         " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘  ▝▀▀▘",
     ];
 
-    if {
+    let startup_logo_fits = {
         let width = STARTUP.iter().map(|line| line.len()).max().unwrap_or(0) as u16;
         let height = STARTUP.len() as u16 + 2;
         width <= area.width && height <= area.height
-    } {
+    };
+
+    if startup_logo_fits {
         logo_lines(STARTUP)
     } else {
         sshoosh_logo_lines()

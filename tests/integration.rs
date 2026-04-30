@@ -1229,7 +1229,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(first.contains("Channels"), "{first:?}");
 
     session
-        .data(channel.id(), sgr_drag((2, 6), (9, 6)))
+        .data(channel.id(), sgr_drag((2, 2), (9, 2)))
         .await
         .expect("drag selection");
     let copied = read_until(&mut channel, "\x1b]52;c;").await;

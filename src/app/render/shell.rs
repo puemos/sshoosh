@@ -18,10 +18,7 @@ pub fn draw(
 
     let shell = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(6),
-            Constraint::Length(bottombar_height(ui)),
-        ])
+        .constraints([Constraint::Min(6), Constraint::Length(bottombar_height(ui))])
         .split(area);
     draw_body(frame, shell[0], snapshot, ui);
     draw_bottombar(frame, shell[1], account, snapshot, ui);

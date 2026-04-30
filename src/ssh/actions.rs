@@ -708,7 +708,7 @@ fn mentions_modal(rows: &[MentionSummary]) -> ListModal {
                 ])
             })
             .collect(),
-        row_actions: rows.iter().map(|row| source_row_action(row)).collect(),
+        row_actions: rows.iter().map(source_row_action).collect(),
         empty: "No mentions found.".to_string(),
     }
 }
@@ -737,7 +737,7 @@ fn notifications_modal(rows: &[NotificationSummary]) -> ListModal {
                 ])
             })
             .collect(),
-        row_actions: rows.iter().map(|row| source_row_action(row)).collect(),
+        row_actions: rows.iter().map(source_row_action).collect(),
         empty: "No notifications found.".to_string(),
     }
 }
