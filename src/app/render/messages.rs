@@ -44,6 +44,7 @@ pub(crate) enum MessageKind {
     Dm,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn message_card<'a>(
     snapshot: &Snapshot,
     kind: MessageKind,

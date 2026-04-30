@@ -1,4 +1,6 @@
 use super::*;
+pub(crate) const MAX_PENDING_ACCOUNTS: i64 = 64;
+
 impl ServerState {
     pub async fn new(db: Database) -> anyhow::Result<Self> {
         let (live_tx, _) = broadcast::channel(1024);
@@ -66,6 +68,35 @@ impl ServerState {
 
         let Some((desired_username, token)) = login_username.split_once('+') else {
             let username = normalize_username(login_username)?;
+            let existing_pending: Option<String> = query_scalar(
+                "SELECT id
+                 FROM accounts
+                 WHERE activated_at IS NULL
+                   AND disabled_at IS NULL
+                   AND pending_username IS NOT NULL
+                   AND lower(pending_username) = lower(?)
+                 LIMIT 1",
+            )
+            .bind(&username)
+            .fetch_optional(&mut tx)
+            .await?;
+            anyhow::ensure!(
+                existing_pending.is_none(),
+                "An activation is already pending for this username"
+            );
+            let pending_count: i64 = query_scalar(
+                "SELECT COUNT(*)
+                 FROM accounts
+                 WHERE activated_at IS NULL
+                   AND disabled_at IS NULL
+                   AND pending_username IS NOT NULL",
+            )
+            .fetch_one(&mut tx)
+            .await?;
+            anyhow::ensure!(
+                pending_count < MAX_PENDING_ACCOUNTS,
+                "Too many pending account activations; ask an owner/admin for an invite token"
+            );
             let account_id = id();
             let internal_username = pending_internal_username(&account_id);
             query(
@@ -378,18 +409,26 @@ impl ServerState {
             (Vec::new(), false)
         };
         let notifications = load_notifications(self.db.read_pool(), account_id, 20).await?;
-        let notification_unread_count: i64 = query_scalar(
-            "SELECT COUNT(*) FROM notifications WHERE account_id = ? AND read_at IS NULL",
-        )
-        .bind(account_id)
-        .fetch_one(self.db.read_pool())
-        .await?;
-        let mention_unread_count: i64 = query_scalar(
-            "SELECT COUNT(*) FROM mentions WHERE target_account_id = ? AND read_at IS NULL",
-        )
-        .bind(account_id)
-        .fetch_one(self.db.read_pool())
-        .await?;
+        let notification_unread_sql = format!(
+            "SELECT COUNT(*)
+             FROM notifications n
+             WHERE n.account_id = ? AND n.read_at IS NULL AND {}",
+            notification_visible_source_sql("n")
+        );
+        let notification_unread_count: i64 = query_scalar(&notification_unread_sql)
+            .bind(account_id)
+            .fetch_one(self.db.read_pool())
+            .await?;
+        let mention_unread_sql = format!(
+            "SELECT COUNT(*)
+             FROM mentions m
+             WHERE m.target_account_id = ? AND m.read_at IS NULL AND {}",
+            mention_visible_source_sql("m")
+        );
+        let mention_unread_count: i64 = query_scalar(&mention_unread_sql)
+            .bind(account_id)
+            .fetch_one(self.db.read_pool())
+            .await?;
 
         Ok(Snapshot {
             current_username: Some(account.username),

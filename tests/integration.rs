@@ -9,7 +9,7 @@ use russh::{
 use secrecy::SecretString;
 use sshoosh::{
     config::Config,
-    db::{Database, DatabaseConfig, query, query_scalar},
+    db::{Database, DatabaseConfig, now, query, query_scalar},
     service::{Account, ServerRuntime, ServerState},
     ssh::run_with_listener,
 };
@@ -748,6 +748,259 @@ async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
     );
 }
 
+#[tokio::test]
+async fn private_channel_mentions_only_notify_visible_members_and_filter_stale_rows() {
+    let (_config, state) = test_state("private-mentions").await;
+    let owner = bootstrap_owner(&state, "SHA256:private-owner", "ssh-ed25519 private-owner").await;
+    let alice_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:private-alice",
+        "ssh-ed25519 alice",
+        alice_invite,
+    )
+    .await;
+    let bob_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let bob = accept_invite_key(
+        &state,
+        "bob",
+        "SHA256:private-bob",
+        "ssh-ed25519 bob",
+        bob_invite,
+    )
+    .await;
+
+    let channel_id = state
+        .create_channel(owner.id.clone(), "ops-secret".to_string(), true)
+        .await
+        .expect("private channel");
+    state
+        .add_channel_member(&owner.id, "ops-secret", "alice")
+        .await
+        .expect("add alice to private channel");
+    let thread_id = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "Incident notes".to_string(),
+        )
+        .await
+        .expect("thread");
+    let secret_body = "private incident detail for @alice and @bob";
+    state
+        .add_comment(owner.id.clone(), thread_id.clone(), secret_body.to_string())
+        .await
+        .expect("private mention comment");
+
+    let alice_mentions = state.list_mentions(&alice.id, 20).await.expect("mentions");
+    assert_eq!(alice_mentions.len(), 1);
+    assert_eq!(alice_mentions[0].body, secret_body);
+    let alice_notifications = state
+        .list_notifications(&alice.id, 20)
+        .await
+        .expect("alice notifications");
+    assert!(
+        alice_notifications
+            .iter()
+            .any(|notification| notification.kind == "mention" && notification.body == secret_body)
+    );
+    let alice_snapshot = state
+        .snapshot(&alice.id, None, None, None)
+        .await
+        .expect("alice snapshot");
+    assert_eq!(alice_snapshot.mention_unread_count, 1);
+    assert_eq!(alice_snapshot.notification_unread_count, 1);
+
+    let bob_mentions = state
+        .list_mentions(&bob.id, 20)
+        .await
+        .expect("bob mentions");
+    assert!(bob_mentions.is_empty(), "{bob_mentions:?}");
+    let bob_notifications = state
+        .list_notifications(&bob.id, 20)
+        .await
+        .expect("bob notifications");
+    assert!(bob_notifications.is_empty(), "{bob_notifications:?}");
+    let raw_bob_mentions: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM mentions
+         WHERE target_account_id = ?",
+    )
+    .bind(&bob.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("raw bob mention count");
+    assert_eq!(raw_bob_mentions, 0);
+    let raw_bob_notifications: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM notifications
+         WHERE account_id = ?",
+    )
+    .bind(&bob.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("raw bob notification count");
+    assert_eq!(raw_bob_notifications, 0);
+
+    let comment_id: String = query_scalar(
+        "SELECT id
+         FROM comments
+         WHERE thread_id = ? AND obj_index = 1",
+    )
+    .bind(&thread_id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("comment id");
+    let stale_mention_id = Uuid::now_v7().to_string();
+    let created_at = now();
+    query(
+        "INSERT INTO mentions
+         (id, target_account_id, actor_account_id, source_kind, source_id, channel_id,
+          thread_id, conversation_id, obj_index, created_at)
+         VALUES (?, ?, ?, 'comment', ?, ?, ?, NULL, 1, ?)",
+    )
+    .bind(&stale_mention_id)
+    .bind(&bob.id)
+    .bind(&owner.id)
+    .bind(&comment_id)
+    .bind(&channel_id)
+    .bind(&thread_id)
+    .bind(&created_at)
+    .execute(state.db.write_pool())
+    .await
+    .expect("insert stale mention");
+    query(
+        "INSERT INTO notifications
+         (id, account_id, actor_account_id, kind, source_kind, source_id, channel_id,
+          thread_id, conversation_id, title, body, created_at)
+         VALUES (?, ?, ?, 'mention', 'comment', ?, ?, ?, NULL, 'Incident notes', ?, ?)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(&bob.id)
+    .bind(&owner.id)
+    .bind(&comment_id)
+    .bind(&channel_id)
+    .bind(&thread_id)
+    .bind(secret_body)
+    .bind(&created_at)
+    .execute(state.db.write_pool())
+    .await
+    .expect("insert stale notification");
+
+    assert!(
+        state
+            .list_mentions(&bob.id, 20)
+            .await
+            .expect("filtered stale mentions")
+            .is_empty()
+    );
+    assert!(
+        state
+            .list_notifications(&bob.id, 20)
+            .await
+            .expect("filtered stale notifications")
+            .is_empty()
+    );
+    state
+        .mark_notification_read(&bob.id, None)
+        .await
+        .expect("mark visible notifications read");
+    let stale_notification_read_at: Option<String> = query_scalar(
+        "SELECT read_at
+         FROM notifications
+         WHERE account_id = ? AND channel_id = ?",
+    )
+    .bind(&bob.id)
+    .bind(&channel_id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("stale notification read_at");
+    assert_eq!(stale_notification_read_at, None);
+    let bob_snapshot = state
+        .snapshot(&bob.id, None, None, None)
+        .await
+        .expect("bob snapshot");
+    assert_eq!(bob_snapshot.mention_unread_count, 0);
+    assert_eq!(bob_snapshot.notification_unread_count, 0);
+}
+
+#[tokio::test]
+async fn removed_private_channel_participant_does_not_receive_later_reply_notifications() {
+    let (_config, state) = test_state("removed-replies").await;
+    let owner = bootstrap_owner(&state, "SHA256:reply-owner", "ssh-ed25519 reply-owner").await;
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:reply-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
+    let channel_id = state
+        .create_channel(owner.id.clone(), "reply-secret".to_string(), true)
+        .await
+        .expect("private channel");
+    state
+        .add_channel_member(&owner.id, "reply-secret", "alice")
+        .await
+        .expect("add alice");
+    let thread_id = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "Reply visibility".to_string(),
+        )
+        .await
+        .expect("thread");
+    state
+        .add_comment(
+            alice.id.clone(),
+            thread_id.clone(),
+            "I can see this before removal".to_string(),
+        )
+        .await
+        .expect("alice reply");
+    state
+        .remove_channel_member(&owner.id, "reply-secret", "alice")
+        .await
+        .expect("remove alice");
+    state
+        .add_comment(
+            owner.id.clone(),
+            thread_id.clone(),
+            "private reply after removal".to_string(),
+        )
+        .await
+        .expect("owner reply after removal");
+
+    let raw_alice_replies: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM notifications
+         WHERE account_id = ? AND kind = 'reply'",
+    )
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("raw alice reply count");
+    assert_eq!(raw_alice_replies, 0);
+    let alice_notifications = state
+        .list_notifications(&alice.id, 20)
+        .await
+        .expect("alice notifications");
+    assert!(
+        alice_notifications
+            .iter()
+            .all(|notification| !notification.body.contains("after removal"))
+    );
+    let alice_snapshot = state
+        .snapshot(&alice.id, None, None, None)
+        .await
+        .expect("alice snapshot");
+    assert_eq!(alice_snapshot.notification_unread_count, 0);
+}
+
 async fn service_pair(state: &ServerState) -> ServerState {
     ServerState::new(state.db.clone())
         .await
@@ -791,6 +1044,64 @@ async fn unknown_ssh_key_creates_blocked_pending_account() {
     assert_eq!(account_count, 1);
     assert_eq!(key_count, 1);
     assert_eq!(alice_count, 0);
+}
+
+#[tokio::test]
+async fn unknown_ssh_key_pending_accounts_are_duplicate_checked_and_capped() {
+    let (_config, state) = test_state("pending-cap").await;
+    let first = state
+        .ensure_account_for_key("Alice", "SHA256:cap-0", "ssh-ed25519 cap-0")
+        .await
+        .expect("first pending account");
+    assert!(!first.activated);
+    assert_eq!(first.pending_username.as_deref(), Some("alice"));
+
+    let duplicate = state
+        .ensure_account_for_key("alice", "SHA256:cap-duplicate", "ssh-ed25519 cap-duplicate")
+        .await
+        .expect_err("duplicate pending username must fail");
+    assert!(
+        duplicate
+            .to_string()
+            .contains("activation is already pending"),
+        "{duplicate:?}"
+    );
+
+    for idx in 1..64 {
+        let username = format!("pending{idx}");
+        let fingerprint = format!("SHA256:cap-{idx}");
+        let public_key = format!("ssh-ed25519 cap-{idx}");
+        let pending = state
+            .ensure_account_for_key(&username, &fingerprint, &public_key)
+            .await
+            .expect("pending account below cap");
+        assert_eq!(pending.pending_username.as_deref(), Some(username.as_str()));
+    }
+
+    let capped = state
+        .ensure_account_for_key(
+            "overflow",
+            "SHA256:cap-overflow",
+            "ssh-ed25519 cap-overflow",
+        )
+        .await
+        .expect_err("pending account cap must fail");
+    assert!(
+        capped
+            .to_string()
+            .contains("Too many pending account activations"),
+        "{capped:?}"
+    );
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    assert_eq!(account_count, 64);
+    assert_eq!(key_count, 64);
 }
 
 #[tokio::test]
@@ -1068,6 +1379,87 @@ async fn encrypted_content_keeps_plaintext_fts() {
         .expect("snapshot");
     assert_eq!(snapshot.threads[0].title, "Secret plan");
     assert_eq!(snapshot.threads[0].body, "Launch at dawn");
+}
+
+#[cfg(unix)]
+async fn assert_local_sqlite_files_are_owner_only(cfg: DatabaseConfig, db_path: PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let db = Database::connect_with_config(&cfg)
+        .await
+        .expect("connect db");
+    db.init().await.expect("init db");
+    query("CREATE TABLE IF NOT EXISTS permission_probe (id INTEGER PRIMARY KEY)")
+        .execute(db.write_pool())
+        .await
+        .expect("create probe table");
+    query("INSERT INTO permission_probe DEFAULT VALUES")
+        .execute(db.write_pool())
+        .await
+        .expect("write probe row");
+
+    let mode = fs::metadata(&db_path)
+        .expect("db metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600, "database mode for {}", db_path.display());
+
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = db_path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        let sidecar = PathBuf::from(sidecar);
+        if sidecar.exists() {
+            let mode = fs::metadata(&sidecar)
+                .expect("sidecar metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "sidecar mode for {}", sidecar.display());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sshoosh_db_sqlite_files_are_created_owner_only() {
+    let db_path = temp_path("db-permissions").with_extension("sqlite");
+    let cfg = database_config(db_path.clone(), "db-permissions");
+    assert_local_sqlite_files_are_owner_only(cfg, db_path).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn file_url_sqlite_files_are_created_owner_only() {
+    let db_path = temp_path("file-url-permissions").with_extension("sqlite");
+    let mut cfg = database_config(
+        temp_path("ignored-file-url").with_extension("sqlite"),
+        "file-url-permissions",
+    );
+    cfg.database_url = Some(format!("file:{}", db_path.display()));
+    assert_local_sqlite_files_are_owner_only(cfg, db_path).await;
+}
+
+#[tokio::test]
+async fn non_local_http_database_url_is_rejected_before_remote_connection() {
+    let mut cfg = database_config(
+        temp_path("http-url-reject").with_extension("sqlite"),
+        "http-url-reject",
+    );
+    cfg.database_url = Some("http://example.com/db".to_string());
+    cfg.database_auth_token = Some(SecretString::new(
+        "secret-token".to_string().into_boxed_str(),
+    ));
+
+    let err = match Database::connect_with_config(&cfg).await {
+        Ok(_) => panic!("plain remote http must be rejected before connecting"),
+        Err(err) => err,
+    };
+    assert!(
+        err.to_string()
+            .contains("plain HTTP database URLs are only allowed"),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]

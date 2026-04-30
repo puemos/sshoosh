@@ -31,7 +31,7 @@ pub(crate) async fn load_notifications(
     limit: i64,
 ) -> anyhow::Result<Vec<NotificationSummary>> {
     let limit = limit.clamp(1, 200);
-    let rows = query(
+    let sql = format!(
         "SELECT n.id, n.kind, actor.username AS actor_username,
                 n.channel_id, c.slug AS channel_slug,
                 n.thread_id, t.title AS thread_title,
@@ -42,13 +42,16 @@ pub(crate) async fn load_notifications(
          LEFT JOIN channels c ON c.id = n.channel_id
          LEFT JOIN threads t ON t.id = n.thread_id
          WHERE n.account_id = ?
+           AND {}
          ORDER BY n.created_at DESC
          LIMIT ?",
-    )
-    .bind(account_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+        notification_visible_source_sql("n")
+    );
+    let rows = query(&sql)
+        .bind(account_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|row| NotificationSummary {

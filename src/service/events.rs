@@ -202,6 +202,9 @@ pub(crate) async fn create_notification_tx(
     if actor_id == Some(account_id) {
         return Ok(String::new());
     }
+    if !account_can_view_source_tx(tx, account_id, input.channel_id, input.conversation_id).await? {
+        return Ok(String::new());
+    }
     if let Some(thread_id) = input.thread_id {
         let muted: i64 = query_scalar(
             "SELECT COUNT(*) FROM thread_reads
@@ -292,6 +295,11 @@ pub(crate) async fn create_mention_notifications_tx(
         if target_id == actor_id || targets.contains(&target_id) {
             continue;
         }
+        if !account_can_view_source_tx(tx, &target_id, input.channel_id, input.conversation_id)
+            .await?
+        {
+            continue;
+        }
         query(
             "INSERT INTO mentions
              (id, target_account_id, actor_account_id, source_kind, source_id, channel_id,
@@ -346,12 +354,22 @@ pub(crate) async fn create_thread_reply_notifications_tx(
     input: ReplyNotificationInput<'_>,
 ) -> anyhow::Result<()> {
     let participants = query_scalar::<String>(
-        "SELECT creator_account_id FROM threads WHERE id = ?
-         UNION
-         SELECT author_account_id FROM comments WHERE thread_id = ? AND deleted_at IS NULL",
+        "SELECT account_id
+         FROM (
+           SELECT creator_account_id AS account_id FROM threads WHERE id = ?
+           UNION
+           SELECT author_account_id AS account_id
+           FROM comments
+           WHERE thread_id = ? AND deleted_at IS NULL
+         ) participants
+         WHERE EXISTS (
+           SELECT 1 FROM channel_members m
+           WHERE m.channel_id = ? AND m.account_id = participants.account_id
+         )",
     )
     .bind(input.thread_id)
     .bind(input.thread_id)
+    .bind(input.channel_id)
     .fetch_all(&mut tx)
     .await?;
     for account_id in participants {
@@ -379,6 +397,99 @@ pub(crate) async fn create_thread_reply_notifications_tx(
     Ok(())
 }
 
+pub(crate) async fn account_can_view_source_tx(
+    mut tx: &mut DbTransaction,
+    account_id: &str,
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+) -> anyhow::Result<bool> {
+    let active: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM accounts
+         WHERE id = ? AND activated_at IS NOT NULL AND disabled_at IS NULL",
+    )
+    .bind(account_id)
+    .fetch_one(&mut tx)
+    .await?;
+    if active == 0 {
+        return Ok(false);
+    }
+
+    if let Some(channel_id) = channel_id {
+        let member: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM channel_members
+             WHERE channel_id = ? AND account_id = ?",
+        )
+        .bind(channel_id)
+        .bind(account_id)
+        .fetch_one(&mut tx)
+        .await?;
+        if member == 0 {
+            return Ok(false);
+        }
+    }
+
+    if let Some(conversation_id) = conversation_id {
+        let member: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM conversation_members
+             WHERE conversation_id = ? AND account_id = ?",
+        )
+        .bind(conversation_id)
+        .bind(account_id)
+        .fetch_one(&mut tx)
+        .await?;
+        if member == 0 {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+pub(crate) fn notification_visible_source_sql(alias: &str) -> String {
+    visible_source_sql(alias, "account_id")
+}
+
+pub(crate) fn mention_visible_source_sql(alias: &str) -> String {
+    visible_source_sql(alias, "target_account_id")
+}
+
+fn visible_source_sql(alias: &str, account_column: &str) -> String {
+    let alias = match alias {
+        "m" => "m",
+        "mentions" => "mentions",
+        "n" => "n",
+        "notifications" => "notifications",
+        _ => panic!("unsupported notification source alias"),
+    };
+    format!(
+        "EXISTS (
+           SELECT 1 FROM accounts visible_account
+           WHERE visible_account.id = {alias}.{account_column}
+             AND visible_account.activated_at IS NOT NULL
+             AND visible_account.disabled_at IS NULL
+         )
+         AND (
+           {alias}.channel_id IS NULL
+           OR EXISTS (
+             SELECT 1 FROM channel_members visible_channel
+             WHERE visible_channel.channel_id = {alias}.channel_id
+               AND visible_channel.account_id = {alias}.{account_column}
+           )
+         )
+         AND (
+           {alias}.conversation_id IS NULL
+           OR EXISTS (
+             SELECT 1 FROM conversation_members visible_conversation
+             WHERE visible_conversation.conversation_id = {alias}.conversation_id
+               AND visible_conversation.account_id = {alias}.{account_column}
+           )
+         )"
+    )
+}
+
 pub(crate) async fn create_dm_notifications_tx(
     mut tx: &mut DbTransaction,
     actor_id: &str,
@@ -388,7 +499,12 @@ pub(crate) async fn create_dm_notifications_tx(
     body: &str,
 ) -> anyhow::Result<()> {
     let members = query_scalar::<String>(
-        "SELECT account_id FROM conversation_members WHERE conversation_id = ?",
+        "SELECT m.account_id
+         FROM conversation_members m
+         JOIN accounts a ON a.id = m.account_id
+         WHERE m.conversation_id = ?
+           AND a.activated_at IS NOT NULL
+           AND a.disabled_at IS NULL",
     )
     .bind(conversation_id)
     .fetch_all(&mut tx)

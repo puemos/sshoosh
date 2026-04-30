@@ -61,6 +61,7 @@ pub struct Database {
     fencing_token: Arc<AtomicI64>,
     write_lock: Arc<Mutex<()>>,
     ignore_check_constraints: Arc<AtomicBool>,
+    local_path: Option<PathBuf>,
 }
 
 pub struct DbTransaction {
@@ -161,36 +162,46 @@ impl Database {
     }
 
     pub async fn connect_with_config(config: &DatabaseConfig) -> anyhow::Result<Self> {
-        let (inner, kind, display_name) = if let Some(url) = config.database_url.as_deref() {
-            let token = config
-                .database_auth_token
-                .as_ref()
-                .map(|token| token.expose_secret().to_string())
-                .unwrap_or_default();
-            if is_remote_url(url) && token.is_empty() {
-                bail!("SSHOOSH_DATABASE_AUTH_TOKEN is required for remote database URLs");
-            }
-            let db = if url.starts_with("file:") {
-                let path = url.trim_start_matches("file:");
-                ensure_parent(Path::new(path))?;
-                Builder::new_local(path).build().await?
+        let (inner, kind, display_name, local_path) =
+            if let Some(url) = config.database_url.as_deref() {
+                validate_database_url(url)?;
+                let token = config
+                    .database_auth_token
+                    .as_ref()
+                    .map(|token| token.expose_secret().to_string())
+                    .unwrap_or_default();
+                if is_remote_url(url) && token.is_empty() {
+                    bail!("SSHOOSH_DATABASE_AUTH_TOKEN is required for remote database URLs");
+                }
+                let (db, local_path) = if let Some(path) = strip_url_prefix(url, "file:") {
+                    ensure_parent(Path::new(path))?;
+                    let db = Builder::new_local(path).build().await?;
+                    let local_path = PathBuf::from(path);
+                    secure_local_database_files(&local_path)?;
+                    (db, Some(local_path))
+                } else {
+                    (
+                        Builder::new_remote(url.to_string(), token).build().await?,
+                        None,
+                    )
+                };
+                let kind = if is_file_url(url) {
+                    DatabaseKind::Local
+                } else {
+                    DatabaseKind::Remote
+                };
+                (db, kind, redact_database_url(url), local_path)
             } else {
-                Builder::new_remote(url.to_string(), token).build().await?
+                ensure_parent(&config.db_path)?;
+                let inner = Builder::new_local(&config.db_path).build().await?;
+                secure_local_database_files(&config.db_path)?;
+                (
+                    inner,
+                    DatabaseKind::Local,
+                    config.db_path.display().to_string(),
+                    Some(config.db_path.clone()),
+                )
             };
-            let kind = if url.starts_with("file:") {
-                DatabaseKind::Local
-            } else {
-                DatabaseKind::Remote
-            };
-            (db, kind, redact_database_url(url))
-        } else {
-            ensure_parent(&config.db_path)?;
-            (
-                Builder::new_local(&config.db_path).build().await?,
-                DatabaseKind::Local,
-                config.db_path.display().to_string(),
-            )
-        };
 
         let encryption = config
             .encryption_key
@@ -212,6 +223,7 @@ impl Database {
             fencing_token: Arc::new(AtomicI64::new(0)),
             write_lock: Arc::new(Mutex::new(())),
             ignore_check_constraints: Arc::new(AtomicBool::new(false)),
+            local_path,
         };
 
         db.configure_connection(&db.connection()?).await?;
@@ -542,6 +554,9 @@ impl Database {
             conn.execute("PRAGMA temp_store = MEMORY", ()).await?;
             conn.execute("PRAGMA journal_mode = WAL", ()).await.ok();
             conn.execute("PRAGMA synchronous = NORMAL", ()).await.ok();
+            if let Some(path) = self.local_path.as_deref() {
+                secure_local_database_files(path)?;
+            }
             if self.ignore_check_constraints.load(Ordering::Acquire) {
                 conn.execute("PRAGMA ignore_check_constraints = ON", ())
                     .await
@@ -1349,8 +1364,99 @@ fn ensure_parent(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn secure_local_database_files(path: &Path) -> anyhow::Result<()> {
+    #[cfg(not(unix))]
+    let _ = path;
+    #[cfg(unix)]
+    {
+        secure_local_database_file(path)?;
+        secure_local_database_file(&sqlite_sidecar_path(path, "-wal"))?;
+        secure_local_database_file(&sqlite_sidecar_path(path, "-shm"))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn secure_local_database_file(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if path.exists() {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("securing permissions for {}", path.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+fn validate_database_url(url: &str) -> anyhow::Result<()> {
+    if is_http_url(url) && !is_local_http_database_url(url) {
+        bail!("plain HTTP database URLs are only allowed for localhost development");
+    }
+    Ok(())
+}
+
+fn is_local_http_database_url(url: &str) -> bool {
+    let Some(rest) = strip_url_prefix(url, "http://") else {
+        return false;
+    };
+    let Some(host) = database_url_host(rest) else {
+        return false;
+    };
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
+fn database_url_host(url_without_scheme: &str) -> Option<&str> {
+    let authority = url_without_scheme
+        .split(&['/', '?', '#'])
+        .next()
+        .filter(|authority| !authority.is_empty())?;
+    let authority = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split_once(']').map(|(host, _)| host);
+    }
+    Some(
+        authority
+            .split_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(authority),
+    )
+    .filter(|host| !host.is_empty())
+}
+
 fn is_remote_url(url: &str) -> bool {
-    url.starts_with("libsql://") || url.starts_with("https://") || url.starts_with("http://")
+    has_url_prefix(url, "libsql://")
+        || has_url_prefix(url, "https://")
+        || has_url_prefix(url, "http://")
+}
+
+fn is_file_url(url: &str) -> bool {
+    has_url_prefix(url, "file:")
+}
+
+fn is_http_url(url: &str) -> bool {
+    has_url_prefix(url, "http://")
+}
+
+fn strip_url_prefix<'a>(url: &'a str, prefix: &str) -> Option<&'a str> {
+    has_url_prefix(url, prefix).then(|| &url[prefix.len()..])
+}
+
+fn has_url_prefix(url: &str, prefix: &str) -> bool {
+    url.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 fn redact_database_url(url: &str) -> String {
@@ -1375,4 +1481,47 @@ fn normalize_sql(sql: &str) -> String {
 
 fn random_id() -> String {
     uuid::Uuid::now_v7().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_local_http_database_urls_are_rejected() {
+        for url in [
+            "http://example.com/db",
+            "HTTP://example.com/db",
+            "http://localhost.evil/db",
+        ] {
+            let err = validate_database_url(url).expect_err("reject http");
+            assert!(
+                err.to_string()
+                    .contains("plain HTTP database URLs are only allowed"),
+                "{url}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn localhost_http_database_urls_are_allowed() {
+        for url in [
+            "http://localhost:8080/db",
+            "http://127.0.0.1:8080/db",
+            "http://[::1]:8080/db",
+        ] {
+            validate_database_url(url).expect(url);
+        }
+    }
+
+    #[test]
+    fn secure_and_file_database_urls_are_allowed() {
+        for url in [
+            "https://example.com/db",
+            "libsql://example.turso.io",
+            "file:/tmp/sshoosh.sqlite",
+        ] {
+            validate_database_url(url).expect(url);
+        }
+    }
 }

@@ -45,18 +45,27 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         let now = now();
         if let Some(notification_id) = notification_id {
-            query(
+            let sql = format!(
                 "UPDATE notifications SET read_at = ?
-                 WHERE account_id = ? AND (id = ? OR id LIKE ?)",
-            )
-            .bind(&now)
-            .bind(account_id)
-            .bind(notification_id)
-            .bind(format!("{}%", notification_id.trim()))
-            .execute(self.db.write_pool())
-            .await?;
+                 WHERE account_id = ?
+                   AND (id = ? OR id LIKE ?)
+                   AND {}",
+                notification_visible_source_sql("notifications")
+            );
+            query(&sql)
+                .bind(&now)
+                .bind(account_id)
+                .bind(notification_id)
+                .bind(format!("{}%", notification_id.trim()))
+                .execute(self.db.write_pool())
+                .await?;
         } else {
-            query("UPDATE notifications SET read_at = ? WHERE account_id = ? AND read_at IS NULL")
+            let sql = format!(
+                "UPDATE notifications SET read_at = ?
+                 WHERE account_id = ? AND read_at IS NULL AND {}",
+                notification_visible_source_sql("notifications")
+            );
+            query(&sql)
                 .bind(&now)
                 .bind(account_id)
                 .execute(self.db.write_pool())
@@ -71,7 +80,7 @@ impl ServerState {
         limit: i64,
     ) -> anyhow::Result<Vec<MentionSummary>> {
         let limit = limit.clamp(1, 200);
-        let rows = query(
+        let sql = format!(
             "SELECT m.id, actor.username AS actor_username, m.source_kind,
                     m.channel_id, c.slug AS channel_slug,
                     m.thread_id, t.title AS thread_title,
@@ -86,13 +95,16 @@ impl ServerState {
              LEFT JOIN comments cm ON cm.id = m.source_id AND m.source_kind = 'comment'
              LEFT JOIN conversation_messages dm ON dm.id = m.source_id AND m.source_kind = 'dm'
              WHERE m.target_account_id = ?
+               AND {}
              ORDER BY m.created_at DESC
              LIMIT ?",
-        )
-        .bind(account_id)
-        .bind(limit)
-        .fetch_all(self.db.read_pool())
-        .await?;
+            mention_visible_source_sql("m")
+        );
+        let rows = query(&sql)
+            .bind(account_id)
+            .bind(limit)
+            .fetch_all(self.db.read_pool())
+            .await?;
         Ok(rows
             .into_iter()
             .map(|row| MentionSummary {
