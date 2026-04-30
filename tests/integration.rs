@@ -1247,7 +1247,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("dismiss help");
 
     session
-        .data(channel.id(), b"/invite new\r".to_vec())
+        .data(channel.id(), b"/invite new\r\r".to_vec())
         .await
         .expect("send invite command");
     let invite_output = read_until(&mut channel, "Enter or Esc closes").await;

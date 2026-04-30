@@ -87,17 +87,26 @@ impl App {
         );
     }
 
-    pub(crate) fn accept_autocomplete_if_incomplete(&mut self) -> bool {
-        let replacement = self.ui.composer.autocomplete.selected_replacement();
-        if let Some((range, value)) = replacement {
-            if self.ui.composer.buffer.get(range.clone()) == Some(value.as_str()) {
-                return false;
-            }
-            self.ui.composer.replace_range(range, &value);
-            self.update_completions();
-            return true;
+    pub(crate) fn accept_autocomplete_enter(&mut self) -> bool {
+        if !self.ui.composer.autocomplete.open {
+            return false;
         }
-        false
+        let Some(item) = self
+            .ui
+            .composer
+            .autocomplete
+            .items
+            .get(self.ui.composer.autocomplete.selected)
+            .cloned()
+        else {
+            self.ui.composer.autocomplete.open = false;
+            return false;
+        };
+        self.ui
+            .composer
+            .replace_range(item.replacement_range, &item.replacement);
+        self.ui.composer.autocomplete.open = false;
+        true
     }
 
     pub(crate) fn accept_autocomplete_tab(&mut self) -> bool {

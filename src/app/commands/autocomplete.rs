@@ -113,6 +113,61 @@ pub(crate) fn argument_suggestions(
         _ => Vec::new(),
     }
 }
+
+pub(crate) fn autocomplete_mentions(
+    buffer: &str,
+    cursor: usize,
+    snapshot: &Snapshot,
+) -> AutocompleteState {
+    let Some((range, prefix)) = active_mention_token(buffer, cursor) else {
+        return AutocompleteState::default();
+    };
+    autocomplete_arguments(
+        range,
+        prefix,
+        dm_suggestions(snapshot),
+        "Mention user",
+        true,
+    )
+}
+
+fn active_mention_token(buffer: &str, cursor: usize) -> Option<(Range<usize>, &str)> {
+    let cursor = cursor.min(buffer.len());
+    if !buffer.is_char_boundary(cursor) {
+        return None;
+    }
+
+    let (start, _) = buffer[..cursor]
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| *ch == '@')?;
+    if start > 0
+        && buffer[..start]
+            .chars()
+            .next_back()
+            .is_some_and(is_mention_name_char)
+    {
+        return None;
+    }
+
+    let prefix_start = start + '@'.len_utf8();
+    let prefix = &buffer[prefix_start..cursor];
+    if !prefix.chars().all(is_mention_name_char) {
+        return None;
+    }
+
+    let suffix_len = buffer[cursor..]
+        .chars()
+        .take_while(|ch| is_mention_name_char(*ch))
+        .map(char::len_utf8)
+        .sum::<usize>();
+    Some((start..cursor + suffix_len, prefix))
+}
+
+fn is_mention_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
+}
+
 pub(crate) fn autocomplete_arguments(
     replacement_range: Range<usize>,
     arg_prefix: &str,

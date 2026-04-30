@@ -503,18 +503,6 @@ impl AutocompleteState {
         }
     }
 
-    pub fn selected_replacement(&self) -> Option<(Range<usize>, String)> {
-        if !self.open {
-            return None;
-        }
-        let item = self.items.get(self.selected)?;
-        if item.accept_on_enter {
-            Some((item.replacement_range.clone(), item.replacement.clone()))
-        } else {
-            None
-        }
-    }
-
     pub fn selected_tab_replacement(&self) -> Option<(Range<usize>, String)> {
         if !self.open {
             return None;

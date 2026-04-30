@@ -201,10 +201,122 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn tab_accepts_inline_mention_autocomplete() {
+        let mut app = test_app("mention-tab").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("@al");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\t");
+
+        assert_eq!(app.ui.composer.buffer, "@alice");
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn arrow_keys_navigate_inline_mention_autocomplete() {
+        let mut app = test_app("mention-arrows").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alex".to_string(),
+            display_name: "Alex".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("@a");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.selected, 0);
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.composer.autocomplete.selected, 1);
+
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.composer.autocomplete.selected, 0);
+    }
+
+    #[tokio::test]
+    async fn enter_accepts_open_autocomplete_without_submitting() {
+        let mut app = test_app("autocomplete-enter-accept").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/dm open ");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        let replacement = app.ui.composer.autocomplete.items[0].replacement.clone();
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, format!("/dm open {replacement}"));
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+        assert!(!app.ui.composer.autocomplete.open);
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enter_accepts_highlighted_autocomplete_item() {
+        let mut app = test_app("autocomplete-enter-highlighted").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "bob".to_string(),
+            display_name: "Bob".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/dm open ");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert!(app.ui.composer.autocomplete.items.len() > 1);
+
+        app.handle_input(b"\x1b[B");
+        let replacement = app.ui.composer.autocomplete.items[app.ui.composer.autocomplete.selected]
+            .replacement
+            .clone();
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.composer.buffer, format!("/dm open {replacement}"));
+        assert!(!app.ui.composer.autocomplete.open);
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
     async fn arrow_keys_walk_command_history_in_compose() {
         let mut app = test_app("command-history-arrows").await;
 
-        app.handle_input(b"/older\n/more\nhello\n/");
+        app.ui.composer.push_history("/older".to_string());
+        app.ui.composer.push_history("/more".to_string());
+        app.ui.composer.push_history("hello".to_string());
+        app.handle_input(b"/");
         assert_eq!(app.ui.composer.buffer, "/");
 
         app.handle_input(b"\x1b[A");
@@ -520,8 +632,8 @@ mod cases {
     }
 
     #[tokio::test]
-    async fn exact_dm_autocomplete_enter_submits_command() {
-        let mut app = test_app("dm-enter-submit").await;
+    async fn exact_dm_autocomplete_enter_accepts_before_submit() {
+        let mut app = test_app("dm-enter-exact-accept").await;
         app.snapshot.users.push(crate::service::UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
@@ -536,11 +648,71 @@ mod cases {
 
         app.handle_input(b"\r");
 
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/dm @alice");
+        assert!(!app.ui.composer.autocomplete.open);
+        assert!(app.actions.is_empty());
+
+        app.handle_input(b"\r");
+
         assert_eq!(app.ui.mode, UiMode::Normal);
         assert_eq!(
             app.actions,
             vec![Action::OpenDm {
                 target: "@alice".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn exact_mention_autocomplete_enter_accepts_before_submit() {
+        let mut app = test_app("mention-enter-exact-accept").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("@alice");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "@alice");
+        assert!(!app.ui.composer.autocomplete.open);
+        assert!(app.actions.is_empty());
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(
+            app.actions,
+            vec![Action::AddComment {
+                body: "@alice".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn enter_submits_when_autocomplete_is_closed() {
+        let mut app = test_app("enter-submit-no-autocomplete").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("hello");
+        app.update_completions();
+
+        assert!(!app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(
+            app.actions,
+            vec![Action::AddComment {
+                body: "hello".to_string()
             }]
         );
     }

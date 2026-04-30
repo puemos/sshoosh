@@ -230,7 +230,7 @@ impl CommandRegistry {
         snapshot: &Snapshot,
     ) -> AutocompleteState {
         if !buffer.starts_with('/') {
-            return AutocompleteState::default();
+            return autocomplete_mentions(buffer, cursor, snapshot);
         }
         let cursor = cursor.min(buffer.len());
         if cursor == 0 {
@@ -443,6 +443,7 @@ impl CommandRegistry {
         items
     }
 
+    #[cfg(test)]
     pub fn is_no_arg_command(&self, line: &str) -> bool {
         let line = line.trim().trim_start_matches('/');
         let (command, rest) = split_word(line);

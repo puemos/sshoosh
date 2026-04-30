@@ -425,10 +425,7 @@ impl App {
                 }
             }
             Key::Enter => {
-                if self.accept_autocomplete_if_incomplete() {
-                    if self.commands.is_no_arg_command(&self.ui.composer.buffer) {
-                        self.submit_composer();
-                    }
+                if self.accept_autocomplete_enter() {
                     return;
                 }
                 self.submit_composer();

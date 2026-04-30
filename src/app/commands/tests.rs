@@ -274,4 +274,94 @@ mod cases {
         assert!(state.items[0].accept_on_enter);
         assert!(state.items[0].accept_on_tab);
     }
+
+    #[test]
+    fn mention_autocomplete_replaces_active_token() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![crate::service::UserPresence {
+                username: "alice".to_string(),
+                display_name: "Alice".to_string(),
+                last_seen_at: None,
+                connected: false,
+            }],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("hello @al", 9, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "@alice");
+        assert_eq!(state.items[0].replacement_range, 6..9);
+        assert_eq!(state.items[0].detail, "offline");
+        assert_eq!(state.items[0].preview, "Mention user");
+        assert!(state.items[0].accept_on_enter);
+        assert!(state.items[0].accept_on_tab);
+    }
+
+    #[test]
+    fn bare_mention_opens_without_enter_acceptance() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![crate::service::UserPresence {
+                username: "alice".to_string(),
+                display_name: "Alice".to_string(),
+                last_seen_at: None,
+                connected: false,
+            }],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("@", 1, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "@alice");
+        assert_eq!(state.items[0].replacement_range, 0..1);
+        assert!(!state.items[0].accept_on_enter);
+        assert!(state.items[0].accept_on_tab);
+    }
+
+    #[test]
+    fn mention_autocomplete_preserves_surrounding_token_range() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![crate::service::UserPresence {
+                username: "alice".to_string(),
+                display_name: "Alice".to_string(),
+                last_seen_at: None,
+                connected: false,
+            }],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("ping (@al) today", 9, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "@alice");
+        assert_eq!(state.items[0].replacement_range, 6..9);
+
+        let state = registry.autocomplete("email alice@example.com", 19, &snapshot);
+        assert!(!state.open);
+    }
+
+    #[test]
+    fn slash_command_autocomplete_takes_precedence_over_mentions() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![crate::service::UserPresence {
+                username: "alice".to_string(),
+                display_name: "Alice".to_string(),
+                last_seen_at: None,
+                connected: false,
+            }],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("/dm @al", 7, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "@alice");
+        assert_eq!(state.items[0].replacement_range, 4..7);
+        assert_eq!(state.items[0].preview, "Open a direct message");
+    }
 }
