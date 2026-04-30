@@ -135,7 +135,7 @@ mod cases {
             4,
         );
 
-        assert_eq!(card.height(), 4);
+        assert_eq!(card.height(), 6);
         assert_eq!(card.link_count(), 0);
     }
 
@@ -296,7 +296,7 @@ mod cases {
             theme::COMPOSER
         );
         assert_eq!(buffer.cell((1, 1)).expect("workspace header").symbol(), "C");
-        assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "w");
+        assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "#");
     }
 
     #[test]
@@ -1605,7 +1605,7 @@ mod cases {
         ui.route = Route::Dms;
         ui.active_pane = ActivePane::Detail;
         ui.detail_scroll
-            .set_offset(ratatui::layout::Position { x: 0, y: 2 });
+            .set_offset(ratatui::layout::Position { x: 0, y: 3 });
 
         terminal
             .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))

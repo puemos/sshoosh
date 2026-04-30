@@ -1,5 +1,5 @@
 use super::*;
-use crate::time_format::format_human_timestamp;
+use crate::time_format::{calendar_day_key, calendar_day_label, format_human_timestamp};
 pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if matches!(ui.route, Route::Dms) {
         draw_dm_detail(frame, area, snapshot, ui);
@@ -17,10 +17,41 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         .and_then(|id| snapshot.threads.iter().find(|thread| &thread.id == id));
     let mut items: Vec<ListItem> = Vec::new();
     let message_width = message_content_width(area);
+    let channel_slug = snapshot
+        .selected_channel_id
+        .as_ref()
+        .and_then(|id| snapshot.channels.iter().find(|channel| &channel.id == id))
+        .map(|channel| channel.slug.as_str());
     let title = selected
         .map(|thread| thread.title.as_str())
         .unwrap_or("Thread");
-    draw_detail_header(frame, area, title, ui);
+    let header_meta = selected.map(|thread| {
+        let last_activity = thread
+            .last_activity_at
+            .as_deref()
+            .map(format_human_timestamp)
+            .unwrap_or_else(|| "no activity".to_string());
+        let plural = if thread.comment_count == 1 {
+            "comment"
+        } else {
+            "comments"
+        };
+        let mut meta = format!(
+            "{} {plural} · {}",
+            thread.comment_count, last_activity,
+        );
+        if thread.edited_at.is_some() {
+            meta.push_str(" · edited");
+        }
+        if thread.archived_at.is_some() {
+            meta.push_str(" · archived");
+        }
+        if thread.pinned_at.is_some() {
+            meta.push_str(" · pinned");
+        }
+        meta
+    });
+    draw_thread_header(frame, area, channel_slug, title, header_meta.as_deref(), ui);
     let messages_area = pane_scroll_area(area);
     let mut link_hits = Vec::new();
     let mut card_hits = Vec::new();
@@ -33,41 +64,11 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 history_prompt("Older comments available. Use /older."),
             );
         }
-        let last_activity = thread
-            .last_activity_at
-            .as_deref()
-            .map(format_human_timestamp)
-            .unwrap_or_else(|| "no activity".to_string());
-        let summary = ListItem::new(vec![
-            Line::from(vec![Span::styled(
-                format!(
-                    "@{} · {} comments · {}{}{}{}",
-                    thread.author,
-                    thread.comment_count,
-                    last_activity,
-                    if thread.edited_at.is_some() {
-                        " · edited"
-                    } else {
-                        ""
-                    },
-                    if thread.archived_at.is_some() {
-                        " · archived"
-                    } else {
-                        ""
-                    },
-                    if thread.pinned_at.is_some() {
-                        " · pinned"
-                    } else {
-                        ""
-                    }
-                ),
-                theme::muted(),
-            )]),
-            Line::from(""),
-        ]);
-        append_plain_item(&mut items, &mut content_row, summary);
+        append_plain_item(&mut items, &mut content_row, ListItem::new(""));
 
+        let mut last_day = None;
         if !thread.body.trim().is_empty() {
+            last_day = calendar_day_key(&thread.created_at);
             let card = message_card(
                 snapshot,
                 MessageKind::ThreadRoot,
@@ -87,8 +88,21 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             );
         }
         for (idx, comment) in snapshot.comments.iter().enumerate() {
+            let day = calendar_day_key(&comment.created_at);
+            let day_changed = day.is_some() && day != last_day;
             if idx == 0 {
                 append_plain_item(&mut items, &mut content_row, message_gap());
+            }
+            if day_changed && let Some(label) = calendar_day_label(&comment.created_at) {
+                append_plain_item(
+                    &mut items,
+                    &mut content_row,
+                    date_divider(&label, message_width),
+                );
+                append_plain_item(&mut items, &mut content_row, message_gap());
+            }
+            if day.is_some() {
+                last_day = day;
             }
             let card = message_card(
                 snapshot,
@@ -195,6 +209,46 @@ pub(crate) fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, 
         area,
         title,
         theme::section_header(matches!(&ui.route, Route::Channel(_))),
+    );
+}
+
+pub(crate) fn draw_thread_header(
+    frame: &mut Frame,
+    area: Rect,
+    channel_slug: Option<&str>,
+    title: &str,
+    meta: Option<&str>,
+    ui: &UiState,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let header = Rect::new(area.x, area.y, area.width, 1);
+    let active = ui.active_pane == ActivePane::Detail;
+    let title_style = if active {
+        theme::title()
+    } else {
+        theme::muted()
+    };
+    let mut spans = Vec::new();
+    if let Some(slug) = channel_slug {
+        spans.push(Span::styled(format!("#{slug}"), title_style));
+        spans.push(Span::styled(" › ", theme::muted()));
+    }
+    spans.push(Span::styled(title.to_string(), title_style));
+    if let Some(meta) = meta.filter(|value| !value.is_empty()) {
+        let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+        let remaining = (area.width as usize).saturating_sub(used);
+        if remaining > 6 {
+            spans.push(Span::styled("   ", theme::muted()));
+            let meta_max = remaining.saturating_sub(3);
+            let truncated = truncate_text(meta, meta_max);
+            spans.push(Span::styled(truncated, theme::muted()));
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(theme::panel()),
+        header,
     );
 }
 

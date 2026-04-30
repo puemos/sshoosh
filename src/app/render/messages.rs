@@ -63,6 +63,7 @@ pub(crate) fn message_card<'a>(
     let mut lines = Vec::new();
     let mut links = Vec::new();
 
+    lines.push(message_card_line(gutter, Vec::new()));
     lines.push(message_card_line(
         gutter,
         message_meta_spans(
@@ -77,7 +78,7 @@ pub(crate) fn message_card<'a>(
     ));
 
     for (row_idx, row) in render_message_body(body, width).into_iter().enumerate() {
-        let row_idx = row_idx.saturating_add(1);
+        let row_idx = row_idx.saturating_add(2);
         let mut col = MESSAGE_PREFIX_WIDTH;
         let mut content = Vec::new();
         for run in row {
@@ -103,6 +104,7 @@ pub(crate) fn message_card<'a>(
         }
         lines.push(message_card_line(gutter, content));
     }
+    lines.push(message_card_line(gutter, Vec::new()));
 
     MessageCard {
         item: ListItem::new(lines).style(theme::message_card_on(surface)),
@@ -268,6 +270,21 @@ pub(crate) fn register_link_hits(
             style: link.style,
         });
     }
+}
+
+pub(crate) fn date_divider<'a>(label: &str, width: usize) -> ListItem<'a> {
+    let label_text = format!(" {label} ");
+    let label_width = label_text.chars().count();
+    let total = width.max(label_width + 4);
+    let side = (total - label_width) / 2;
+    let left = "─".repeat(side);
+    let right = "─".repeat(total - side - label_width);
+    ListItem::new(Line::from(vec![
+        Span::styled(left, theme::message_separator()),
+        Span::styled(label_text, theme::muted()),
+        Span::styled(right, theme::message_separator()),
+    ]))
+    .style(theme::panel())
 }
 
 pub(crate) fn message_gap<'a>() -> ListItem<'a> {

@@ -4,6 +4,26 @@ use time::{
 
 const RELATIVE_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
 
+pub(crate) fn calendar_day_label(value: &str) -> Option<String> {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let timestamp = OffsetDateTime::parse(value, &Rfc3339).ok()?;
+    timestamp
+        .to_offset(offset)
+        .format(format_description!(
+            "[weekday], [month repr:short] [day padding:none], [year]"
+        ))
+        .ok()
+}
+
+pub(crate) fn calendar_day_key(value: &str) -> Option<String> {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let timestamp = OffsetDateTime::parse(value, &Rfc3339).ok()?;
+    timestamp
+        .to_offset(offset)
+        .format(format_description!("[year]-[month]-[day]"))
+        .ok()
+}
+
 pub(crate) fn format_human_timestamp(value: &str) -> String {
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
     format_human_timestamp_at(value, OffsetDateTime::now_utc(), offset)
