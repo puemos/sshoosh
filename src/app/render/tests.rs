@@ -247,6 +247,7 @@ mod cases {
                 preview: "Create an invite code".to_string(),
                 accept_on_enter: false,
                 accept_on_tab: true,
+                executor: None,
             },
             state::AutocompleteItem {
                 replacement_range: 0..14,
@@ -256,6 +257,7 @@ mod cases {
                 preview: "Set a channel topic".to_string(),
                 accept_on_enter: true,
                 accept_on_tab: true,
+                executor: None,
             },
         ];
 
@@ -1883,5 +1885,35 @@ mod cases {
         assert!(row_text(buffer, 100, hello_pos.1 + 4).contains("3▌"));
         assert!(rendered.contains("shift-enter"));
         assert!(rendered.contains("newline"));
+    }
+
+    #[test]
+    fn render_compose_prompt_hint_uses_accent_for_input_part() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState {
+            mode: UiMode::Compose,
+            ..UiState::default()
+        };
+        ui.composer.start_prompt("/thread new ", "title");
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (prefix_x, prefix_y) =
+            position_for_text(buffer, 100, 30, "/thread new ").expect("prefix position");
+        let (hint_x, hint_y) = position_for_text(buffer, 100, 30, "title").expect("hint position");
+
+        assert_eq!(prefix_y, hint_y);
+        assert_eq!(
+            buffer.cell((prefix_x, prefix_y)).expect("prefix cell").fg,
+            theme::TEXT
+        );
+        assert_eq!(
+            buffer.cell((hint_x, hint_y)).expect("hint cell").fg,
+            theme::ACCENT
+        );
     }
 }

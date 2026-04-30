@@ -240,37 +240,20 @@ impl CommandRegistry {
         let command_token = &buffer[1..cursor.min(token_end)];
         if cursor <= token_end {
             let mut items: Vec<_> = self
-                .specs
-                .iter()
+                .palette_items(snapshot)
+                .into_iter()
                 .enumerate()
-                .filter_map(|spec| {
-                    let (idx, spec) = spec;
-                    let label = format!("/{}", spec.name);
-                    fuzzy_score(&label, &format!("/{command_token}"))
-                        .map(|score| (score, idx, spec))
+                .filter_map(|(idx, item)| {
+                    fuzzy_score(&item.search_text(), command_token).map(|score| (score, idx, item))
                 })
                 .collect();
             items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            let open = !items.is_empty();
             return AutocompleteState {
-                open: true,
+                open,
                 items: items
                     .into_iter()
-                    .map(|(_, _, spec)| AutocompleteItem {
-                        replacement_range: 0..token_end,
-                        replacement: format!(
-                            "/{}{}",
-                            spec.name,
-                            if spec.args.is_empty() { "" } else { " " }
-                        ),
-                        label: format!("/{}", spec.name),
-                        detail: spec.args.to_string(),
-                        preview: match spec.shortcut {
-                            Some(shortcut) => format!("{} · {}", shortcut, spec.description),
-                            None => spec.description.to_string(),
-                        },
-                        accept_on_enter: command_token != spec.name,
-                        accept_on_tab: true,
-                    })
+                    .map(|(_, _, item)| palette_autocomplete_item(item, 0..token_end))
                     .take(8)
                     .collect(),
                 selected: 0,
@@ -466,5 +449,25 @@ impl CommandRegistry {
                 spec.args.is_empty()
                     && (spec.name == subcommand || spec.aliases.contains(&subcommand))
             })
+    }
+}
+
+fn palette_autocomplete_item(
+    item: PaletteItem,
+    replacement_range: Range<usize>,
+) -> AutocompleteItem {
+    let preview = match item.shortcut.as_deref() {
+        Some(shortcut) if !shortcut.is_empty() => format!("{shortcut} · {}", item.detail),
+        _ => item.detail.clone(),
+    };
+    AutocompleteItem {
+        replacement_range,
+        replacement: item.label.clone(),
+        label: item.label,
+        detail: item.category,
+        preview,
+        accept_on_enter: true,
+        accept_on_tab: true,
+        executor: Some(item.executor),
     }
 }

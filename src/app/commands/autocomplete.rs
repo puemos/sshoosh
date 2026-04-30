@@ -49,6 +49,7 @@ pub(crate) fn autocomplete_after_command(
                             preview: subcommand.description.to_string(),
                             accept_on_enter: sub_prefix != subcommand.name,
                             accept_on_tab: true,
+                            executor: None,
                         }
                     })
                     .take(8)
@@ -190,6 +191,7 @@ pub(crate) fn autocomplete_arguments(
                         preview: preview.to_string(),
                         accept_on_enter: accept_on_enter && !arg_prefix.is_empty(),
                         accept_on_tab: true,
+                        executor: None,
                     },
                 )
             })

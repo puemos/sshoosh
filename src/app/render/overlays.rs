@@ -68,18 +68,6 @@ pub(crate) fn draw_palette(frame: &mut Frame, full_area: Rect, area: Rect, ui: &
     }
 }
 
-pub(crate) fn draw_prompt(frame: &mut Frame, full_area: Rect, area: Rect, ui: &mut UiState) {
-    ui.hit_map.push(full_area, HitTarget::PromptBackdrop);
-    let inner = elevated_panel(frame, area, &ui.prompt.title);
-    let text = if ui.prompt.input.is_empty() {
-        format!("{}{}", ui.prompt.prefix, ui.prompt.placeholder)
-    } else {
-        format!("{}{}", ui.prompt.prefix, ui.prompt.input)
-    };
-    frame.render_widget(Paragraph::new(text).style(theme::elevated_panel()), inner);
-    ui.hit_map.push(area, HitTarget::PromptInput);
-}
-
 pub(crate) fn draw_help(
     frame: &mut Frame,
     full_area: Rect,

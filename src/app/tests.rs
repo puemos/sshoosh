@@ -201,6 +201,100 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn compose_search_runs_channel_result() {
+        let mut app = test_app("compose-search-channel").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/general");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.items[0].label, "#general");
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.snapshot.selected_channel_id.as_deref(), Some("general"));
+        assert!(app.snapshot.selected_conversation_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.ui.active_pane, ActivePane::List);
+        assert!(app.refresh_requested);
+        assert!(app.ui.composer.buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compose_search_runs_dm_result() {
+        let mut app = test_app("compose-search-dm").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/alice");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.items[0].label, "@alice");
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert_eq!(app.ui.route, Route::Dms);
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.refresh_requested);
+        assert!(app.ui.composer.buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn compose_search_runs_thread_result() {
+        let mut app = test_app("compose-search-thread").await;
+        app.snapshot.selected_thread_id = None;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/deploy");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.items[0].label, "Deploy notes");
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.refresh_requested);
+        assert!(app.ui.composer.buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn command_argument_completion_still_inserts_text() {
+        let mut app = test_app("command-argument-completion").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/channel ");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.items[0].label, "new");
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/channel new ");
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bottom_bar_accept_runs_compose_search_result() {
+        let mut app = test_app("bottom-bar-compose-search").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/alice");
+        app.update_completions();
+
+        app.run_bottom_bar_action(BottomBarAction::AcceptAutocomplete);
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert_eq!(app.ui.route, Route::Dms);
+        assert!(app.refresh_requested);
+    }
+
+    #[tokio::test]
     async fn tab_accepts_inline_mention_autocomplete() {
         let mut app = test_app("mention-tab").await;
         app.snapshot.users.push(crate::service::UserPresence {
@@ -690,14 +784,33 @@ mod cases {
         click_at(&mut app, input.rect.x + 3, input.rect.y + 1);
         assert_eq!(app.ui.composer.cursor, 9);
 
-        app.ui.composer = ComposerState::from("/");
+        app.ui.composer = ComposerState::from("/dm open ");
         app.update_completions();
         app.render().expect("render");
         click_region(&mut app, |target| {
             matches!(target, HitTarget::AutocompleteRow(0))
         });
-        assert_eq!(app.ui.composer.buffer, "/invite ");
+        assert_eq!(app.ui.composer.buffer, "/dm open @alice");
         assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn mouse_runs_compose_search_result() {
+        let mut app = test_app("mouse-compose-search").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/general");
+        app.update_completions();
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::AutocompleteRow(0))
+        });
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.snapshot.selected_channel_id.as_deref(), Some("general"));
+        assert!(app.snapshot.selected_thread_id.is_none());
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert!(app.refresh_requested);
     }
 
     #[tokio::test]
@@ -1077,8 +1190,19 @@ mod cases {
         click_region(&mut app, |target| {
             matches!(target, HitTarget::PaletteRow(0))
         });
-        assert_eq!(app.ui.mode, UiMode::Prompt);
-        assert_eq!(app.ui.prompt.prefix, "/thread new ");
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/thread new ");
+        assert_eq!(
+            app.ui
+                .composer
+                .inline_prompt
+                .as_ref()
+                .map(|hint| hint.placeholder.as_str()),
+            Some("title")
+        );
+
+        app.handle_input(b"\x1b");
+        assert_eq!(app.ui.mode, UiMode::Normal);
 
         app.render().expect("render");
         click_at(&mut app, 0, 0);

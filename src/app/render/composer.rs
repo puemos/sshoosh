@@ -54,6 +54,12 @@ pub(crate) fn draw_bottombar(
     if prompt.is_empty() {
         prompt.push_str(cursor);
     }
+    let inline_prompt = ui.composer.inline_prompt.as_ref().filter(|hint| {
+        ui.mode == UiMode::Compose
+            && ui.composer.buffer.len() == hint.prefix_len
+            && ui.composer.cursor == hint.prefix_len
+            && !hint.placeholder.is_empty()
+    });
     let scroll_y = composer_cursor_line(&ui.composer.buffer, ui.composer.cursor)
         .saturating_add(1)
         .saturating_sub(input.height);
@@ -65,6 +71,16 @@ pub(crate) fn draw_bottombar(
             Span::styled(
                 "  Press / for a command, Enter to write…",
                 theme::composer().fg(theme::MUTED),
+            ),
+        ])]
+    } else if let Some(hint) = inline_prompt {
+        vec![Line::from(vec![
+            Span::styled(prompt, theme::composer()),
+            Span::styled(
+                hint.placeholder.clone(),
+                theme::composer()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
             ),
         ])]
     } else {
@@ -111,7 +127,6 @@ pub(crate) fn mode_label(ui: &UiState) -> &'static str {
         UiMode::Compose => "compose",
         UiMode::Normal => "normal",
         UiMode::Palette => "palette",
-        UiMode::Prompt => "prompt",
         UiMode::Help => "help",
         UiMode::ConfirmQuit => "quit?",
     }
@@ -133,10 +148,6 @@ fn keybar_items(ui: &UiState) -> &'static [(&'static str, &'static str, Option<B
         ],
         UiMode::Palette => &[
             ("enter", "run", Some(BottomBarAction::RunPalette)),
-            ("esc", "close", Some(BottomBarAction::CloseMode)),
-        ],
-        UiMode::Prompt => &[
-            ("enter", "run", Some(BottomBarAction::RunPrompt)),
             ("esc", "close", Some(BottomBarAction::CloseMode)),
         ],
         UiMode::Help => &[("esc", "close", Some(BottomBarAction::CloseMode))],

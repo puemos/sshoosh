@@ -7,14 +7,17 @@ use crate::service::Snapshot;
 use ratatui::layout::{Position, Rect};
 use tui_scrollview::ScrollViewState;
 
-use super::{action::SourceTarget, commands::PaletteItem, input::MouseModifiers};
+use super::{
+    action::SourceTarget,
+    commands::{CommandExecutor, PaletteItem},
+    input::MouseModifiers,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
     Normal,
     Compose,
     Palette,
-    Prompt,
     Help,
     ConfirmQuit,
 }
@@ -45,7 +48,6 @@ pub struct UiState {
     pub help_scroll: ScrollViewState,
     pub composer: ComposerState,
     pub palette: PaletteState,
-    pub prompt: PromptState,
     pub banner: Option<Banner>,
     pub startup_splash_until: Option<Instant>,
     pub comment_menu: Option<CommentMenuState>,
@@ -68,7 +70,6 @@ impl Default for UiState {
             help_scroll: ScrollViewState::default(),
             composer: ComposerState::default(),
             palette: PaletteState::default(),
-            prompt: PromptState::default(),
             banner: None,
             startup_splash_until: None,
             comment_menu: None,
@@ -239,8 +240,6 @@ pub enum HitTarget {
     PaletteInput,
     PaletteResults,
     PaletteRow(usize),
-    PromptBackdrop,
-    PromptInput,
     HelpBackdrop,
     BannerModal,
     ListModalRow(usize),
@@ -265,7 +264,6 @@ pub enum BottomBarAction {
     AcceptAutocomplete,
     CloseMode,
     RunPalette,
-    RunPrompt,
     ConfirmQuit,
     CancelQuit,
 }
@@ -301,6 +299,13 @@ pub struct ComposerState {
     history_position: Option<usize>,
     history_draft: Option<String>,
     pub autocomplete: AutocompleteState,
+    pub inline_prompt: Option<ComposerInlinePrompt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComposerInlinePrompt {
+    pub prefix_len: usize,
+    pub placeholder: String,
 }
 
 impl From<&str> for ComposerState {
@@ -320,6 +325,17 @@ impl ComposerState {
         self.history_position = None;
         self.history_draft = None;
         self.autocomplete = AutocompleteState::default();
+        self.inline_prompt = None;
+    }
+
+    pub fn start_prompt(&mut self, prefix: &str, placeholder: &str) {
+        self.start(prefix);
+        if !placeholder.is_empty() {
+            self.inline_prompt = Some(ComposerInlinePrompt {
+                prefix_len: self.buffer.len(),
+                placeholder: placeholder.to_string(),
+            });
+        }
     }
 
     pub fn reset_input(&mut self) {
@@ -507,18 +523,6 @@ impl AutocompleteState {
             };
         }
     }
-
-    pub fn selected_tab_replacement(&self) -> Option<(Range<usize>, String)> {
-        if !self.open {
-            return None;
-        }
-        let item = self.items.get(self.selected)?;
-        if item.accept_on_tab {
-            Some((item.replacement_range.clone(), item.replacement.clone()))
-        } else {
-            None
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -530,6 +534,7 @@ pub struct AutocompleteItem {
     pub preview: String,
     pub accept_on_enter: bool,
     pub accept_on_tab: bool,
+    pub executor: Option<CommandExecutor>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -575,14 +580,6 @@ impl PaletteState {
         let idx = *self.filtered.get(self.selected)?;
         self.items.get(idx)
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct PromptState {
-    pub title: String,
-    pub prefix: String,
-    pub placeholder: String,
-    pub input: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

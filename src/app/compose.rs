@@ -6,14 +6,10 @@ impl App {
         self.update_completions();
     }
 
-    pub(crate) fn open_prompt(&mut self, title: &str, prefix: &str, placeholder: &str) {
-        self.ui.mode = UiMode::Prompt;
-        self.ui.prompt = PromptState {
-            title: title.to_string(),
-            prefix: prefix.to_string(),
-            placeholder: placeholder.to_string(),
-            input: String::new(),
-        };
+    pub(crate) fn open_compose_prompt(&mut self, _title: &str, prefix: &str, placeholder: &str) {
+        self.ui.mode = UiMode::Compose;
+        self.ui.composer.start_prompt(prefix, placeholder);
+        self.update_completions();
     }
 
     pub(crate) fn open_palette(&mut self) {
@@ -37,14 +33,18 @@ impl App {
         let Some(item) = self.ui.palette.selected_item().cloned() else {
             return;
         };
+        self.run_command_executor(item.executor);
+    }
+
+    pub(crate) fn run_command_executor(&mut self, executor: CommandExecutor) {
         self.ui.mode = UiMode::Normal;
-        match item.executor {
+        match executor {
             CommandExecutor::Action(action) => self.actions.push(action),
             CommandExecutor::Prompt {
                 title,
                 prefix,
                 placeholder,
-            } => self.open_prompt(&title, &prefix, &placeholder),
+            } => self.open_compose_prompt(&title, &prefix, &placeholder),
             CommandExecutor::SwitchChannel(id) => {
                 self.snapshot.selected_channel_id = Some(id.clone());
                 self.snapshot.selected_conversation_id = None;
@@ -88,6 +88,14 @@ impl App {
     }
 
     pub(crate) fn accept_autocomplete_enter(&mut self) -> bool {
+        self.accept_autocomplete_selection(false)
+    }
+
+    pub(crate) fn accept_autocomplete_tab(&mut self) -> bool {
+        self.accept_autocomplete_selection(true)
+    }
+
+    pub(crate) fn accept_autocomplete_selection(&mut self, refresh_after_insert: bool) -> bool {
         if !self.ui.composer.autocomplete.open {
             return false;
         }
@@ -102,21 +110,22 @@ impl App {
             self.ui.composer.autocomplete.open = false;
             return false;
         };
+        if refresh_after_insert && !item.accept_on_tab {
+            return false;
+        }
+        if let Some(executor) = item.executor {
+            self.ui.composer.reset_input();
+            self.run_command_executor(executor);
+            return true;
+        }
         self.ui
             .composer
             .replace_range(item.replacement_range, &item.replacement);
         self.ui.composer.autocomplete.open = false;
-        true
-    }
-
-    pub(crate) fn accept_autocomplete_tab(&mut self) -> bool {
-        let replacement = self.ui.composer.autocomplete.selected_tab_replacement();
-        if let Some((range, value)) = replacement {
-            self.ui.composer.replace_range(range, &value);
+        if refresh_after_insert {
             self.update_completions();
-            return true;
         }
-        false
+        true
     }
 
     pub(crate) fn submit_onboarding(&mut self) {

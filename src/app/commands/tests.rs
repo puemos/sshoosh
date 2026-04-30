@@ -204,7 +204,8 @@ mod cases {
         let registry = CommandRegistry::default();
         let state = registry.autocomplete("/thr", 4, &Snapshot::default());
         assert!(state.open);
-        assert_eq!(state.items[0].replacement, "/thread ");
+        assert_eq!(state.items[0].replacement, "/thread new");
+        assert!(state.items[0].executor.is_some());
         assert!(state.items[0].accept_on_enter);
 
         let state = registry.autocomplete("/thread r", 9, &Snapshot::default());
@@ -217,7 +218,8 @@ mod cases {
         let registry = CommandRegistry::default();
         let state = registry.autocomplete("/", 1, &Snapshot::default());
         assert!(state.open);
-        assert_eq!(state.items[0].replacement, "/invite ");
+        assert_eq!(state.items[0].replacement, "Create thread");
+        assert!(state.items[0].executor.is_some());
         assert!(state.items[0].accept_on_enter);
         assert!(!registry.is_no_arg_command("/invite"));
         assert!(!registry.is_no_arg_command("/thread"));
@@ -236,7 +238,8 @@ mod cases {
         let registry = CommandRegistry::default();
         let state = registry.autocomplete("/thread", 3, &Snapshot::default());
         assert!(state.open);
-        assert_eq!(state.items[0].replacement, "/thread ");
+        assert_eq!(state.items[0].replacement, "/thread new");
+        assert!(state.items[0].executor.is_some());
         assert_eq!(state.items[0].replacement_range, 0..7);
     }
 

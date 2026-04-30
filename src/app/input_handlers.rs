@@ -65,7 +65,6 @@ impl App {
             UiMode::Normal => self.handle_normal_key(key),
             UiMode::Compose => self.handle_compose_key(key),
             UiMode::Palette => self.handle_palette_key(key),
-            UiMode::Prompt => self.handle_prompt_key(key),
             UiMode::Help => self.handle_help_key(key),
             UiMode::ConfirmQuit => self.handle_confirm_quit_key(key),
         }
@@ -278,10 +277,7 @@ impl App {
                 }
             }
             HitTarget::PaletteInput | HitTarget::PaletteResults => {}
-            HitTarget::PaletteBackdrop | HitTarget::PromptBackdrop | HitTarget::HelpBackdrop => {
-                self.ui.mode = UiMode::Normal;
-            }
-            HitTarget::PromptInput => {}
+            HitTarget::PaletteBackdrop | HitTarget::HelpBackdrop => self.ui.mode = UiMode::Normal,
             HitTarget::BannerModal => {}
             HitTarget::ListModalRow(row) => {
                 let action = self
@@ -354,12 +350,6 @@ impl App {
                 self.ui.mode = UiMode::Normal;
             }
             BottomBarAction::RunPalette => self.run_palette_selection(),
-            BottomBarAction::RunPrompt => {
-                let value = self.ui.prompt.input.trim().to_string();
-                let prefix = self.ui.prompt.prefix.clone();
-                self.ui.mode = UiMode::Normal;
-                self.dispatch_command_line(format!("{prefix}{value}"));
-            }
             BottomBarAction::ConfirmQuit => self.running = false,
             BottomBarAction::CancelQuit => self.ui.mode = UiMode::Normal,
         }
@@ -504,25 +494,6 @@ impl App {
                 self.ui.palette.query.push(ch);
                 self.rebuild_palette();
             }
-            _ => {}
-        }
-    }
-
-    pub(crate) fn handle_prompt_key(&mut self, key: Key) {
-        match key {
-            Key::Esc => self.ui.mode = UiMode::Normal,
-            Key::Enter | Key::ShiftEnter => {
-                let value = self.ui.prompt.input.trim().to_string();
-                let prefix = self.ui.prompt.prefix.clone();
-                self.ui.mode = UiMode::Normal;
-                self.dispatch_command_line(format!("{prefix}{value}"));
-            }
-            Key::Backspace => {
-                self.ui.prompt.input.pop();
-            }
-            Key::Ctrl('u') => self.ui.prompt.input.clear(),
-            Key::Paste(text) => self.ui.prompt.input.push_str(text.trim()),
-            Key::Char(ch) if !ch.is_control() => self.ui.prompt.input.push(ch),
             _ => {}
         }
     }
