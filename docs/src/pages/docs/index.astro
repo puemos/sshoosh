@@ -1,0 +1,16 @@
+---
+import { getEntry, render } from 'astro:content';
+import DocsShell from '../../components/DocsShell.astro';
+
+const entry = await getEntry('docs', 'index');
+
+if (!entry) {
+  throw new Error('Missing docs index content');
+}
+
+const { Content } = await render(entry);
+---
+
+<DocsShell entry={entry}>
+  <Content />
+</DocsShell>

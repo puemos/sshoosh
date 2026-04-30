@@ -1,0 +1,25 @@
+[Unit]
+Description=sshoosh SSH workspace chat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sshoosh
+Group=sshoosh
+Environment=SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite
+Environment=SSHOOSH_HOST=0.0.0.0
+Environment=SSHOOSH_PORT=2222
+Environment=SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
+ExecStart=/usr/local/bin/sshoosh serve
+Restart=on-failure
+RestartSec=2
+StateDirectory=sshoosh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/sshoosh
+
+[Install]
+WantedBy=multi-user.target

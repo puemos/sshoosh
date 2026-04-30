@@ -1,4 +1,7 @@
 /target/
+/docs/.astro/
+/docs/dist/
+/docs/node_modules/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
