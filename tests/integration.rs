@@ -1229,14 +1229,14 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(first.contains("Channels"), "{first:?}");
 
     session
-        .data(channel.id(), sgr_drag((2, 4), (9, 4)))
+        .data(channel.id(), sgr_drag((2, 6), (9, 6)))
         .await
         .expect("drag selection");
     let copied = read_until(&mut channel, "\x1b]52;c;").await;
     assert!(copied.contains("\x1b]52;c;Q2hhbm5lbHM="), "{copied:?}");
 
     session
-        .data(channel.id(), sgr_click(86, 31))
+        .data(channel.id(), sgr_click(82, 32))
         .await
         .expect("click help keybar");
     let help_output = read_until(&mut channel, "Keyboard").await;
@@ -1258,7 +1258,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("dismiss invite modal");
 
     session
-        .data(channel.id(), sgr_click(75, 31))
+        .data(channel.id(), sgr_click(69, 32))
         .await
         .expect("click command keybar");
     session

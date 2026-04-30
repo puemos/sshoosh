@@ -1,43 +1,37 @@
 use super::*;
-pub(crate) fn draw_bottombar(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+pub(crate) fn draw_bottombar(
+    frame: &mut Frame,
+    area: Rect,
+    account: &Account,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
     frame.render_widget(Block::default().style(theme::base()), area);
     if area.height == 0 || area.width == 0 {
         return;
     }
 
-    let separator = Rect::new(area.x, area.y, area.width, 1);
-    let separator_color = bottom_separator_color(ui);
-    draw_horizontal_divider(frame, separator, separator_color);
-
-    let card = Rect::new(
-        area.x.saturating_add(1),
-        area.y.saturating_add(1),
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(1),
-    );
+    let card = Rect::new(area.x, area.y, area.width, area.height);
     frame.render_widget(Block::default().style(theme::composer()), card);
     if card.height == 0 || card.width == 0 {
         return;
     }
 
-    let edge = Rect::new(card.x, card.y, 1, card.height);
-    let edge_text = (0..card.height).map(|_| "│").collect::<Vec<_>>().join("\n");
     let mode_color = if ui.mode == UiMode::Normal {
-        theme::BORDER
+        theme::ACCENT
     } else {
         theme::WARN
     };
-    frame.render_widget(
-        Paragraph::new(edge_text).style(Style::default().fg(mode_color).bg(theme::COMPOSER)),
-        edge,
-    );
 
-    let input_height = card.height.saturating_sub(3).max(1);
+    let top_padding: u16 = if card.height >= 3 { 1 } else { 0 };
+    let status_reserved: u16 = if card.height >= 3 { 2 } else { 1 };
+    let input_height = card
+        .height
+        .saturating_sub(status_reserved.saturating_add(top_padding))
+        .max(1);
     let input = Rect::new(
         card.x.saturating_add(2),
-        card.y
-            .saturating_add(1)
-            .min(card.y + card.height.saturating_sub(1)),
+        card.y.saturating_add(top_padding),
         card.width.saturating_sub(4),
         input_height,
     );
@@ -74,45 +68,27 @@ pub(crate) fn draw_bottombar(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
 
     let status = Rect::new(
         card.x.saturating_add(2),
-        card.y + card.height.saturating_sub(2),
+        card.y + card.height.saturating_sub(1),
         card.width.saturating_sub(4),
         1,
     );
-    let keybar = keybar_text(ui);
-    let keybar_start = status.x + status.width.saturating_sub(keybar.chars().count() as u16);
-    frame.render_widget(
-        Paragraph::new(keybar)
-            .alignment(Alignment::Right)
-            .style(Style::default().fg(theme::MUTED).bg(theme::COMPOSER)),
-        status,
-    );
-    let keybar_width = keybar.chars().count() as u16;
+    let keybar_width = keybar_width(ui);
+    let keybar_start = status.x + status.width.saturating_sub(keybar_width);
+    if keybar_width > 0 {
+        frame.render_widget(
+            Paragraph::new(keybar_line(ui)).style(theme::composer()),
+            Rect::new(keybar_start, status.y, keybar_width.min(status.width), 1),
+        );
+    }
     let status_left_width = status
         .width
         .saturating_sub(keybar_width.saturating_add(2))
-        .min(40);
+        .min(96);
     if status_left_width > 0 {
         let status_left = Rect::new(status.x, status.y, status_left_width, 1);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    mode_label(ui),
-                    Style::default().fg(mode_color).bg(theme::COMPOSER),
-                ),
-                Span::styled(
-                    format!(" · {}", active_label(snapshot, ui)),
-                    Style::default().fg(theme::MUTED).bg(theme::COMPOSER),
-                ),
-            ]))
-            .style(theme::composer()),
-            status_left,
-        );
+        draw_status_cluster(frame, status_left, account, snapshot, ui, mode_color);
     }
-    register_keybar_actions(ui, status, keybar, keybar_start);
-}
-
-pub(crate) fn bottom_separator_color(_ui: &UiState) -> ratatui::style::Color {
-    theme::BORDER
+    register_keybar_actions(ui, status, keybar_start);
 }
 
 pub(crate) fn mode_label(ui: &UiState) -> &'static str {
@@ -126,65 +102,179 @@ pub(crate) fn mode_label(ui: &UiState) -> &'static str {
     }
 }
 
-pub(crate) fn keybar_text(ui: &UiState) -> &'static str {
+fn keybar_items(ui: &UiState) -> &'static [(&'static str, &'static str, Option<BottomBarAction>)] {
     match ui.mode {
-        UiMode::Normal => "tab detail  / command  ? help  q quit",
-        UiMode::Compose => {
-            "enter send  shift-enter newline  tab accept  ctrl-x e edit last  esc normal"
-        }
-        UiMode::Palette => "type filter  enter run  esc close",
-        UiMode::Prompt => "enter run  esc close",
-        UiMode::Help => "esc close",
-        UiMode::ConfirmQuit => "y quit  n cancel",
+        UiMode::Normal => &[
+            ("tab", "detail", Some(BottomBarAction::ToggleDetail)),
+            ("/", "command", Some(BottomBarAction::OpenCommand)),
+            ("?", "help", Some(BottomBarAction::OpenHelp)),
+            ("q", "quit", Some(BottomBarAction::OpenQuit)),
+        ],
+        UiMode::Compose => &[
+            ("enter", "send", Some(BottomBarAction::SubmitComposer)),
+            ("shift-enter", "newline", None),
+            ("tab", "accept", Some(BottomBarAction::AcceptAutocomplete)),
+            ("esc", "normal", Some(BottomBarAction::CloseMode)),
+        ],
+        UiMode::Palette => &[
+            ("enter", "run", Some(BottomBarAction::RunPalette)),
+            ("esc", "close", Some(BottomBarAction::CloseMode)),
+        ],
+        UiMode::Prompt => &[
+            ("enter", "run", Some(BottomBarAction::RunPrompt)),
+            ("esc", "close", Some(BottomBarAction::CloseMode)),
+        ],
+        UiMode::Help => &[("esc", "close", Some(BottomBarAction::CloseMode))],
+        UiMode::ConfirmQuit => &[
+            ("y", "quit", Some(BottomBarAction::ConfirmQuit)),
+            ("n", "cancel", Some(BottomBarAction::CancelQuit)),
+        ],
     }
 }
 
-pub(crate) fn register_keybar_actions(
+fn keybar_width(ui: &UiState) -> u16 {
+    keybar_items(ui)
+        .iter()
+        .enumerate()
+        .map(|(idx, (key, label, _))| {
+            let gap = if idx == 0 { 0 } else { 2 };
+            gap + key.chars().count() + 2 + 1 + label.chars().count()
+        })
+        .sum::<usize>() as u16
+}
+
+fn keybar_line(ui: &UiState) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, (key, label, _)) in keybar_items(ui).iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled("  ", theme::composer()));
+        }
+        spans.push(Span::styled(
+            format!(" {key} "),
+            Style::default()
+                .fg(theme::TEXT)
+                .bg(theme::KEYCAP)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(" ", theme::composer()));
+        spans.push(Span::styled(*label, theme::composer().fg(theme::MUTED)));
+    }
+    Line::from(spans)
+}
+
+pub(crate) fn register_keybar_actions(ui: &mut UiState, status: Rect, keybar_start: u16) {
+    let mut cursor = keybar_start;
+    for (idx, (key, label, action)) in keybar_items(ui).iter().enumerate() {
+        if idx > 0 {
+            cursor = cursor.saturating_add(2);
+        }
+        let width = key.chars().count() as u16 + 2 + 1 + label.chars().count() as u16;
+        if let Some(action) = action
+            && cursor < status.x.saturating_add(status.width)
+        {
+            let visible_width = width.min(status.x.saturating_add(status.width) - cursor);
+            ui.hit_map.push(
+                Rect::new(cursor, status.y, visible_width, 1),
+                HitTarget::BottomBar(*action),
+            );
+        }
+        cursor = cursor.saturating_add(width);
+    }
+}
+
+fn draw_status_cluster(
+    frame: &mut Frame,
+    area: Rect,
+    account: &Account,
+    snapshot: &Snapshot,
     ui: &mut UiState,
-    status: Rect,
-    keybar: &str,
-    keybar_start: u16,
+    mode_color: ratatui::style::Color,
 ) {
-    let actions: &[(&str, BottomBarAction)] = match ui.mode {
-        UiMode::Normal => &[
-            ("tab detail", BottomBarAction::ToggleDetail),
-            ("/ command", BottomBarAction::OpenCommand),
-            ("? help", BottomBarAction::OpenHelp),
-            ("q quit", BottomBarAction::OpenQuit),
-        ],
-        UiMode::Compose => &[
-            ("enter send", BottomBarAction::SubmitComposer),
-            ("tab accept", BottomBarAction::AcceptAutocomplete),
-            ("esc normal", BottomBarAction::CloseMode),
-        ],
-        UiMode::Palette => &[
-            ("enter run", BottomBarAction::RunPalette),
-            ("esc close", BottomBarAction::CloseMode),
-        ],
-        UiMode::Prompt => &[
-            ("enter run", BottomBarAction::RunPrompt),
-            ("esc close", BottomBarAction::CloseMode),
-        ],
-        UiMode::Help => &[("esc close", BottomBarAction::CloseMode)],
-        UiMode::ConfirmQuit => &[
-            ("y quit", BottomBarAction::ConfirmQuit),
-            ("n cancel", BottomBarAction::CancelQuit),
-        ],
-    };
-    for (label, action) in actions {
-        let Some(start) = keybar.find(label) else {
-            continue;
-        };
+    if area.is_empty() {
+        return;
+    }
+    let active = active_label(snapshot, ui);
+    let unread = snapshot.total_unread();
+    let notifications = snapshot.notification_unread_count;
+    let mentions = snapshot.mention_unread_count;
+    let compact_width = char_width(mode_label(ui)).saturating_add(char_width(&active)) + 3;
+    let show_badges = area.width as usize >= compact_width.saturating_add(38);
+    let show_account = area.width as usize >= compact_width.saturating_add(62);
+
+    let mut spans = Vec::new();
+    spans.push(Span::styled(
+        mode_label(ui),
+        Style::default()
+            .fg(mode_color)
+            .bg(theme::COMPOSER)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(" · ", theme::composer().fg(theme::MUTED)));
+    spans.push(Span::styled(active, theme::composer().fg(theme::SUBTLE)));
+    if show_badges {
+        spans.push(Span::styled("  ", theme::composer()));
+        push_badge(&mut spans, format!("{unread} unread"), unread > 0);
+        spans.push(Span::styled(" ", theme::composer()));
+        let notification_start = spans_width(&spans) as u16;
+        push_badge(
+            &mut spans,
+            format!("{notifications} notifications"),
+            notifications > 0,
+        );
         ui.hit_map.push(
             Rect::new(
-                keybar_start.saturating_add(start as u16),
-                status.y,
-                label.chars().count() as u16,
+                area.x.saturating_add(notification_start),
+                area.y,
+                (notifications.to_string().chars().count() as u16).saturating_add(15),
                 1,
             ),
-            HitTarget::BottomBar(*action),
+            HitTarget::TopbarNotifications,
+        );
+        spans.push(Span::styled(" ", theme::composer()));
+        let mention_start = spans_width(&spans) as u16;
+        push_badge(&mut spans, format!("{mentions} mentions"), mentions > 0);
+        ui.hit_map.push(
+            Rect::new(
+                area.x.saturating_add(mention_start),
+                area.y,
+                (mentions.to_string().chars().count() as u16).saturating_add(10),
+                1,
+            ),
+            HitTarget::TopbarMentions,
         );
     }
+    if show_account {
+        spans.push(Span::styled(
+            format!("  {} online", snapshot.online_user_count()),
+            theme::composer().fg(theme::MUTED),
+        ));
+        spans.push(Span::styled(
+            format!("  {}", account.username),
+            theme::composer().fg(theme::MUTED),
+        ));
+        spans.push(Span::styled(
+            format!(" ({})", account.role.as_str()),
+            theme::composer().fg(theme::MUTED),
+        ));
+    }
+
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(theme::composer()),
+        area,
+    );
+}
+
+fn push_badge(spans: &mut Vec<Span<'static>>, label: String, active: bool) {
+    spans.push(Span::styled(
+        format!(" {label} "),
+        Style::default()
+            .fg(if active { theme::WARN } else { theme::MUTED })
+            .bg(theme::BADGE),
+    ));
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
 }
 
 pub(crate) fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {

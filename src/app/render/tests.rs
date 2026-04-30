@@ -21,32 +21,6 @@ mod cases {
     use super::*;
 
     #[test]
-    fn message_created_at_uses_relative_then_absolute_labels() {
-        let now = OffsetDateTime::parse(
-            "2026-04-30T12:00:00Z",
-            &time::format_description::well_known::Rfc3339,
-        )
-        .unwrap();
-
-        assert_eq!(
-            format_message_created_at_at("2026-04-30T11:59:35Z", now).as_deref(),
-            Some("just now")
-        );
-        assert_eq!(
-            format_message_created_at_at("2026-04-30T11:55:00Z", now).as_deref(),
-            Some("5m ago")
-        );
-        assert_eq!(
-            format_message_created_at_at("2026-04-30T09:00:00Z", now).as_deref(),
-            Some("3h ago")
-        );
-        assert_eq!(
-            format_message_created_at_at("2026-04-20T09:08:00Z", now).as_deref(),
-            Some("Apr 20, 2026 09:08 UTC")
-        );
-    }
-
-    #[test]
     fn render_message_body_applies_inline_markdown_styles() {
         let lines = render_message_body("A **bold** *em* `code` ~~gone~~", 80);
 
@@ -208,7 +182,7 @@ mod cases {
 
     #[test]
     fn topbar_and_pane_headers_use_compact_aligned_layout() {
-        let backend = TestBackend::new(80, 24);
+        let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = Account {
             id: "a".to_string(),
@@ -260,21 +234,40 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        let logo = buffer.cell((0, 0)).expect("logo");
+        for x in 0..120 {
+            assert_eq!(
+                buffer.cell((x, 0)).expect("topbar padding bg").bg,
+                theme::TOPBAR
+            );
+        }
+        let logo = buffer.cell((1, 1)).expect("logo");
         assert_eq!(logo.symbol(), "s");
         assert!(logo.modifier.contains(Modifier::ITALIC));
-        for x in 0..80 {
-            assert_eq!(buffer.cell((x, 0)).expect("topbar bg").bg, theme::TOPBAR);
+        for x in 0..120 {
+            assert_eq!(buffer.cell((x, 1)).expect("topbar bg").bg, theme::TOPBAR);
         }
-        let topbar = row_text(buffer, 80, 0);
-        assert!(topbar.starts_with("sshoosh"));
-        assert!(topbar.contains("#general"));
-        assert!(topbar.contains("notifications:2"));
-        assert!(topbar.contains("mentions:1"));
-        let active_x = position_for_text(buffer, 80, 24, "#general")
-            .expect("active label")
+        for x in 0..120 {
+            assert_eq!(
+                buffer.cell((x, 2)).expect("topbar bottom padding bg").bg,
+                theme::TOPBAR
+            );
+        }
+        let topbar = row_text(buffer, 120, 1);
+        assert!(topbar.starts_with(" sshoosh"));
+        assert!(topbar.contains("workspace main"));
+        let workspace_x = position_for_text(buffer, 120, 24, "workspace main")
+            .expect("workspace label")
             .0;
-        assert!(active_x > 6);
+        assert_eq!(workspace_x + "workspace main".chars().count() as u16, 119);
+        assert!(!topbar.contains("#general"));
+        assert!(!topbar.contains("notifications:2"));
+        assert!(!topbar.contains("mentions:1"));
+        let bottom_status = row_text(buffer, 120, 23);
+        assert!(bottom_status.contains("normal"));
+        assert!(bottom_status.contains("#general"));
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("2 notifications"));
+        assert!(rendered.contains("1 mentions"));
         assert!(
             ui.hit_map
                 .entries()
@@ -287,19 +280,22 @@ mod cases {
                 .iter()
                 .any(|region| matches!(region.target, HitTarget::TopbarMentions))
         );
-        assert_eq!(buffer.cell((0, 1)).expect("top divider").symbol(), "─");
-        assert_eq!(buffer.cell((38, 1)).expect("top connector").symbol(), "┬");
-        assert_eq!(buffer.cell((79, 1)).expect("top divider").symbol(), "─");
-        assert_eq!(buffer.cell((38, 2)).expect("pane divider").symbol(), "│");
-        assert_eq!(buffer.cell((38, 18)).expect("pane divider").symbol(), "│");
-        assert_eq!(buffer.cell((0, 19)).expect("bottom divider").symbol(), "─");
+        assert_eq!(buffer.cell((0, 3)).expect("top divider").symbol(), "─");
+        assert_eq!(buffer.cell((38, 3)).expect("top connector").symbol(), "┬");
+        assert_eq!(buffer.cell((119, 3)).expect("top divider").symbol(), "─");
+        assert_eq!(buffer.cell((38, 4)).expect("pane divider").symbol(), "│");
+        assert_eq!(buffer.cell((38, 19)).expect("pane divider").symbol(), "│");
+        assert_eq!(buffer.cell((0, 20)).expect("footer bg").bg, theme::COMPOSER);
         assert_eq!(
-            buffer.cell((38, 19)).expect("bottom connector").symbol(),
-            "┴"
+            buffer.cell((38, 20)).expect("footer split bg").bg,
+            theme::COMPOSER
         );
-        assert_eq!(buffer.cell((79, 19)).expect("bottom divider").symbol(), "─");
-        assert_eq!(buffer.cell((1, 3)).expect("workspace header").symbol(), "C");
-        assert_eq!(buffer.cell((40, 3)).expect("detail header").symbol(), "w");
+        assert_eq!(
+            buffer.cell((119, 20)).expect("footer bg").bg,
+            theme::COMPOSER
+        );
+        assert_eq!(buffer.cell((1, 5)).expect("workspace header").symbol(), "C");
+        assert_eq!(buffer.cell((40, 5)).expect("detail header").symbol(), "w");
     }
 
     #[test]
@@ -780,8 +776,6 @@ mod cases {
             .join("\n");
 
         assert_eq!(channel_label("private", "super"), "#super · private");
-        assert!(row_text(buffer, width, 0).contains("#super"));
-        assert!(row_text(buffer, width, 0).contains("private"));
         assert!(rendered.contains("#super"));
         assert!(rendered.contains("private"));
         assert!(!rendered.contains("🔒"));
@@ -792,7 +786,9 @@ mod cases {
 
     #[test]
     fn workspace_thread_rows_are_single_line_and_truncated() {
-        let backend = TestBackend::new(42, 16);
+        let width = 42;
+        let height = 16;
+        let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = Account {
             id: "a".to_string(),
@@ -848,8 +844,7 @@ mod cases {
         assert!(!rendered.contains("3 comments"));
         assert!(!rendered.contains("2026-04-30"));
         assert!(!rendered.contains(">"));
-        let channel_cell = buffer.cell((1, 4)).expect("channel cell");
-        assert_eq!(channel_cell.symbol(), "#");
+        let channel_cell = cell_for_text(buffer, width, height, "#general");
         assert_eq!(channel_cell.fg, theme::TEXT);
         assert!(channel_cell.modifier.contains(Modifier::BOLD));
     }
@@ -911,7 +906,9 @@ mod cases {
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(rendered.contains("@alice"));
         assert!(rendered.contains("@owner"));
-        assert!(rendered.contains("Jan 2, 2020 03:04 UTC"));
+        assert!(rendered.contains("Jan 2, 2020"));
+        assert!(!rendered.contains("2020-01-02T03:04:00Z"));
+        assert!(!rendered.contains("UTC"));
         assert!(!rendered.contains(" you ·"));
         assert!(!rendered.contains("· #"));
         assert!(rendered.contains("Hello owner"));
@@ -1093,15 +1090,15 @@ mod cases {
             .unwrap();
 
         assert!(matches!(
-            ui.hit_map.hit(1, 4).map(|region| region.target),
+            ui.hit_map.hit(1, 6).map(|region| region.target),
             Some(HitTarget::WorkspaceChannel(id)) if id == "general"
         ));
         assert!(matches!(
-            ui.hit_map.hit(1, 5).map(|region| region.target),
+            ui.hit_map.hit(1, 7).map(|region| region.target),
             Some(HitTarget::WorkspaceThread(id)) if id == "thread"
         ));
         assert!(matches!(
-            ui.hit_map.hit(40, 4).map(|region| region.target),
+            ui.hit_map.hit(40, 6).map(|region| region.target),
             Some(HitTarget::DetailScroll)
         ));
         assert!(matches!(
@@ -1465,6 +1462,7 @@ mod cases {
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(rendered.contains("hello"));
         assert!(rendered.contains("world"));
-        assert!(rendered.contains("shift-enter newline"));
+        assert!(rendered.contains("shift-enter"));
+        assert!(rendered.contains("newline"));
     }
 }

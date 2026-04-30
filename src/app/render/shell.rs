@@ -19,7 +19,7 @@ pub fn draw(
     let shell = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
+            Constraint::Length(3),
             Constraint::Length(1),
             Constraint::Min(6),
             Constraint::Length(bottombar_height(ui)),
@@ -28,8 +28,8 @@ pub fn draw(
     draw_topbar(frame, shell[0], account, snapshot, ui);
     draw_horizontal_divider(frame, shell[1], theme::BORDER);
     draw_body(frame, shell[2], snapshot, ui);
-    draw_bottombar(frame, shell[3], snapshot, ui);
-    draw_pane_divider_intersections(frame, area, shell[1], shell[3], bottom_separator_color(ui));
+    draw_bottombar(frame, shell[3], account, snapshot, ui);
+    draw_pane_divider_intersections(frame, area, shell[1]);
     draw_banner(frame, area, ui);
     if ui.startup_splash_active() {
         draw_startup_splash(frame, area, ui);

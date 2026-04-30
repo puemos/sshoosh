@@ -298,6 +298,7 @@ mod cases {
     #[tokio::test]
     async fn mouse_clicks_topbar_notifications_and_mentions() {
         let mut app = test_app("topbar-clicks").await;
+        app.resize(140, 30).expect("resize");
         app.snapshot.notification_unread_count = 2;
         app.snapshot.mention_unread_count = 1;
         app.render().expect("render");
