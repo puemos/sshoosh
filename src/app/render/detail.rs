@@ -36,10 +36,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         } else {
             "comments"
         };
-        let mut meta = format!(
-            "{} {plural} · {}",
-            thread.comment_count, last_activity,
-        );
+        let mut meta = format!("{} {plural} · {}", thread.comment_count, last_activity,);
         if thread.edited_at.is_some() {
             meta.push_str(" · edited");
         }

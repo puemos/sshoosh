@@ -1358,7 +1358,6 @@ mod cases {
         let account = activated_test_account();
         let mut ui = UiState::default();
         ui.mode = UiMode::Help;
-        ui.help_scroll.set_offset(Position { x: 0, y: 10 });
         let registry = crate::app::commands::CommandRegistry::default();
 
         terminal
@@ -1374,24 +1373,59 @@ mod cases {
             .unwrap();
 
         let buffer = terminal.backend().buffer();
-        let channel_description =
-            position_for_text(buffer, width, height, "Create a public channel")
-                .expect("channel help");
-        let private_channel_description =
-            position_for_text(buffer, width, height, "Create a private channel")
-                .expect("private channel help");
-        let join_channel_description =
-            position_for_text(buffer, width, height, "Join a public channel")
-                .expect("join channel help");
+        let navigation_group =
+            position_for_text(buffer, width, height, "Navigation").expect("navigation group");
+        let invite_command =
+            position_for_text(buffer, width, height, "/invite new").expect("invite command");
+        let invite_description =
+            position_for_text(buffer, width, height, "Create an invite code").expect("invite help");
+        let invite_list_command =
+            position_for_text(buffer, width, height, "/invite list").expect("invite list command");
+        let invite_list_description =
+            position_for_text(buffer, width, height, "List invites").expect("invite list help");
+        let invite_revoke_command =
+            position_for_text(buffer, width, height, "/invite revoke invite-id")
+                .expect("invite revoke command");
+        let keyboard_header =
+            position_for_text(buffer, width, height, "Keyboard").expect("keyboard header");
+        let slash_header =
+            position_for_text(buffer, width, height, "Slash commands").expect("slash header");
+        let admin_category =
+            position_for_text(buffer, width, height, "Admin").expect("admin category");
+        assert_eq!(navigation_group.0, admin_category.0);
+        assert_eq!(admin_category.0, invite_command.0);
+        assert_eq!(invite_command.0, invite_list_command.0);
+        assert_eq!(invite_command.0, invite_revoke_command.0);
+        assert_eq!(invite_description.0, invite_list_description.0);
+        assert_eq!(navigation_group.1, keyboard_header.1 + 2);
+        assert_eq!(admin_category.1, slash_header.1 + 2);
+        assert_eq!(invite_command.1, admin_category.1 + 2);
 
-        assert_eq!(channel_description.0, private_channel_description.0);
-        assert_eq!(channel_description.0, join_channel_description.0);
-        assert!(
-            position_for_text(buffer, width, height, "/channel new name")
-                .is_some()
-        );
-        assert!(position_for_text(buffer, width, height, "/channel private name").is_some());
-        assert!(position_for_text(buffer, width, height, "/channel join #channel").is_some());
+        ui.help_scroll.set_offset(Position { x: 0, y: 30 });
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let lifecycle_category =
+            position_for_text(buffer, width, height, "Lifecycle").expect("lifecycle category");
+        let channel_command =
+            position_for_text(buffer, width, height, "/channel new name").expect("channel command");
+        let thread_command =
+            position_for_text(buffer, width, height, "/thread new title").expect("thread command");
+
+        assert_eq!(lifecycle_category.0, channel_command.0);
+        assert_eq!(lifecycle_category.0, thread_command.0);
+        assert_eq!(channel_command.1, lifecycle_category.1 + 2);
+        assert!(thread_command.1 > channel_command.1);
     }
 
     #[test]
@@ -1425,6 +1459,29 @@ mod cases {
 
         assert!(rendered.contains("Keyboard"));
         assert!(rendered.contains("Slash commands"));
+        assert!(!rendered.contains("membersManage"));
+        assert!(!rendered.contains("idManage"));
+        assert!(!rendered.contains("readOpen"));
+
+        ui.help_scroll.set_offset(Position { x: 0, y: 5 });
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &account,
+                    &Snapshot::default(),
+                    &mut ui,
+                    registry.specs(),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..height)
+            .map(|y| row_text(buffer, width, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         assert!(rendered.contains("/invite new"));
         assert!(rendered.contains("Create an invite code"));
         assert!(!rendered.contains("membersManage"));
@@ -1491,6 +1548,64 @@ mod cases {
             ui.hit_map.hit(0, 0).map(|region| region.target),
             Some(HitTarget::HelpBackdrop)
         ));
+    }
+
+    #[test]
+    fn comment_menu_uses_compact_spacing_and_aligned_hit_rows() {
+        let width = 40;
+        let height = 12;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.comment_menu = Some(state::CommentMenuState {
+            target: EditableMessageTarget::Comment(7),
+            x: 4,
+            y: 3,
+        });
+
+        terminal
+            .draw(|frame| draw_comment_menu(frame, frame.area(), &mut ui))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let (title_x, title_y) =
+            position_for_text(buffer, width, height, "Message").expect("menu title");
+        let (edit_x, edit_y) = position_for_text(buffer, width, height, "Edit").expect("edit row");
+        let (delete_x, delete_y) =
+            position_for_text(buffer, width, height, "Delete").expect("delete row");
+
+        assert_eq!(edit_x, title_x);
+        assert_eq!(delete_x, title_x);
+        assert!(edit_y >= title_y.saturating_add(2));
+        assert_eq!(delete_y, edit_y.saturating_add(1));
+
+        let edit_region = ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(
+                    region.target,
+                    HitTarget::CommentMenuEdit(EditableMessageTarget::Comment(7))
+                )
+            })
+            .expect("edit hit region");
+        let delete_region = ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(
+                    region.target,
+                    HitTarget::CommentMenuDelete(EditableMessageTarget::Comment(7))
+                )
+            })
+            .expect("delete hit region");
+
+        assert_eq!(edit_region.rect.y, edit_y);
+        assert_eq!(delete_region.rect.y, delete_y);
+        assert_eq!(edit_region.rect.x, edit_x);
+        assert_eq!(delete_region.rect.x, delete_x);
     }
 
     #[test]

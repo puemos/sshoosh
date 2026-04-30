@@ -49,7 +49,11 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                     {
                         selected_y = Some(items.len() as u16);
                     }
-                    let connector = if idx == last_idx { "└─ " } else { "├─ " };
+                    let connector = if idx == last_idx {
+                        "└─ "
+                    } else {
+                        "├─ "
+                    };
                     items.push(thread_item(snapshot, thread, row_width, connector));
                     row_hits.push((row, HitTarget::WorkspaceThread(thread.id.clone())));
                 }

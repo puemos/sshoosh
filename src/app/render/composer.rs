@@ -226,7 +226,12 @@ fn draw_status_cluster(
     spans.push(Span::styled(active, theme::composer().fg(theme::SUBTLE)));
     if show_badges {
         spans.push(Span::styled(" ", theme::composer()));
-        push_badge(&mut spans, format!("{unread} unread"), unread > 0, theme::WARN);
+        push_badge(
+            &mut spans,
+            format!("{unread} unread"),
+            unread > 0,
+            theme::WARN,
+        );
         let notification_start = spans_width(&spans) as u16;
         push_badge(
             &mut spans,
@@ -309,7 +314,7 @@ pub(crate) fn composer_cursor_line(buffer: &str, cursor: usize) -> u16 {
 
 pub(crate) fn draw_autocomplete(frame: &mut Frame, composer_area: Rect, ui: &mut UiState) {
     let visible_count = ui.composer.autocomplete.items.len().min(8);
-    let height = visible_count as u16 + 3;
+    let height = visible_count as u16 + 4;
     let visible_items = &ui.composer.autocomplete.items[..visible_count];
     let label_width = visible_items
         .iter()
