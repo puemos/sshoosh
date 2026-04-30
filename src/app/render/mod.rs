@@ -6,7 +6,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, Paragraph, Wrap},
 };
-use time::{OffsetDateTime, macros::format_description};
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
 use crate::service::{Account, SearchKind, Snapshot};

@@ -1,4 +1,5 @@
 use super::*;
+use crate::time_format::format_human_timestamp;
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
@@ -66,9 +67,9 @@ pub(crate) fn message_card<'a>(
         format!("@{}", author),
         theme::message_author(is_current_user),
     )];
-    if let Some(created_at) = created_at.and_then(format_message_created_at) {
+    if let Some(created_at) = created_at {
         meta.push(Span::styled(
-            format!(" · {created_at}"),
+            format!(" · {}", format_human_timestamp(created_at)),
             theme::message_meta(),
         ));
     }
@@ -178,30 +179,6 @@ pub(crate) fn register_link_hits(
             text: link.text,
             style: link.style,
         });
-    }
-}
-
-pub(crate) fn format_message_created_at(created_at: &str) -> Option<String> {
-    format_message_created_at_at(created_at, OffsetDateTime::now_utc())
-}
-
-pub(crate) fn format_message_created_at_at(
-    created_at: &str,
-    now: OffsetDateTime,
-) -> Option<String> {
-    let created_at =
-        OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339).ok()?;
-    let seconds = (now - created_at).whole_seconds().max(0);
-    match seconds {
-        0..=59 => Some("just now".to_string()),
-        60..=3_599 => Some(format!("{}m ago", seconds / 60)),
-        3_600..=86_399 => Some(format!("{}h ago", seconds / 3_600)),
-        86_400..=604_799 => Some(format!("{}d ago", seconds / 86_400)),
-        _ => created_at
-            .format(format_description!(
-                "[month repr:short] [day padding:none], [year] [hour]:[minute] UTC"
-            ))
-            .ok(),
     }
 }
 

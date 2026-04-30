@@ -1,4 +1,5 @@
 use super::*;
+use crate::time_format::format_human_timestamp;
 pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if matches!(ui.route, Route::Dms) {
         draw_dm_detail(frame, area, snapshot, ui);
@@ -32,13 +33,18 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 history_prompt("Older comments available. Use /older."),
             );
         }
+        let last_activity = thread
+            .last_activity_at
+            .as_deref()
+            .map(format_human_timestamp)
+            .unwrap_or_else(|| "no activity".to_string());
         let summary = ListItem::new(vec![
             Line::from(vec![Span::styled(
                 format!(
                     "@{} · {} comments · {}{}{}{}",
                     thread.author,
                     thread.comment_count,
-                    thread.last_activity_at.as_deref().unwrap_or("no activity"),
+                    last_activity,
                     if thread.edited_at.is_some() {
                         " · edited"
                     } else {

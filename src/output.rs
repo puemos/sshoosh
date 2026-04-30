@@ -123,9 +123,12 @@ pub mod cli {
 }
 
 pub mod ssh {
-    use crate::service::{
-        AccountSummary, AuditEntry, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
-        MentionSummary, NotificationSummary, SshKeySummary,
+    use crate::{
+        service::{
+            AccountSummary, AuditEntry, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
+            MentionSummary, NotificationSummary, SshKeySummary,
+        },
+        time_format::format_human_timestamp,
     };
 
     pub fn format_accounts(rows: &[AccountSummary]) -> String {
@@ -143,7 +146,7 @@ pub mod ssh {
                 row.username,
                 row.role.as_str(),
                 state,
-                row.last_seen_at.as_deref().unwrap_or("-")
+                format_optional_timestamp(row.last_seen_at.as_deref())
             ));
         }
         out
@@ -152,7 +155,11 @@ pub mod ssh {
     pub fn format_keys(rows: &[SshKeySummary]) -> String {
         let mut out = String::from("SSH keys\n");
         for row in rows {
-            let state = row.revoked_at.as_deref().unwrap_or("active");
+            let state = row
+                .revoked_at
+                .as_deref()
+                .map(|revoked_at| format!("revoked:{}", format_human_timestamp(revoked_at)))
+                .unwrap_or_else(|| "active".to_string());
             out.push_str(&format!(
                 "{}  @{}  {}  {}\n",
                 short_id(&row.id),
@@ -180,7 +187,7 @@ pub mod ssh {
                 row.role_on_accept.as_str(),
                 row.created_by,
                 state,
-                row.expires_at.as_deref().unwrap_or("-")
+                format_optional_timestamp(row.expires_at.as_deref())
             ));
         }
         out
@@ -195,7 +202,9 @@ pub mod ssh {
         for row in rows {
             out.push_str(&format!(
                 "@{}  {}  joined:{}\n",
-                row.username, row.role, row.joined_at
+                row.username,
+                row.role,
+                format_human_timestamp(&row.joined_at)
             ));
         }
         out
@@ -265,7 +274,7 @@ pub mod ssh {
         for row in rows {
             out.push_str(&format!(
                 "{}  {}  {}  {}  {}\n",
-                row.created_at,
+                format_human_timestamp(&row.created_at),
                 row.actor_username
                     .as_ref()
                     .map(|username| format!("@{username}"))
@@ -280,5 +289,48 @@ pub mod ssh {
 
     fn short_id(id: &str) -> &str {
         id.get(..8).unwrap_or(id)
+    }
+
+    fn format_optional_timestamp(value: Option<&str>) -> String {
+        value
+            .map(format_human_timestamp)
+            .unwrap_or_else(|| "-".to_string())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::service::Role;
+
+        #[test]
+        fn formats_human_timestamps_without_changing_missing_values() {
+            let accounts = vec![AccountSummary {
+                id: "account".to_string(),
+                username: "owner".to_string(),
+                display_name: "Owner".to_string(),
+                role: Role::Owner,
+                activated: true,
+                disabled: false,
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                last_seen_at: Some("2020-01-02T03:04:00Z".to_string()),
+            }];
+            let rendered = format_accounts(&accounts);
+
+            assert!(rendered.contains("Jan 2, 2020 "));
+            assert!(!rendered.contains("2020-01-02T03:04:00Z"));
+
+            let accounts = vec![AccountSummary {
+                id: "account".to_string(),
+                username: "member".to_string(),
+                display_name: "Member".to_string(),
+                role: Role::Member,
+                activated: true,
+                disabled: false,
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                last_seen_at: None,
+            }];
+
+            assert!(format_accounts(&accounts).contains("last_seen:-"));
+        }
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::time_format::format_human_timestamp;
 
 enum ActionResult {
     Message(String),
@@ -593,7 +594,7 @@ fn accounts_modal(rows: &[AccountSummary]) -> ListModal {
                     format!("@{}", row.username),
                     row.role.as_str().to_string(),
                     account_state(row).to_string(),
-                    row.last_seen_at.as_deref().unwrap_or("-").to_string(),
+                    format_optional_timestamp(row.last_seen_at.as_deref()),
                 ])
             })
             .collect(),
@@ -634,7 +635,7 @@ fn invites_modal(rows: &[InviteSummary]) -> ListModal {
                     row.role_on_accept.as_str().to_string(),
                     format!("@{}", row.created_by),
                     invite_state(row).to_string(),
-                    row.expires_at.as_deref().unwrap_or("-").to_string(),
+                    format_optional_timestamp(row.expires_at.as_deref()),
                 ])
             })
             .collect(),
@@ -657,7 +658,7 @@ fn channel_members_modal(slug: &str, rows: &[ChannelMemberSummary]) -> ListModal
                 row_values([
                     format!("@{}", row.username),
                     row.role.clone(),
-                    row.joined_at.clone(),
+                    format_human_timestamp(&row.joined_at),
                 ])
             })
             .collect(),
@@ -851,6 +852,12 @@ fn row_values<const N: usize>(values: [String; N]) -> Vec<String> {
     values.into()
 }
 
+fn format_optional_timestamp(value: Option<&str>) -> String {
+    value
+        .map(format_human_timestamp)
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }
@@ -899,6 +906,27 @@ mod tests {
         assert_eq!(modal.rows[1][3], "accepted");
         assert!(modal.row_actions.is_empty());
         assert_eq!(modal.empty, "No invites found.");
+    }
+
+    #[test]
+    fn accounts_modal_formats_last_seen_for_humans() {
+        let rows = vec![AccountSummary {
+            id: "account".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            disabled: false,
+            created_at: "2020-01-01T00:00:00Z".to_string(),
+            last_seen_at: Some("2020-01-02T03:04:00Z".to_string()),
+        }];
+
+        let modal = accounts_modal(&rows);
+
+        assert_eq!(modal.rows[0][0], "@owner");
+        assert!(modal.rows[0][3].starts_with("Jan 2, 2020 "));
+        assert!(!modal.rows[0][3].contains('T'));
+        assert!(!modal.rows[0][3].contains('Z'));
     }
 
     #[test]
