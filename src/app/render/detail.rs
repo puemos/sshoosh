@@ -70,6 +70,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         if !thread.body.trim().is_empty() {
             let card = message_card(
                 snapshot,
+                MessageKind::ThreadRoot,
                 &thread.author,
                 Some(&thread.created_at),
                 thread.edited_at.as_deref(),
@@ -91,6 +92,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             }
             let card = message_card(
                 snapshot,
+                MessageKind::Comment,
                 &comment.author,
                 Some(&comment.created_at),
                 comment.edited_at.as_deref(),
@@ -345,6 +347,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             }
             let card = message_card(
                 snapshot,
+                MessageKind::Dm,
                 &message.author,
                 Some(&message.created_at),
                 message.edited_at.as_deref(),

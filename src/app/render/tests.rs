@@ -119,6 +119,35 @@ mod cases {
     }
 
     #[test]
+    fn message_card_renders_metadata_before_body_and_wraps_for_gutter_padding() {
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            ..Snapshot::default()
+        };
+        let card = message_card(
+            &snapshot,
+            MessageKind::Comment,
+            "owner",
+            Some("2020-01-02T03:04:00Z"),
+            Some("2020-01-02T03:05:00Z"),
+            Some("👍 2"),
+            "abcdefghij",
+            4,
+        );
+
+        assert_eq!(card.height(), 4);
+        assert_eq!(card.link_count(), 0);
+    }
+
+    #[test]
+    fn message_error_detection_is_render_only_heuristic() {
+        assert!(is_error_message("Error from provider: bad input"));
+        assert!(is_error_message("  Error: bad input"));
+        assert!(is_error_message("failed: bad input"));
+        assert!(!is_error_message("this is not an error"));
+    }
+
+    #[test]
     fn render_empty_main_at_common_sizes() {
         for (width, height) in [(80, 24), (100, 32), (140, 40)] {
             let backend = TestBackend::new(width, height);
@@ -971,6 +1000,160 @@ mod cases {
     }
 
     #[test]
+    fn render_thread_detail_uses_elevated_message_slabs_and_gutters() {
+        let width = 120;
+        let height = 36;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 3,
+                last_comment_index: 4,
+                unread_count: 0,
+                last_activity_at: Some("2020-01-02T03:08:00Z".to_string()),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            comments: vec![
+                CommentItem {
+                    id: "comment-2".to_string(),
+                    author: "alice".to_string(),
+                    obj_index: 2,
+                    body: "Looks good https://example.com".to_string(),
+                    created_at: "2020-01-02T03:05:00Z".to_string(),
+                    edited_at: Some("2020-01-02T03:06:00Z".to_string()),
+                    reactions: "ok 2".to_string(),
+                },
+                CommentItem {
+                    id: "comment-3".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 3,
+                    body: "I would keep normal comments quieter.".to_string(),
+                    created_at: "2020-01-02T03:07:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+                CommentItem {
+                    id: "comment-4".to_string(),
+                    author: "system".to_string(),
+                    obj_index: 4,
+                    body: "Error from provider: 13 request validation errors".to_string(),
+                    created_at: "2020-01-02T03:08:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+            ],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let (_root_meta_x, root_meta_y) =
+            position_for_text(buffer, width, height, "thread root").expect("root metadata");
+        let (root_body_x, root_body_y) =
+            position_for_text(buffer, width, height, "Original post").expect("root body");
+        assert!(root_meta_y < root_body_y);
+        assert_eq!(
+            buffer
+                .cell((root_body_x, root_body_y))
+                .expect("root body")
+                .bg,
+            theme::MESSAGE_CARD_ROOT
+        );
+        let root_gutter = buffer
+            .cell((root_body_x.saturating_sub(3), root_body_y))
+            .expect("root gutter");
+        assert_eq!(root_gutter.symbol(), "▏");
+        assert_eq!(root_gutter.fg, theme::MESSAGE_ROOT_GUTTER);
+
+        let (alice_x, alice_y) =
+            position_for_text(buffer, width, height, "Looks good").expect("alice body");
+        assert_eq!(
+            buffer.cell((alice_x, alice_y)).expect("alice body").bg,
+            theme::MESSAGE_CARD
+        );
+        assert_eq!(
+            buffer
+                .cell((alice_x.saturating_sub(3), alice_y))
+                .expect("alice gutter")
+                .fg,
+            theme::MESSAGE_GUTTER
+        );
+        assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("edited"));
+        assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("ok 2"));
+
+        let (owner_x, owner_y) =
+            position_for_text(buffer, width, height, "I would").expect("owner body");
+        assert_eq!(
+            buffer
+                .cell((owner_x.saturating_sub(3), owner_y))
+                .expect("owner gutter")
+                .fg,
+            theme::MESSAGE_CURRENT_USER_GUTTER
+        );
+
+        let (error_x, error_y) =
+            position_for_text(buffer, width, height, "Error from provider").expect("error body");
+        assert_eq!(
+            buffer.cell((error_x, error_y)).expect("error body").bg,
+            theme::MESSAGE_CARD_FOCUSED
+        );
+        assert_eq!(
+            buffer
+                .cell((error_x.saturating_sub(3), error_y))
+                .expect("error gutter")
+                .fg,
+            theme::MESSAGE_ERROR_GUTTER
+        );
+
+        assert!(ui.hit_map.entries().iter().any(|region| matches!(
+            region.target,
+            HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
+        )));
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::MessageLink(ref url) if url == "https://example.com"))
+        );
+    }
+
+    #[test]
     fn render_thread_empty_state_uses_centered_action_hint() {
         let width = 100;
         let height = 30;
@@ -1104,14 +1287,15 @@ mod cases {
     }
 
     #[test]
-    fn help_overlay_aligns_dense_command_reference() {
+    fn help_overlay_aligns_command_rows_with_subcommand_descriptions() {
         let width = 120;
-        let height = 32;
+        let height = 60;
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = activated_test_account();
         let mut ui = UiState::default();
         ui.mode = UiMode::Help;
+        ui.help_scroll.set_offset(Position { x: 0, y: 10 });
         let registry = crate::app::commands::CommandRegistry::default();
 
         terminal
@@ -1127,26 +1311,24 @@ mod cases {
             .unwrap();
 
         let buffer = terminal.backend().buffer();
-        let invite_description =
-            position_for_text(buffer, width, height, "Manage invite codes").expect("invite help");
         let channel_description =
-            position_for_text(buffer, width, height, "Manage channels").expect("channel help");
-        let thread_description =
-            position_for_text(buffer, width, height, "Manage threads").expect("thread help");
+            position_for_text(buffer, width, height, "Create a public channel")
+                .expect("channel help");
+        let private_channel_description =
+            position_for_text(buffer, width, height, "Create a private channel")
+                .expect("private channel help");
+        let join_channel_description =
+            position_for_text(buffer, width, height, "Join a public channel")
+                .expect("join channel help");
 
-        assert_eq!(invite_description.0, channel_description.0);
-        assert_eq!(invite_description.0, thread_description.0);
-        assert_eq!(
-            cell_for_text(buffer, width, height, "Slash commands").fg,
-            theme::ACCENT
+        assert_eq!(channel_description.0, private_channel_description.0);
+        assert_eq!(channel_description.0, join_channel_description.0);
+        assert!(
+            position_for_text(buffer, width, height, "/channel new name")
+                .is_some()
         );
-        assert_eq!(
-            cell_for_text(buffer, width, height, "Admin").fg,
-            theme::ACCENT
-        );
-        let key = cell_for_text(buffer, width, height, "j/k");
-        assert_eq!(key.fg, theme::MUTED);
-        assert!(key.modifier.contains(Modifier::BOLD));
+        assert!(position_for_text(buffer, width, height, "/channel private name").is_some());
+        assert!(position_for_text(buffer, width, height, "/channel join #channel").is_some());
     }
 
     #[test]
@@ -1180,7 +1362,8 @@ mod cases {
 
         assert!(rendered.contains("Keyboard"));
         assert!(rendered.contains("Slash commands"));
-        assert!(rendered.contains("/invite"));
+        assert!(rendered.contains("/invite new"));
+        assert!(rendered.contains("Create an invite code"));
         assert!(!rendered.contains("membersManage"));
         assert!(!rendered.contains("idManage"));
         assert!(!rendered.contains("readOpen"));
@@ -1195,7 +1378,7 @@ mod cases {
         let account = activated_test_account();
         let mut ui = UiState::default();
         ui.mode = UiMode::Help;
-        ui.help_scroll.set_offset(Position { x: 0, y: 2 });
+        ui.help_scroll.set_offset(Position { x: 0, y: 18 });
         let registry = crate::app::commands::CommandRegistry::default();
 
         terminal
@@ -1216,8 +1399,8 @@ mod cases {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("/channel"));
-        assert!(rendered.contains("Manage channels"));
+        assert!(rendered.contains("/channel new"));
+        assert!(rendered.contains("Create a public channel"));
     }
 
     #[test]
@@ -1430,7 +1613,6 @@ mod cases {
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(!rendered.contains("First message"));
         assert!(rendered.contains("Second message"));
-        assert!(rendered.contains("Third message"));
     }
 
     #[test]

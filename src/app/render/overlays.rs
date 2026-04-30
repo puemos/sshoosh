@@ -184,12 +184,9 @@ fn help_command_lines(commands: &[CommandSpec], width: usize) -> Vec<Line<'stati
         theme::elevated_accent(),
     ))];
     for (category, specs) in command_groups(commands) {
-        for (idx, spec) in specs.into_iter().enumerate() {
-            lines.push(help_command_line(
-                width,
-                if idx == 0 { category } else { "" },
-                spec,
-            ));
+        lines.push(Line::from(Span::styled(category, theme::elevated_accent())));
+        for spec in specs {
+            lines.extend(help_command_rows(width, spec));
         }
     }
     lines
@@ -210,55 +207,81 @@ fn command_groups<'a>(commands: &'a [CommandSpec]) -> Vec<(&'static str, Vec<&'a
     groups
 }
 
-fn help_command_line(width: usize, category: &'static str, spec: &CommandSpec) -> Line<'static> {
-    let (category_width, command_width, args_width, shortcut_width): (usize, usize, usize, usize) =
-        if width >= 64 {
-            (11, 14, 18, 3)
-        } else if width >= 52 {
-            (9, 13, 12, 3)
-        } else {
-            (0, 13, 14, 0)
-        };
-    let separator_count = usize::from(category_width > 0)
-        + 1
-        + usize::from(args_width > 0)
-        + usize::from(shortcut_width > 0);
-    let used = category_width
-        .saturating_add(command_width)
-        .saturating_add(args_width)
-        .saturating_add(shortcut_width)
-        .saturating_add(separator_count);
-    let description_width = width.saturating_sub(used).max(1);
-    let mut spans = Vec::new();
+fn help_command_rows(width: usize, spec: &CommandSpec) -> Vec<Line<'static>> {
+    let subcommands = subcommands_for(spec.name);
+    if subcommands.is_empty() {
+        return vec![help_command_line(
+            width,
+            command_usage(spec.name, spec.args),
+            spec.shortcut,
+            spec.description,
+        )];
+    }
 
-    if category_width > 0 {
-        spans.push(Span::styled(
-            pad_or_truncate(category, category_width),
-            help_group_style(category),
-        ));
-        spans.push(Span::raw(" "));
+    subcommands
+        .iter()
+        .map(|subcommand| help_subcommand_line(width, spec, subcommand))
+        .collect()
+}
+
+fn help_subcommand_line(
+    width: usize,
+    spec: &CommandSpec,
+    subcommand: &SubcommandSpec,
+) -> Line<'static> {
+    help_command_line(
+        width,
+        command_usage(
+            &format!("{} {}", spec.name, subcommand.name),
+            subcommand.args,
+        ),
+        spec.shortcut
+            .filter(|_| subcommand.name == "new" || subcommand.name == "open"),
+        subcommand.description,
+    )
+}
+
+fn command_usage(name: &str, args: &str) -> String {
+    if args.is_empty() {
+        format!("/{name}")
+    } else {
+        format!("/{name} {args}")
     }
-    spans.push(Span::styled(
-        pad_or_truncate(&format!("/{}", spec.name), command_width),
-        theme::elevated_title(),
-    ));
-    spans.push(Span::raw(" "));
-    if args_width > 0 {
-        spans.push(Span::styled(
-            pad_or_truncate(spec.args, args_width),
-            theme::elevated_muted(),
-        ));
-        spans.push(Span::raw(" "));
+}
+
+fn help_command_line(
+    width: usize,
+    command: String,
+    shortcut: Option<&'static str>,
+    description: &'static str,
+) -> Line<'static> {
+    let shortcut_width = if width >= 56 { 3 } else { 0 };
+    let command_width = if width >= 72 {
+        34
+    } else if width >= 52 {
+        27
+    } else {
+        18
     }
+    .min(width.saturating_sub(shortcut_width + 2).max(1));
+    let used = command_width + 1 + shortcut_width + usize::from(shortcut_width > 0);
+    let description_width = width.saturating_sub(used).max(1);
+    let mut spans = vec![
+        Span::styled(
+            pad_or_truncate(&command, command_width),
+            theme::elevated_title(),
+        ),
+        Span::raw(" "),
+    ];
     if shortcut_width > 0 {
         spans.push(Span::styled(
-            pad_or_truncate(spec.shortcut.unwrap_or_default(), shortcut_width),
+            pad_or_truncate(shortcut.unwrap_or_default(), shortcut_width),
             theme::elevated_muted().add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
     }
     spans.push(Span::styled(
-        pad_or_truncate(spec.description, description_width),
+        pad_or_truncate(description, description_width),
         theme::elevated_panel(),
     ));
     Line::from(spans)

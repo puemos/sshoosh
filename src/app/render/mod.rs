@@ -11,7 +11,7 @@ use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use crate::service::{Account, SearchKind, Snapshot};
 
 use super::{
-    commands::CommandSpec,
+    commands::{CommandSpec, SubcommandSpec, subcommands_for},
     state::{
         ActivePane, Banner, BannerPresentation, BottomBarAction, EditableMessageTarget, HitTarget,
         LinkOverlay, ListModal, Route, SelectionRange, UiMode, UiState,

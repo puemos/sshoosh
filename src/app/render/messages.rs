@@ -1,9 +1,25 @@
 use super::*;
 use crate::time_format::format_human_timestamp;
+use ratatui::style::Color;
+
+const MESSAGE_PREFIX: &str = "▏  ";
+const MESSAGE_PREFIX_WIDTH: u16 = 3;
+
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
     hit: Option<MessageCardHit>,
+}
+
+#[cfg(test)]
+impl MessageCard<'_> {
+    pub(crate) fn height(&self) -> usize {
+        self.item.height()
+    }
+
+    pub(crate) fn link_count(&self) -> usize {
+        self.links.len()
+    }
 }
 
 pub(crate) struct MessageLinkHit {
@@ -21,8 +37,16 @@ pub(crate) struct MessageCardHit {
     target: HitTarget,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MessageKind {
+    ThreadRoot,
+    Comment,
+    Dm,
+}
+
 pub(crate) fn message_card<'a>(
     snapshot: &Snapshot,
+    kind: MessageKind,
     author: &str,
     created_at: Option<&str>,
     edited_at: Option<&str>,
@@ -34,14 +58,30 @@ pub(crate) fn message_card<'a>(
         .current_username
         .as_deref()
         .is_some_and(|username| username.eq_ignore_ascii_case(author));
-    let gutter = Style::default().fg(theme::BORDER).bg(theme::PANEL);
+    let surface = message_surface(kind, body);
+    let gutter = theme::message_gutter(message_gutter(kind, is_current_user, body), surface);
     let mut lines = Vec::new();
     let mut links = Vec::new();
 
+    lines.push(message_card_line(
+        gutter,
+        message_meta_spans(
+            kind,
+            is_current_user,
+            author,
+            created_at,
+            edited_at,
+            reactions,
+            surface,
+        ),
+    ));
+
     for (row_idx, row) in render_message_body(body, width).into_iter().enumerate() {
-        let mut col = 2u16;
+        let row_idx = row_idx.saturating_add(1);
+        let mut col = MESSAGE_PREFIX_WIDTH;
         let mut content = Vec::new();
         for run in row {
+            let style = run.style.bg(surface);
             let width = run.text.chars().count().min(u16::MAX as usize) as u16;
             if let Some(url) = run
                 .link_url
@@ -55,40 +95,88 @@ pub(crate) fn message_card<'a>(
                     width,
                     url: url.clone(),
                     text: run.text.clone(),
-                    style: run.style,
+                    style,
                 });
             }
             col = col.saturating_add(width);
-            content.push(Span::styled(run.text, run.style));
+            content.push(Span::styled(run.text, style));
         }
         lines.push(message_card_line(gutter, content));
     }
+
+    MessageCard {
+        item: ListItem::new(lines).style(theme::message_card_on(surface)),
+        links,
+        hit: None,
+    }
+}
+
+fn message_meta_spans<'a>(
+    kind: MessageKind,
+    is_current_user: bool,
+    author: &str,
+    created_at: Option<&str>,
+    edited_at: Option<&str>,
+    reactions: Option<&str>,
+    surface: Color,
+) -> Vec<Span<'a>> {
     let mut meta = vec![Span::styled(
         format!("@{}", author),
-        theme::message_author(is_current_user),
+        theme::message_author_on(is_current_user, surface),
     )];
     if let Some(created_at) = created_at {
         meta.push(Span::styled(
             format!(" · {}", format_human_timestamp(created_at)),
-            theme::message_meta(),
+            theme::message_meta_on(surface),
+        ));
+    }
+    if matches!(kind, MessageKind::ThreadRoot) {
+        meta.push(Span::styled(
+            " · thread root",
+            theme::message_meta_on(surface),
         ));
     }
     if edited_at.is_some() {
-        meta.push(Span::styled(" · edited", theme::message_meta()));
+        meta.push(Span::styled(" · edited", theme::message_meta_on(surface)));
     }
     if let Some(reactions) = reactions.filter(|value| !value.is_empty()) {
         meta.push(Span::styled(
             format!(" · {reactions}"),
-            theme::message_meta(),
+            theme::message_meta_on(surface),
         ));
     }
-    lines.push(message_card_line(gutter, meta));
+    meta
+}
 
-    MessageCard {
-        item: ListItem::new(lines).style(theme::message_card()),
-        links,
-        hit: None,
+fn message_surface(kind: MessageKind, body: &str) -> Color {
+    if matches!(kind, MessageKind::ThreadRoot) {
+        theme::MESSAGE_CARD_ROOT
+    } else if is_error_message(body) {
+        theme::MESSAGE_CARD_FOCUSED
+    } else {
+        theme::MESSAGE_CARD
     }
+}
+
+fn message_gutter(kind: MessageKind, is_current_user: bool, body: &str) -> Color {
+    if is_error_message(body) {
+        theme::MESSAGE_ERROR_GUTTER
+    } else if matches!(kind, MessageKind::ThreadRoot) {
+        theme::MESSAGE_ROOT_GUTTER
+    } else if is_current_user {
+        theme::MESSAGE_CURRENT_USER_GUTTER
+    } else {
+        theme::MESSAGE_GUTTER
+    }
+}
+
+pub(crate) fn is_error_message(body: &str) -> bool {
+    let body = body.trim_start();
+    body.starts_with("Error from provider:")
+        || body.starts_with("Error:")
+        || body.starts_with("error:")
+        || body.starts_with("Failed:")
+        || body.starts_with("failed:")
 }
 
 pub(crate) fn with_message_card_hit<'a>(
@@ -183,15 +271,15 @@ pub(crate) fn register_link_hits(
 }
 
 pub(crate) fn message_gap<'a>() -> ListItem<'a> {
-    ListItem::new(Line::from("")).style(theme::panel())
+    ListItem::new(Line::from(Span::styled("", theme::message_separator()))).style(theme::panel())
 }
 
 pub(crate) fn message_card_line<'a>(gutter: Style, content: Vec<Span<'a>>) -> Line<'a> {
-    let mut spans = vec![Span::styled("│ ", gutter)];
+    let mut spans = vec![Span::styled(MESSAGE_PREFIX, gutter)];
     spans.extend(content);
     Line::from(spans)
 }
 
 pub(crate) fn message_content_width(area: Rect) -> usize {
-    area.width.saturating_sub(4).max(8) as usize
+    area.width.saturating_sub(MESSAGE_PREFIX_WIDTH + 2).max(8) as usize
 }
