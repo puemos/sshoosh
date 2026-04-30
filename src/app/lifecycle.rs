@@ -1,0 +1,230 @@
+impl App {
+    pub async fn new(
+        account: Account,
+        state: ServerState,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<Self> {
+        let (terminal, shared) = terminal::terminal(cols.max(80), rows.max(24))?;
+        let live_rx = state.subscribe();
+        let snapshot = state.snapshot(&account.id, None, None, None).await?;
+        let mut ui = UiState::default();
+        ui.sync_route_from_snapshot(&snapshot);
+        Ok(Self {
+            running: true,
+            terminal,
+            shared,
+            account,
+            state,
+            live_rx,
+            snapshot,
+            ui,
+            commands: CommandRegistry::default(),
+            decoder: InputDecoder::default(),
+            actions: Vec::new(),
+            refresh_requested: false,
+            pending_link_open: None,
+            pending_clipboard_copy: None,
+            desired_pointer_shape: PointerShape::Default,
+            emitted_pointer_shape: PointerShape::Default,
+            history_limit: DEFAULT_HISTORY_LIMIT,
+            search_limit: DEFAULT_SEARCH_LIMIT,
+        })
+    }
+
+    pub async fn refresh(&mut self) -> anyhow::Result<()> {
+        self.account = match self.state.reload_account(&self.account.id).await {
+            Ok(account) => account,
+            Err(err) => {
+                self.running = false;
+                return Err(err);
+            }
+        };
+        let search_query = self.snapshot.search_query.clone();
+        let search_results = self.snapshot.search_results.clone();
+        let search_has_more = self.snapshot.search_has_more;
+        self.snapshot = self
+            .state
+            .snapshot_with_history_limit(
+                &self.account.id,
+                self.snapshot.selected_channel_id.as_deref(),
+                self.snapshot.selected_thread_id.as_deref(),
+                self.snapshot.selected_conversation_id.as_deref(),
+                self.history_limit,
+            )
+            .await?;
+        if self.ui.route == Route::Search {
+            self.snapshot.search_query = search_query;
+            self.snapshot.search_results = search_results;
+            self.snapshot.search_has_more = search_has_more;
+            self.ui.search_selected = self
+                .ui
+                .search_selected
+                .min(self.snapshot.search_results.len().saturating_sub(1));
+        }
+        self.ui.sync_route_from_snapshot(&self.snapshot);
+        self.update_completions();
+        self.refresh_requested = false;
+        Ok(())
+    }
+
+    pub fn drain_live_events(&mut self) -> bool {
+        let mut changed = false;
+        loop {
+            match self.live_rx.try_recv() {
+                Ok(_) => changed = true,
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                    changed = true;
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+            }
+        }
+        changed
+    }
+
+    pub fn take_actions(&mut self) -> Vec<Action> {
+        std::mem::take(&mut self.actions)
+    }
+
+    pub fn take_refresh_requested(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_requested)
+    }
+
+    pub fn set_banner_ok(&mut self, text: impl Into<String>) {
+        self.ui.banner = Some(Banner::ok(text));
+    }
+
+    pub fn set_banner_modal_ok(&mut self, text: impl Into<String>) {
+        self.ui.banner = Some(Banner::modal_ok(text));
+    }
+
+    pub fn set_banner_err(&mut self, text: impl Into<String>) {
+        self.ui.banner = Some(Banner::err(text));
+    }
+
+    pub fn selected_channel_id(&self) -> Option<String> {
+        self.snapshot.selected_channel_id.clone()
+    }
+
+    pub fn selected_channel_slug(&self) -> Option<String> {
+        self.snapshot
+            .selected_channel_id
+            .as_ref()
+            .and_then(|id| {
+                self.snapshot
+                    .channels
+                    .iter()
+                    .find(|channel| &channel.id == id)
+            })
+            .map(|channel| channel.slug.clone())
+    }
+
+    pub fn selected_thread_id(&self) -> Option<String> {
+        self.snapshot.selected_thread_id.clone()
+    }
+
+    pub fn selected_conversation_id(&self) -> Option<String> {
+        self.snapshot.selected_conversation_id.clone()
+    }
+
+    pub fn search_query(&self) -> Option<String> {
+        matches!(self.ui.route, Route::Search)
+            .then(|| self.snapshot.search_query.clone())
+            .flatten()
+    }
+
+    pub fn reset_search_limit(&mut self) -> i64 {
+        self.search_limit = DEFAULT_SEARCH_LIMIT;
+        self.search_limit
+    }
+
+    pub fn increase_search_limit(&mut self) -> i64 {
+        self.search_limit = self
+            .search_limit
+            .saturating_add(SEARCH_PAGE_SIZE)
+            .min(MAX_SEARCH_LIMIT);
+        self.search_limit
+    }
+
+    pub fn increase_history_limit(&mut self) -> i64 {
+        self.history_limit = self
+            .history_limit
+            .saturating_add(DEFAULT_HISTORY_LIMIT)
+            .min(MAX_HISTORY_LIMIT);
+        self.history_limit
+    }
+
+    pub fn select_channel(&mut self, channel_id: String) {
+        self.reset_history_limit();
+        self.snapshot.selected_channel_id = Some(channel_id.clone());
+        self.snapshot.selected_thread_id = None;
+        self.snapshot.selected_conversation_id = None;
+        self.snapshot.threads.clear();
+        self.snapshot.comments.clear();
+        self.reset_detail_scroll();
+        self.ui.route = Route::Channel(channel_id);
+        self.ui.active_pane = ActivePane::List;
+        self.ui.threads_collapsed = false;
+        self.refresh_requested = true;
+    }
+
+    pub fn select_thread(&mut self, channel_id: String, thread_id: String) {
+        self.reset_history_limit();
+        self.snapshot.selected_channel_id = Some(channel_id.clone());
+        self.snapshot.selected_thread_id = Some(thread_id);
+        self.snapshot.selected_conversation_id = None;
+        self.reset_detail_scroll();
+        self.ui.route = Route::Channel(channel_id);
+        self.ui.active_pane = ActivePane::Detail;
+        self.ui.threads_collapsed = false;
+        self.actions.push(Action::MarkThreadRead);
+        self.refresh_requested = true;
+    }
+
+    pub fn select_thread_at_bottom(&mut self, channel_id: String, thread_id: String) {
+        self.select_thread(channel_id, thread_id);
+        self.scroll_detail_to_bottom();
+    }
+
+    pub fn select_conversation(&mut self, conversation_id: String) {
+        self.reset_history_limit();
+        self.snapshot.selected_conversation_id = Some(conversation_id);
+        self.reset_detail_scroll();
+        self.ui.route = Route::Dms;
+        self.ui.active_pane = ActivePane::Detail;
+        self.actions.push(Action::MarkDmRead);
+        self.refresh_requested = true;
+    }
+
+    pub fn select_conversation_at_bottom(&mut self, conversation_id: String) {
+        self.select_conversation(conversation_id);
+        self.scroll_detail_to_bottom();
+    }
+
+    pub fn set_search_results(
+        &mut self,
+        query: String,
+        results: Vec<SearchResult>,
+        has_more: bool,
+        reset_selection: bool,
+    ) {
+        self.snapshot.search_query = Some(query);
+        self.snapshot.search_results = results;
+        self.snapshot.search_has_more = has_more;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.route = Route::Search;
+        self.ui.active_pane = ActivePane::Detail;
+        if reset_selection {
+            self.ui.search_selected = 0;
+            self.reset_detail_scroll();
+        } else {
+            self.ui.search_selected = self
+                .ui
+                .search_selected
+                .min(self.snapshot.search_results.len().saturating_sub(1));
+        }
+    }
+
+}

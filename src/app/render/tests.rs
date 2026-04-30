@@ -1,0 +1,1026 @@
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod tests {
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        buffer::{Buffer, Cell},
+    };
+
+    use crate::service::{
+        Channel, CommentItem, Conversation, ConversationMessage, Role, SearchKind, SearchResult,
+        ThreadItem,
+    };
+
+    use super::*;
+
+    #[test]
+    fn message_created_at_uses_relative_then_absolute_labels() {
+        let now = OffsetDateTime::parse(
+            "2026-04-30T12:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+
+        assert_eq!(
+            format_message_created_at_at("2026-04-30T11:59:35Z", now).as_deref(),
+            Some("just now")
+        );
+        assert_eq!(
+            format_message_created_at_at("2026-04-30T11:55:00Z", now).as_deref(),
+            Some("5m ago")
+        );
+        assert_eq!(
+            format_message_created_at_at("2026-04-30T09:00:00Z", now).as_deref(),
+            Some("3h ago")
+        );
+        assert_eq!(
+            format_message_created_at_at("2026-04-20T09:08:00Z", now).as_deref(),
+            Some("Apr 20, 2026 09:08 UTC")
+        );
+    }
+
+    #[test]
+    fn render_message_body_applies_inline_markdown_styles() {
+        let lines = render_message_body("A **bold** *em* `code` ~~gone~~", 80);
+
+        assert_eq!(styled_lines_text(&lines), "A bold em code gone");
+        assert!(!styled_lines_text(&lines).contains("**"));
+        assert!(
+            run_for_text(&lines, "bold")
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert!(
+            run_for_text(&lines, "em")
+                .style
+                .add_modifier
+                .contains(Modifier::ITALIC)
+        );
+        assert_eq!(run_for_text(&lines, "code").style.fg, Some(theme::SUBTLE));
+        assert!(
+            run_for_text(&lines, "gone")
+                .style
+                .add_modifier
+                .contains(Modifier::CROSSED_OUT)
+        );
+    }
+
+    #[test]
+    fn render_message_body_shows_link_destinations() {
+        let lines = render_message_body(
+            "[OpenAI](https://openai.com) and <https://example.com>",
+            120,
+        );
+
+        assert_eq!(
+            styled_lines_text(&lines),
+            "OpenAI (https://openai.com) and https://example.com"
+        );
+        assert!(
+            run_for_text(&lines, "OpenAI")
+                .style
+                .add_modifier
+                .contains(Modifier::UNDERLINED)
+        );
+        assert_eq!(
+            run_for_text(&lines, " (https://openai.com)").style.fg,
+            Some(theme::MUTED)
+        );
+        assert_eq!(
+            styled_lines_text(&lines)
+                .matches("https://example.com")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn render_message_body_autolinks_bare_urls() {
+        let lines = render_message_body("hey https://wow.com, ok", 80);
+
+        assert_eq!(styled_lines_text(&lines), "hey https://wow.com, ok");
+        let url = run_for_text(&lines, "https://wow.com");
+        assert!(url.style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_eq!(url.link_url.as_deref(), Some("https://wow.com"));
+        assert_eq!(run_for_text(&lines, ", ok").link_url, None);
+    }
+
+    #[test]
+    fn render_message_body_preserves_style_when_wrapping() {
+        let lines = render_message_body("**abcdefgh**", 4);
+
+        assert_eq!(styled_lines_text(&lines), "abcd\nefgh");
+        assert!(
+            run_for_text(&lines, "abcd")
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert!(
+            run_for_text(&lines, "efgh")
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn render_message_body_keeps_block_markdown_literal() {
+        let lines = render_message_body("# heading\n- item", 80);
+
+        assert_eq!(styled_lines_text(&lines), "# heading\n- item");
+        assert_eq!(
+            run_for_text(&lines, "# heading").style,
+            theme::message_body()
+        );
+        assert_eq!(run_for_text(&lines, "- item").style, theme::message_body());
+    }
+
+    #[test]
+    fn render_empty_main_at_common_sizes() {
+        for (width, height) in [(80, 24), (100, 32), (140, 40)] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let account = Account {
+                id: "a".to_string(),
+                username: "owner".to_string(),
+                display_name: "Owner".to_string(),
+                role: Role::Owner,
+                activated: true,
+            };
+            let mut ui = UiState::default();
+            terminal
+                .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert!(format!("{buffer:?}").contains("sshoosh"));
+        }
+    }
+
+    #[test]
+    fn autocomplete_descriptions_align_after_long_command_names() {
+        let backend = TestBackend::new(90, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.composer.autocomplete.open = true;
+        ui.composer.autocomplete.items = vec![
+            super::super::state::AutocompleteItem {
+                replacement_range: 0..7,
+                replacement: "/invite".to_string(),
+                label: "/invite".to_string(),
+                detail: String::new(),
+                preview: "Create an invite code".to_string(),
+                accept_on_enter: false,
+                accept_on_tab: true,
+            },
+            super::super::state::AutocompleteItem {
+                replacement_range: 0..14,
+                replacement: "/channel topic ".to_string(),
+                label: "/channel topic".to_string(),
+                detail: "[#channel] topic".to_string(),
+                preview: "Set a channel topic".to_string(),
+                accept_on_enter: true,
+                accept_on_tab: true,
+            },
+        ];
+
+        terminal
+            .draw(|frame| draw_autocomplete(frame, Rect::new(0, 12, 90, 3), &mut ui))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let invite_description =
+            position_for_text(buffer, 90, 16, "Create an invite code").expect("invite description");
+        let topic_description =
+            position_for_text(buffer, 90, 16, "Set a channel topic").expect("topic description");
+
+        assert_eq!(invite_description.0, topic_description.0);
+    }
+
+    #[test]
+    fn topbar_and_pane_headers_use_compact_aligned_layout() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 1,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "wow".to_string(),
+                body: "Body".to_string(),
+                author: "owner".to_string(),
+                comment_count: 0,
+                last_comment_index: 0,
+                unread_count: 0,
+                last_activity_at: Some("now".to_string()),
+                created_at: "2026-04-30T00:00:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer.cell((9, 0)).expect("active label").symbol(), "#");
+        assert_eq!(buffer.cell((0, 1)).expect("top divider").symbol(), "─");
+        assert_eq!(buffer.cell((38, 1)).expect("top connector").symbol(), "┬");
+        assert_eq!(buffer.cell((79, 1)).expect("top divider").symbol(), "─");
+        assert_eq!(buffer.cell((38, 2)).expect("pane divider").symbol(), "│");
+        assert_eq!(buffer.cell((38, 18)).expect("pane divider").symbol(), "│");
+        assert_eq!(buffer.cell((0, 19)).expect("bottom divider").symbol(), "─");
+        assert_eq!(
+            buffer.cell((38, 19)).expect("bottom connector").symbol(),
+            "┴"
+        );
+        assert_eq!(buffer.cell((79, 19)).expect("bottom divider").symbol(), "─");
+        assert_eq!(buffer.cell((1, 3)).expect("workspace header").symbol(), "C");
+        assert_eq!(buffer.cell((40, 3)).expect("detail header").symbol(), "w");
+    }
+
+    #[test]
+    fn invite_code_uses_modal_without_covering_topbar() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(super::super::state::Banner::modal_ok("Invite code: abc123"));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("sshoosh"));
+        assert!(rendered.contains("Invite code"));
+        assert!(rendered.contains("abc123"));
+    }
+
+    #[test]
+    fn search_results_and_pagination_prompts_render() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            search_query: Some("deploy".to_string()),
+            search_results: vec![SearchResult {
+                kind: SearchKind::Thread,
+                label: "Deploy notes".to_string(),
+                context: "#general".to_string(),
+                snippet: "deploy window at noon".to_string(),
+                channel_id: Some("general".to_string()),
+                thread_id: Some("thread".to_string()),
+                conversation_id: None,
+            }],
+            search_has_more: true,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Search;
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("Search: deploy"));
+        assert!(rendered.contains("Deploy notes"));
+        assert!(rendered.contains("More results available"));
+    }
+
+    #[test]
+    fn thread_history_prompt_renders_when_comments_are_truncated() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 501,
+                last_comment_index: 501,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2026-04-30T00:00:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            comments_has_more: true,
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("Older comments available"));
+    }
+
+    #[test]
+    fn toast_banner_renders_box_at_bottom_right_without_covering_topbar() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(super::super::state::Banner::ok("Selection copied"));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("sshoosh"));
+        assert!(!row_text(buffer, width, 0).contains("Selection copied"));
+
+        let (text_x, text_y) =
+            position_for_text(buffer, width, height, "Selection copied").unwrap();
+        let bottom_bar_top = height.saturating_sub(bottombar_height(&ui));
+        assert!(text_x > width / 2);
+        assert!(text_y < bottom_bar_top);
+        assert!(text_y >= bottom_bar_top.saturating_sub(5));
+
+        let top_left = buffer
+            .cell((text_x.saturating_sub(2), text_y.saturating_sub(1)))
+            .expect("toast top-left border");
+        assert_eq!(top_left.symbol(), "┌");
+        assert_eq!(top_left.fg, theme::OK);
+    }
+
+    #[test]
+    fn error_toast_uses_error_coloring() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState::default();
+        ui.banner = Some(super::super::state::Banner::err("refresh failed"));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (text_x, text_y) = position_for_text(buffer, width, height, "refresh failed").unwrap();
+        let text = buffer.cell((text_x, text_y)).expect("toast text");
+        let border = buffer
+            .cell((text_x.saturating_sub(2), text_y.saturating_sub(1)))
+            .expect("toast border");
+
+        assert_eq!(text.fg, theme::ERROR);
+        assert!(text.modifier.contains(Modifier::BOLD));
+        assert_eq!(border.symbol(), "┌");
+        assert_eq!(border.fg, theme::ERROR);
+    }
+
+    #[test]
+    fn workspace_section_headers_do_not_use_item_style() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![
+                Channel {
+                    id: "general".to_string(),
+                    slug: "general".to_string(),
+                    name: "general".to_string(),
+                    visibility: "public".to_string(),
+                    topic: None,
+                    unread_count: 0,
+                },
+                Channel {
+                    id: "party".to_string(),
+                    slug: "party".to_string(),
+                    name: "party".to_string(),
+                    visibility: "public".to_string(),
+                    topic: None,
+                    unread_count: 0,
+                },
+            ],
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "alice".to_string(),
+                last_message_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            selected_channel_id: Some("general".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let channels = cell_for_text(buffer, width, height, "Channels");
+        assert_eq!(channels.fg, theme::ACCENT);
+        assert!(channels.modifier.contains(Modifier::BOLD));
+
+        let dms = cell_for_text(buffer, width, height, "DMs");
+        assert_eq!(dms.fg, theme::SUBTLE);
+        assert!(dms.modifier.contains(Modifier::BOLD));
+
+        let channel_item = cell_for_text(buffer, width, height, "#party");
+        assert_eq!(channel_item.fg, theme::MUTED);
+        assert!(!channel_item.modifier.contains(Modifier::BOLD));
+
+        let dm_item = cell_for_text(buffer, width, height, "@alice");
+        assert_eq!(dm_item.fg, theme::MUTED);
+        assert!(!dm_item.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn private_channels_use_subtle_privacy_badge() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![
+                Channel {
+                    id: "general".to_string(),
+                    slug: "general".to_string(),
+                    name: "general".to_string(),
+                    visibility: "public".to_string(),
+                    topic: None,
+                    unread_count: 0,
+                },
+                Channel {
+                    id: "super".to_string(),
+                    slug: "super".to_string(),
+                    name: "super".to_string(),
+                    visibility: "private".to_string(),
+                    topic: None,
+                    unread_count: 0,
+                },
+            ],
+            selected_channel_id: Some("super".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("super".to_string());
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..height)
+            .map(|y| row_text(buffer, width, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(channel_label("private", "super"), "#super · private");
+        assert!(row_text(buffer, width, 0).contains("#super"));
+        assert!(row_text(buffer, width, 0).contains("private"));
+        assert!(rendered.contains("#super"));
+        assert!(rendered.contains("private"));
+        assert!(!rendered.contains("🔒"));
+        assert!(!rendered.contains("◆super"));
+        assert_eq!(channel_privacy_badge("public"), "");
+        assert_eq!(channel_privacy_badge("private"), " · private");
+    }
+
+    #[test]
+    fn workspace_thread_rows_are_single_line_and_truncated() {
+        let backend = TestBackend::new(42, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "A very long thread title that should be clipped".to_string(),
+                body: "Body".to_string(),
+                author: "owner".to_string(),
+                comment_count: 3,
+                last_comment_index: 3,
+                unread_count: 0,
+                last_activity_at: Some("2026-04-30T00:00:00Z".to_string()),
+                created_at: "2026-04-30T00:00:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::List;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("A very long thread"));
+        assert!(rendered.contains("..."));
+        assert!(!rendered.contains("@owner"));
+        assert!(!rendered.contains("3 comments"));
+        assert!(!rendered.contains("2026-04-30"));
+        assert!(!rendered.contains(">"));
+        let channel_cell = buffer.cell((1, 4)).expect("channel cell");
+        assert_eq!(channel_cell.symbol(), "#");
+        assert_eq!(channel_cell.fg, theme::TEXT);
+        assert!(channel_cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn render_dm_messages_with_scannable_rows() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "alice".to_string(),
+                last_message_index: 2,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: Some("Hi Alice".to_string()),
+                muted_until: None,
+                saved_at: None,
+            }],
+            conversation_messages: vec![
+                ConversationMessage {
+                    id: "m1".to_string(),
+                    author: "alice".to_string(),
+                    obj_index: 1,
+                    body: "Hello owner".to_string(),
+                    created_at: "2020-01-02T03:04:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+                ConversationMessage {
+                    id: "m2".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 2,
+                    body: "Hi Alice".to_string(),
+                    created_at: "2020-01-02T03:05:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+            ],
+            selected_conversation_id: Some("dm".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Dms;
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("@alice"));
+        assert!(rendered.contains("@owner"));
+        assert!(rendered.contains("Jan 2, 2020 03:04 UTC"));
+        assert!(!rendered.contains(" you ·"));
+        assert!(!rendered.contains("· #"));
+        assert!(rendered.contains("Hello owner"));
+        assert!(rendered.contains("Hi Alice"));
+        assert!(!rendered.contains("●"));
+        assert!(!rendered.contains("Replies"));
+    }
+
+    #[test]
+    fn render_thread_detail_uses_thread_title_header() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "channel".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 1,
+                last_comment_index: 2,
+                unread_count: 0,
+                last_activity_at: Some("now".to_string()),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            comments: vec![CommentItem {
+                id: "comment".to_string(),
+                author: "alice".to_string(),
+                obj_index: 2,
+                body: "Looks good".to_string(),
+                created_at: "2020-01-02T03:05:00Z".to_string(),
+                edited_at: None,
+                reactions: String::new(),
+            }],
+            selected_channel_id: Some("channel".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("channel".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("Deploy notes"));
+        assert!(!rendered.contains("Detail"));
+    }
+
+    #[test]
+    fn render_populates_hit_map_for_workspace_detail_and_composer() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 0,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+
+        assert!(matches!(
+            ui.hit_map.hit(1, 4).map(|region| region.target),
+            Some(HitTarget::WorkspaceChannel(id)) if id == "general"
+        ));
+        assert!(matches!(
+            ui.hit_map.hit(1, 5).map(|region| region.target),
+            Some(HitTarget::WorkspaceThread(id)) if id == "thread"
+        ));
+        assert!(matches!(
+            ui.hit_map.hit(40, 4).map(|region| region.target),
+            Some(HitTarget::DetailScroll)
+        ));
+        assert!(matches!(
+            ui.hit_map.hit(3, 21).map(|region| region.target),
+            Some(HitTarget::ComposerInput { .. })
+        ));
+    }
+
+    #[test]
+    fn selection_overlay_extracts_text_and_marks_cells() {
+        let backend = TestBackend::new(20, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.selection.range = Some(SelectionRange {
+            start: Position { x: 0, y: 0 },
+            end: Position { x: 4, y: 0 },
+        });
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new("hello world\nsecond"), frame.area());
+                apply_selection(frame, &mut ui);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(ui.selection.text, "hello");
+        assert_eq!(
+            buffer.cell((0, 0)).expect("selected cell").bg,
+            theme::ACCENT
+        );
+        assert_eq!(
+            buffer.cell((4, 0)).expect("selected cell").bg,
+            theme::ACCENT
+        );
+        assert_ne!(
+            buffer.cell((5, 0)).expect("unselected cell").bg,
+            theme::ACCENT
+        );
+    }
+
+    #[test]
+    fn copied_selection_extracts_text_without_marking_cells() {
+        let backend = TestBackend::new(20, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.selection.range = Some(SelectionRange {
+            start: Position { x: 0, y: 0 },
+            end: Position { x: 4, y: 0 },
+        });
+        ui.selection.copy_requested = true;
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new("hello world\nsecond"), frame.area());
+                apply_selection(frame, &mut ui);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(ui.selection.text, "hello");
+        assert_ne!(buffer.cell((0, 0)).expect("copied cell").bg, theme::ACCENT);
+        assert_ne!(buffer.cell((4, 0)).expect("copied cell").bg, theme::ACCENT);
+    }
+
+    fn styled_lines_text(lines: &[Vec<StyledRun>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.iter().map(|run| run.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn run_for_text<'a>(lines: &'a [Vec<StyledRun>], text: &str) -> &'a StyledRun {
+        lines
+            .iter()
+            .flat_map(|line| line.iter())
+            .find(|run| run.text.contains(text))
+            .unwrap_or_else(|| panic!("could not find styled run containing {text:?}"))
+    }
+
+    fn cell_for_text<'a>(buffer: &'a Buffer, width: u16, height: u16, text: &str) -> &'a Cell {
+        let Some((x, y)) = position_for_text(buffer, width, height, text) else {
+            panic!("could not find {text:?}");
+        };
+        buffer.cell((x, y)).expect("cell")
+    }
+
+    fn position_for_text(
+        buffer: &Buffer,
+        width: u16,
+        height: u16,
+        text: &str,
+    ) -> Option<(u16, u16)> {
+        for y in 0..height {
+            let row = row_text(buffer, width, y);
+            if let Some(byte_x) = row.find(text) {
+                let x = row[..byte_x].chars().count() as u16;
+                return Some((x, y));
+            }
+        }
+        None
+    }
+
+    fn row_text(buffer: &Buffer, width: u16, y: u16) -> String {
+        let mut row = String::new();
+        for x in 0..width {
+            row.push_str(buffer.cell((x, y)).expect("cell").symbol());
+        }
+        row
+    }
+
+    #[test]
+    fn render_dm_detail_uses_scroll_offset_for_messages() {
+        let backend = TestBackend::new(100, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "alice".to_string(),
+                last_message_index: 3,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            conversation_messages: vec![
+                ConversationMessage {
+                    id: "m1".to_string(),
+                    author: "alice".to_string(),
+                    obj_index: 1,
+                    body: "First message".to_string(),
+                    created_at: "2020-01-02T03:04:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+                ConversationMessage {
+                    id: "m2".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 2,
+                    body: "Second message".to_string(),
+                    created_at: "2020-01-02T03:05:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+                ConversationMessage {
+                    id: "m3".to_string(),
+                    author: "alice".to_string(),
+                    obj_index: 3,
+                    body: "Third message".to_string(),
+                    created_at: "2020-01-02T03:06:00Z".to_string(),
+                    edited_at: None,
+                    reactions: String::new(),
+                },
+            ],
+            selected_conversation_id: Some("dm".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Dms;
+        ui.active_pane = ActivePane::Detail;
+        ui.detail_scroll
+            .set_offset(ratatui::layout::Position { x: 0, y: 2 });
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(!rendered.contains("First message"));
+        assert!(rendered.contains("Second message"));
+        assert!(rendered.contains("Third message"));
+    }
+
+    #[test]
+    fn render_multiline_composer_input() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+        };
+        let mut ui = UiState {
+            mode: UiMode::Compose,
+            ..UiState::default()
+        };
+        ui.composer.buffer = "hello\nworld".to_string();
+        ui.composer.cursor = ui.composer.buffer.len();
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("hello"));
+        assert!(rendered.contains("world"));
+        assert!(rendered.contains("shift-enter newline"));
+    }
+}
