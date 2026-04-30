@@ -123,6 +123,13 @@ pub fn message_body() -> Style {
     Style::default().fg(TEXT).bg(CARD)
 }
 
+pub fn message_mention() -> Style {
+    Style::default()
+        .fg(MENTION)
+        .bg(CARD)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn message_link() -> Style {
     Style::default()
         .fg(ACCENT_SOFT)
@@ -164,4 +171,3 @@ pub fn message_gutter(color: Color, bg: Color) -> Style {
 pub fn message_separator() -> Style {
     Style::default().fg(MESSAGE_SEPARATOR).bg(PANEL)
 }
-

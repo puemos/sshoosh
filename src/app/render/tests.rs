@@ -88,6 +88,69 @@ mod cases {
     }
 
     #[test]
+    fn render_message_body_highlights_only_valid_mentions() {
+        let valid_mentions = vec!["shyalter".to_string()];
+        let lines =
+            render_message_body_with_mentions("asd a@ @shyalter @missing", 80, &valid_mentions);
+
+        assert_eq!(styled_lines_text(&lines), "asd a@ @shyalter @missing");
+        assert_eq!(
+            run_for_text(&lines, "@shyalter").style.fg,
+            Some(theme::MENTION)
+        );
+        assert_eq!(run_for_text(&lines, "asd a@ ").style.fg, Some(theme::TEXT));
+        assert_eq!(
+            run_for_text(&lines, " @missing").style.fg,
+            Some(theme::TEXT)
+        );
+    }
+
+    #[test]
+    fn render_message_body_highlights_mentions_case_insensitively() {
+        let valid_mentions = vec!["shyalter".to_string()];
+        let lines = render_message_body_with_mentions("hey @ShyAlter", 80, &valid_mentions);
+
+        assert_eq!(
+            run_for_text(&lines, "@ShyAlter").style.fg,
+            Some(theme::MENTION)
+        );
+    }
+
+    #[test]
+    fn render_message_body_highlights_mentions_next_to_punctuation() {
+        let valid_mentions = vec!["alice".to_string()];
+        let lines = render_message_body_with_mentions("ping (@alice), ok", 80, &valid_mentions);
+
+        assert_eq!(styled_lines_text(&lines), "ping (@alice), ok");
+        assert_eq!(
+            run_for_text(&lines, "@alice").style.fg,
+            Some(theme::MENTION)
+        );
+        assert_eq!(run_for_text(&lines, "), ok").style.fg, Some(theme::TEXT));
+    }
+
+    #[test]
+    fn render_message_body_keeps_mentions_out_of_links_and_code() {
+        let valid_mentions = vec!["alice".to_string()];
+        let lines = render_message_body_with_mentions(
+            "hi [@alice](https://example.com) `@alice` @alice",
+            120,
+            &valid_mentions,
+        );
+        let mention_runs = runs_for_text(&lines, "@alice");
+
+        assert_eq!(mention_runs.len(), 3);
+        assert!(
+            mention_runs[0]
+                .style
+                .add_modifier
+                .contains(Modifier::UNDERLINED)
+        );
+        assert_eq!(mention_runs[1].style.fg, Some(theme::SUBTLE));
+        assert_eq!(mention_runs[2].style.fg, Some(theme::MENTION));
+    }
+
+    #[test]
     fn render_message_body_preserves_style_when_wrapping() {
         let lines = render_message_body("**abcdefgh**", 4);
 
@@ -1501,6 +1564,14 @@ mod cases {
             .flat_map(|line| line.iter())
             .find(|run| run.text.contains(text))
             .unwrap_or_else(|| panic!("could not find styled run containing {text:?}"))
+    }
+
+    fn runs_for_text<'a>(lines: &'a [Vec<StyledRun>], text: &str) -> Vec<&'a StyledRun> {
+        lines
+            .iter()
+            .flat_map(|line| line.iter())
+            .filter(|run| run.text.contains(text))
+            .collect()
     }
 
     fn cell_for_text<'a>(buffer: &'a Buffer, width: u16, height: u16, text: &str) -> &'a Cell {

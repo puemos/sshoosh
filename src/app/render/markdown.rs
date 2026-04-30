@@ -37,11 +37,20 @@ pub(crate) struct LinkState {
     label: String,
 }
 
+#[cfg(test)]
 pub(crate) fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun>> {
+    render_message_body_with_mentions(body, width, &[])
+}
+
+pub(crate) fn render_message_body_with_mentions(
+    body: &str,
+    width: usize,
+    valid_mentions: &[String],
+) -> Vec<Vec<StyledRun>> {
     let width = width.max(1);
     let mut wrapped = Vec::new();
     for raw in body.lines() {
-        let runs = parse_inline_markdown(raw);
+        let runs = parse_inline_markdown(raw, valid_mentions);
         wrapped.extend(wrap_styled_runs(runs, width));
     }
 
@@ -51,9 +60,9 @@ pub(crate) fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun
     wrapped
 }
 
-pub(crate) fn parse_inline_markdown(line: &str) -> Vec<StyledRun> {
+pub(crate) fn parse_inline_markdown(line: &str, valid_mentions: &[String]) -> Vec<StyledRun> {
     if should_render_literal_line(line) {
-        return literal_runs(line);
+        return literal_runs_with_mentions(line, valid_mentions);
     }
 
     let mut options = Options::empty();
@@ -82,19 +91,19 @@ pub(crate) fn parse_inline_markdown(line: &str) -> Vec<StyledRun> {
                     append_link_target(&mut runs, &link);
                 }
             }
-            Event::Text(text) => append_markdown_text(&mut runs, &mut state, &text),
+            Event::Text(text) => append_markdown_text(&mut runs, &mut state, &text, valid_mentions),
             Event::Code(text) => {
                 append_markdown_run(&mut runs, &mut state, &text, theme::message_code())
             }
             Event::SoftBreak | Event::HardBreak => {
-                append_markdown_text(&mut runs, &mut state, " ");
+                append_markdown_text(&mut runs, &mut state, " ", valid_mentions);
             }
-            _ => return literal_runs(line),
+            _ => return literal_runs_with_mentions(line, valid_mentions),
         }
     }
 
     if runs.is_empty() {
-        literal_runs(line)
+        literal_runs_with_mentions(line, valid_mentions)
     } else {
         runs
     }
@@ -104,9 +113,10 @@ pub(crate) fn append_markdown_text(
     runs: &mut Vec<StyledRun>,
     state: &mut InlineMarkdownState,
     text: &str,
+    valid_mentions: &[String],
 ) {
     if state.links.is_empty() {
-        append_text_with_bare_links(runs, state, text);
+        append_text_with_bare_links(runs, state, text, valid_mentions);
     } else {
         let style = markdown_text_style(state);
         append_markdown_run(runs, state, text, style);
@@ -117,18 +127,76 @@ pub(crate) fn append_text_with_bare_links(
     runs: &mut Vec<StyledRun>,
     state: &InlineMarkdownState,
     mut text: &str,
+    valid_mentions: &[String],
 ) {
     while let Some((start, end)) = find_bare_link(text) {
         if start > 0 {
-            push_run(runs, &text[..start], markdown_text_style(state), None);
+            push_text_with_mentions(runs, &text[..start], state, valid_mentions);
         }
         let url = &text[start..end];
         push_run(runs, url, markdown_link_style(state), Some(url));
         text = &text[end..];
     }
     if !text.is_empty() {
+        push_text_with_mentions(runs, text, state, valid_mentions);
+    }
+}
+
+pub(crate) fn push_text_with_mentions(
+    runs: &mut Vec<StyledRun>,
+    mut text: &str,
+    state: &InlineMarkdownState,
+    valid_mentions: &[String],
+) {
+    while let Some((start, end)) = find_valid_mention(text, valid_mentions) {
+        if start > 0 {
+            push_run(runs, &text[..start], markdown_text_style(state), None);
+        }
+        push_run(runs, &text[start..end], markdown_mention_style(state), None);
+        text = &text[end..];
+    }
+    if !text.is_empty() {
         push_run(runs, text, markdown_text_style(state), None);
     }
+}
+
+pub(crate) fn find_valid_mention(text: &str, valid_mentions: &[String]) -> Option<(usize, usize)> {
+    for (idx, ch) in text.char_indices() {
+        if ch != '@' || !is_mention_boundary(text, idx) {
+            continue;
+        }
+        let mut end = idx + ch.len_utf8();
+        for (offset, next) in text[end..].char_indices() {
+            if is_mention_name_char(next) {
+                end = idx + ch.len_utf8() + offset + next.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end == idx + ch.len_utf8() {
+            continue;
+        }
+        let username = &text[idx + ch.len_utf8()..end];
+        if valid_mentions
+            .iter()
+            .any(|valid| valid.eq_ignore_ascii_case(username))
+        {
+            return Some((idx, end));
+        }
+    }
+    None
+}
+
+pub(crate) fn is_mention_boundary(text: &str, start: usize) -> bool {
+    start == 0
+        || text[..start]
+            .chars()
+            .last()
+            .is_some_and(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+}
+
+pub(crate) fn is_mention_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
 }
 
 pub(crate) fn append_markdown_run(
@@ -179,6 +247,10 @@ pub(crate) fn markdown_text_style(state: &InlineMarkdownState) -> Style {
 
 pub(crate) fn markdown_link_style(state: &InlineMarkdownState) -> Style {
     apply_markdown_modifiers(theme::message_link(), state)
+}
+
+pub(crate) fn markdown_mention_style(state: &InlineMarkdownState) -> Style {
+    apply_markdown_modifiers(theme::message_mention(), state)
 }
 
 pub(crate) fn apply_markdown_modifiers(mut style: Style, state: &InlineMarkdownState) -> Style {
@@ -275,6 +347,20 @@ pub(crate) fn push_run(
 
 pub(crate) fn literal_runs(line: &str) -> Vec<StyledRun> {
     vec![StyledRun::new(line, theme::message_body())]
+}
+
+pub(crate) fn literal_runs_with_mentions(line: &str, valid_mentions: &[String]) -> Vec<StyledRun> {
+    if valid_mentions.is_empty() {
+        return literal_runs(line);
+    }
+    let mut runs = Vec::new();
+    push_text_with_mentions(
+        &mut runs,
+        line,
+        &InlineMarkdownState::default(),
+        valid_mentions,
+    );
+    runs
 }
 
 pub(crate) fn should_render_literal_line(line: &str) -> bool {

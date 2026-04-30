@@ -60,6 +60,11 @@ pub(crate) fn message_card<'a>(
         .is_some_and(|username| username.eq_ignore_ascii_case(author));
     let surface = message_surface(kind, body);
     let gutter = theme::message_gutter(message_gutter(kind, is_current_user, body), surface);
+    let valid_mentions: Vec<String> = snapshot
+        .users
+        .iter()
+        .map(|user| user.username.to_ascii_lowercase())
+        .collect();
     let mut lines = Vec::new();
     let mut links = Vec::new();
 
@@ -77,7 +82,10 @@ pub(crate) fn message_card<'a>(
         ),
     ));
 
-    for (row_idx, row) in render_message_body(body, width).into_iter().enumerate() {
+    for (row_idx, row) in render_message_body_with_mentions(body, width, &valid_mentions)
+        .into_iter()
+        .enumerate()
+    {
         let row_idx = row_idx.saturating_add(2);
         let mut col = MESSAGE_PREFIX_WIDTH;
         let mut content = Vec::new();
