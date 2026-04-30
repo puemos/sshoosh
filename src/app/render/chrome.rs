@@ -54,7 +54,7 @@ pub(crate) fn draw_startup_splash(frame: &mut Frame, area: Rect, ui: &mut UiStat
     frame.render_widget(Block::default().style(theme::elevated_panel()), area);
     ui.hit_map.push(area, HitTarget::BannerModal);
 
-    let mut text = sshoosh_splash_logo_lines(area);
+    let mut text = sshoosh_splash_logo_lines();
     text.extend([
         Line::from(""),
         Line::from(Span::styled(
@@ -91,7 +91,7 @@ pub(crate) fn sshoosh_logo_lines() -> Vec<Line<'static>> {
     logo_lines(LOGO)
 }
 
-fn sshoosh_splash_logo_lines(area: Rect) -> Vec<Line<'static>> {
+fn sshoosh_splash_logo_lines() -> Vec<Line<'static>> {
     const STARTUP: &[&str] = &[
         "                          ▗▄▄▖                                  ▗▄▄▄",
         "                          ███▘                                  ███▘",
@@ -105,17 +105,7 @@ fn sshoosh_splash_logo_lines(area: Rect) -> Vec<Line<'static>> {
         " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘  ▝▀▀▘",
     ];
 
-    let startup_logo_fits = {
-        let width = STARTUP.iter().map(|line| line.len()).max().unwrap_or(0) as u16;
-        let height = STARTUP.len() as u16 + 2;
-        width <= area.width && height <= area.height
-    };
-
-    if startup_logo_fits {
-        logo_lines(STARTUP)
-    } else {
-        sshoosh_logo_lines()
-    }
+    logo_lines(STARTUP)
 }
 
 fn logo_lines(lines: &'static [&'static str]) -> Vec<Line<'static>> {

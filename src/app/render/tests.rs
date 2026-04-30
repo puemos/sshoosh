@@ -332,6 +332,33 @@ mod cases {
     }
 
     #[test]
+    fn startup_splash_keeps_full_logo_on_smaller_screens() {
+        let width = 70;
+        let height = 18;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let mut ui = UiState::default();
+        ui.startup_splash_until = Some(Instant::now() + Duration::from_secs(1));
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+
+        assert!(rendered.contains("▗▄▄▖"));
+        assert!(!rendered.contains("_##"));
+    }
+
+    #[test]
     fn list_modal_renders_invites_as_aligned_rows() {
         let width = 100;
         let height = 30;
