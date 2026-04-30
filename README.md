@@ -82,6 +82,36 @@ sudo -u sshoosh env \
 
 On Railway, set a fixed internal port such as `SSHOOSH_PORT=2222`, mount persistent storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`, then enable TCP Proxy to that port and connect to the generated proxy host and port. On Fly, use a persistent volume such as `/data`, set `SSHOOSH_DB=/data/sshoosh.sqlite` and `SSHOOSH_SERVER_KEY=/data/sshoosh_server_ed25519`, and configure a raw TCP pass-through service with no HTTP/TLS handlers or PROXY protocol in front of `sshoosh`.
 
+## Connection Resilience
+
+`sshoosh` runs over SSH/TCP, so a client cannot resume the exact same TCP session after the network path is broken. Reconnecting is safe: durable chat state lives in the database, and the client will return to the current account after authentication. Unsaved text in the local compose box may be lost if the terminal disconnects.
+
+For laptops, mobile hotspots, tunnels, or NATs that briefly stop passing traffic, configure OpenSSH protocol keepalives on the client. This keeps idle sessions from being closed too aggressively and gives SSH a longer window before it decides the server is unreachable:
+
+```text
+Host sshoosh
+  HostName sshoosh.example.com
+  Port 2222
+  User alice
+  ServerAliveInterval 30
+  ServerAliveCountMax 10
+  TCPKeepAlive no
+```
+
+`ServerAliveInterval` sends encrypted SSH keepalive messages after an idle period, and `ServerAliveCountMax` controls how many unanswered messages are tolerated before SSH exits. The example above waits roughly five minutes before giving up. `TCPKeepAlive no` avoids relying on lower-level TCP keepalives, which can make temporary route loss look like a hard failure.
+
+OpenSSH keepalives do not auto-reconnect after `ssh` exits. If you want a wrapper to retry, use a small loop or `autossh` with OpenSSH keepalives:
+
+```sh
+autossh -M 0 \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o TCPKeepAlive=no \
+  -p 2222 alice@sshoosh.example.com
+```
+
+Mosh is not a direct fit for `sshoosh`: it bootstraps over SSH and then starts `mosh-server` in a normal remote shell, while `sshoosh` is the SSH application itself.
+
 ## Configuration
 
 All flags can also be set with environment variables:
