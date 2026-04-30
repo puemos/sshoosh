@@ -136,7 +136,7 @@ mod cases {
                 .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
                 .unwrap();
             let buffer = terminal.backend().buffer();
-            assert!(format!("{buffer:?}").contains("sshoosh"));
+            assert!(format!("{buffer:?}").contains("Channels"));
         }
     }
 
@@ -271,7 +271,7 @@ mod cases {
     }
 
     #[test]
-    fn invite_code_uses_modal_without_covering_topbar() {
+    fn invite_code_uses_modal_without_covering_main_content() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = Account {
@@ -290,7 +290,6 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
         let rendered = format!("{buffer:?}");
-        assert!(rendered.contains("sshoosh"));
         assert!(rendered.contains("Invite code"));
         assert!(rendered.contains("abc123"));
     }
@@ -556,7 +555,7 @@ mod cases {
     }
 
     #[test]
-    fn toast_banner_renders_elevated_panel_at_bottom_right_without_covering_topbar() {
+    fn toast_banner_renders_elevated_panel_at_bottom_right_without_covering_main_content() {
         let width = 100;
         let height = 30;
         let backend = TestBackend::new(width, height);
@@ -577,7 +576,6 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
         let rendered = format!("{buffer:?}");
-        assert!(rendered.contains("sshoosh"));
         assert!(!row_text(buffer, width, 0).contains("Selection copied"));
 
         let (text_x, text_y) =
@@ -1340,7 +1338,7 @@ mod cases {
 
     #[test]
     fn render_dm_detail_uses_scroll_offset_for_messages() {
-        let backend = TestBackend::new(100, 16);
+        let backend = TestBackend::new(100, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = Account {
             id: "a".to_string(),
