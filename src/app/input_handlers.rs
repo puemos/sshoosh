@@ -368,8 +368,8 @@ impl App {
             Key::Ctrl('e') | Key::End => self.ui.composer.cursor = self.ui.composer.buffer.len(),
             Key::Ctrl('u') => self.ui.composer.clear_before_cursor(),
             Key::Ctrl('k') => self.ui.composer.clear_after_cursor(),
-            Key::Paste(text) => self.ui.composer.insert_str(&text),
-            Key::Char(ch) => self.ui.composer.insert(ch),
+            Key::Paste(text) => self.ui.composer.insert_str(&sanitize_composer_paste(&text)),
+            Key::Char(ch) if !ch.is_control() => self.ui.composer.insert(ch),
             _ => {}
         }
     }
@@ -471,8 +471,8 @@ impl App {
                 self.prefill_last_own_comment_edit();
                 return;
             }
-            Key::Paste(text) => self.ui.composer.insert_str(&text.replace('\r', "\n")),
-            Key::Char(ch) => self.ui.composer.insert(ch),
+            Key::Paste(text) => self.ui.composer.insert_str(&sanitize_composer_paste(&text)),
+            Key::Char(ch) if !ch.is_control() => self.ui.composer.insert(ch),
             _ => {}
         }
         self.update_completions();

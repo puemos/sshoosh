@@ -18,7 +18,7 @@ pub(crate) async fn load_user_presence(
             UserPresence {
                 connected: active_account_ids.contains(&account_id),
                 username: row.get("username"),
-                display_name: row.get("display_name"),
+                display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
                 last_seen_at: row.get("last_seen_at"),
             }
         })
@@ -61,10 +61,12 @@ pub(crate) async fn load_notifications(
             channel_id: row.get("channel_id"),
             channel_slug: row.get("channel_slug"),
             thread_id: row.get("thread_id"),
-            thread_title: row.get("thread_title"),
+            thread_title: row
+                .get::<Option<String>>("thread_title")
+                .map(|title| sanitize_single_line_text(&title)),
             conversation_id: row.get("conversation_id"),
-            title: row.get("title"),
-            body: row.get("body"),
+            title: sanitize_single_line_text(&row.get::<String>("title")),
+            body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             read_at: row.get("read_at"),
         })
@@ -114,7 +116,9 @@ pub(crate) async fn load_channels(
             slug: row.get("slug"),
             name: row.get("name"),
             visibility: row.get("visibility"),
-            topic: row.get("topic"),
+            topic: row
+                .get::<Option<String>>("topic")
+                .map(|topic| sanitize_single_line_text(&topic)),
             unread_count: row.get("unread_count"),
         })
         .collect())
@@ -167,8 +171,8 @@ pub(crate) async fn load_threads(
         .map(|row| ThreadItem {
             id: row.get("id"),
             channel_id: row.get("channel_id"),
-            title: row.get("title"),
-            body: row.get("body"),
+            title: sanitize_single_line_text(&row.get::<String>("title")),
+            body: sanitize_stored_text(&row.get::<String>("body")),
             author: row.get("author"),
             comment_count: row.get("comment_count"),
             last_comment_index: row.get("last_comment_index"),
@@ -180,7 +184,7 @@ pub(crate) async fn load_threads(
             pinned_at: row.get("pinned_at"),
             muted_until: row.get("muted_until"),
             saved_at: row.get("saved_at"),
-            reactions: row.get("reactions"),
+            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
         })
         .collect())
 }
@@ -223,10 +227,10 @@ pub(crate) async fn load_comments(
             id: row.get("id"),
             author: row.get("author"),
             obj_index: row.get("obj_index"),
-            body: row.get("body"),
+            body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
-            reactions: row.get("reactions"),
+            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
         })
         .collect();
     let has_more = comments.len() > limit as usize;
@@ -284,7 +288,9 @@ pub(crate) async fn load_conversations(
             last_message_index: row.get("last_message_index"),
             unread_count: row.get("unread_count"),
             last_activity_at: row.get("last_activity_at"),
-            last_message_preview: row.get("last_message_preview"),
+            last_message_preview: row
+                .get::<Option<String>>("last_message_preview")
+                .map(|preview| sanitize_single_line_text(&preview)),
             muted_until: row.get("muted_until"),
             saved_at: row.get("saved_at"),
         })
@@ -355,7 +361,9 @@ pub(crate) async fn load_dm_sidebar(
             last_message_index: row.get("last_message_index"),
             unread_count: row.get("unread_count"),
             last_activity_at: row.get("last_activity_at"),
-            last_message_preview: row.get("last_message_preview"),
+            last_message_preview: row
+                .get::<Option<String>>("last_message_preview")
+                .map(|preview| sanitize_single_line_text(&preview)),
             muted_until: row.get("muted_until"),
             saved_at: row.get("saved_at"),
         })
@@ -400,10 +408,10 @@ pub(crate) async fn load_conversation_messages(
             id: row.get("id"),
             author: row.get("author"),
             obj_index: row.get("obj_index"),
-            body: row.get("body"),
+            body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
-            reactions: row.get("reactions"),
+            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
         })
         .collect();
     let has_more = messages.len() > limit as usize;

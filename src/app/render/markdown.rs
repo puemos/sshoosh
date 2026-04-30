@@ -8,16 +8,18 @@ pub(crate) struct StyledRun {
 
 impl StyledRun {
     fn new(text: impl Into<String>, style: Style) -> Self {
+        let text = text.into();
         Self {
-            text: text.into(),
+            text: sanitize_terminal_visible_text(&text),
             style,
             link_url: None,
         }
     }
 
     fn link(text: impl Into<String>, style: Style, link_url: impl Into<String>) -> Self {
+        let text = text.into();
         Self {
-            text: text.into(),
+            text: sanitize_terminal_visible_text(&text),
             style,
             link_url: Some(link_url.into()),
         }
@@ -327,7 +329,7 @@ pub(crate) fn push_run(
     style: Style,
     link_url: Option<&str>,
 ) {
-    let text = text.into();
+    let text = sanitize_terminal_visible_text(&text.into());
     if text.is_empty() {
         return;
     }
@@ -423,4 +425,19 @@ pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<St
 pub(crate) fn is_openable_link_url(url: &str) -> bool {
     let url = url.trim();
     url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")
+}
+
+pub(crate) fn sanitize_terminal_visible_text(value: &str) -> String {
+    value
+        .chars()
+        .filter_map(|ch| {
+            if ch == '\n' || ch == '\r' || ch == '\t' {
+                Some(' ')
+            } else if ch.is_control() {
+                None
+            } else {
+                Some(ch)
+            }
+        })
+        .collect()
 }

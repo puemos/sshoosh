@@ -182,6 +182,15 @@ mod cases {
     }
 
     #[test]
+    fn render_message_body_strips_terminal_controls() {
+        let lines = render_message_body("hello\u{1b}]0;owned\u{7}\tthere", 80);
+
+        assert_eq!(styled_lines_text(&lines), "hello]0;owned there");
+        assert!(!styled_lines_text(&lines).contains('\u{1b}'));
+        assert!(!styled_lines_text(&lines).contains('\u{7}'));
+    }
+
+    #[test]
     fn message_card_renders_metadata_before_body_and_wraps_for_gutter_padding() {
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
@@ -190,6 +199,8 @@ mod cases {
         let card = message_card(
             &snapshot,
             MessageKind::Comment,
+            HeaderMode::Full,
+            None,
             "owner",
             Some("2020-01-02T03:04:00Z"),
             Some("2020-01-02T03:05:00Z"),
@@ -198,7 +209,9 @@ mod cases {
             4,
         );
 
-        assert_eq!(card.height(), 6);
+        // header + 3 body rows (abcd, efgh, ij) — reactions on header,
+        // edited inline (or dropped if width too tight)
+        assert_eq!(card.height(), 4);
         assert_eq!(card.link_count(), 0);
     }
 
@@ -1207,13 +1220,16 @@ mod cases {
                 .cell((root_body_x, root_body_y))
                 .expect("root body")
                 .bg,
-            theme::MESSAGE_CARD_ROOT
+            theme::MESSAGE_CARD
         );
         let root_gutter = buffer
             .cell((root_body_x.saturating_sub(3), root_body_y))
             .expect("root gutter");
         assert_eq!(root_gutter.symbol(), "▏");
-        assert_eq!(root_gutter.fg, theme::MESSAGE_ROOT_GUTTER);
+        assert_eq!(
+            root_gutter.fg,
+            theme::author_color_avoiding("owner", None)
+        );
 
         let (alice_x, alice_y) =
             position_for_text(buffer, width, height, "Looks good").expect("alice body");
@@ -1221,24 +1237,29 @@ mod cases {
             buffer.cell((alice_x, alice_y)).expect("alice body").bg,
             theme::MESSAGE_CARD
         );
+        let owner_color_root = theme::author_color_avoiding("owner", None);
+        let alice_color = theme::author_color_avoiding("alice", Some(owner_color_root));
         assert_eq!(
             buffer
                 .cell((alice_x.saturating_sub(3), alice_y))
                 .expect("alice gutter")
                 .fg,
-            theme::MESSAGE_GUTTER
+            alice_color
         );
-        assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("edited"));
+        // (edited) renders inline at end of the last body line; reactions sit
+        // right-aligned in the header line one row above the body.
+        assert!(row_text(buffer, width, alice_y).contains("(edited)"));
         assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("ok 2"));
 
         let (owner_x, owner_y) =
             position_for_text(buffer, width, height, "I would").expect("owner body");
+        let owner_comment_color = theme::author_color_avoiding("owner", Some(alice_color));
         assert_eq!(
             buffer
                 .cell((owner_x.saturating_sub(3), owner_y))
                 .expect("owner gutter")
                 .fg,
-            theme::MESSAGE_CURRENT_USER_GUTTER
+            owner_comment_color
         );
 
         let (error_x, error_y) =

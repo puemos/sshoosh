@@ -159,7 +159,9 @@ impl ServerState {
                 slug: row.get("slug"),
                 name: row.get("name"),
                 visibility: row.get("visibility"),
-                topic: row.get("topic"),
+                topic: row
+                    .get::<Option<String>>("topic")
+                    .map(|topic| sanitize_single_line_text(&topic)),
                 joined: row.get::<i64>("joined") != 0,
                 archived: row.get::<Option<String>>("archived_at").is_some(),
             })
@@ -254,6 +256,7 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         let channel = load_channel_by_slug_tx(&mut tx, slug).await?;
         ensure_can_manage_channel(&mut tx, actor_id, &channel).await?;
+        let topic = sanitize_single_line_text(topic);
         let topic = topic.trim();
         let topic = (!topic.is_empty()).then_some(topic);
         let now = now();

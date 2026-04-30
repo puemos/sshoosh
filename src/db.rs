@@ -375,9 +375,15 @@ impl Database {
         if self.kind == DatabaseKind::Remote {
             bail!("remote libSQL/Turso backup is not supported by sshoosh yet");
         }
+        let path = Path::new(out);
+        anyhow::ensure!(
+            !path.exists(),
+            "backup output already exists; refusing to overwrite {out}"
+        );
         let escaped = out.replace('\'', "''");
         self.execute_batch_unchecked(&format!("VACUUM INTO '{escaped}'"))
             .await?;
+        secure_local_database_files(path)?;
         Ok(())
     }
 

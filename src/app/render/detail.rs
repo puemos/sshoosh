@@ -1,5 +1,34 @@
 use super::*;
-use crate::time_format::{calendar_day_key, calendar_day_label, format_human_timestamp};
+use crate::time_format::{
+    calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
+};
+use ratatui::style::Color;
+
+const GROUP_GAP_SECONDS: i64 = 5 * 60;
+
+fn should_continue_group(
+    prev_author: Option<&str>,
+    prev_kind: Option<MessageKind>,
+    prev_created_at: Option<&str>,
+    author: &str,
+    kind: MessageKind,
+    created_at: Option<&str>,
+) -> bool {
+    let Some(prev_author) = prev_author else {
+        return false;
+    };
+    if !prev_author.eq_ignore_ascii_case(author) {
+        return false;
+    }
+    if matches!(prev_kind, Some(MessageKind::ThreadRoot)) || matches!(kind, MessageKind::ThreadRoot)
+    {
+        return false;
+    }
+    let (Some(prev), Some(curr)) = (prev_created_at, created_at) else {
+        return true;
+    };
+    matches!(seconds_between(prev, curr), Some(gap) if gap.abs() <= GROUP_GAP_SECONDS)
+}
 pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if matches!(ui.route, Route::Dms) {
         draw_dm_detail(frame, area, snapshot, ui);
@@ -63,12 +92,21 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         }
         append_plain_item(&mut items, &mut content_row, ListItem::new(""));
 
-        let mut last_day = None;
+        let mut last_day: Option<String> = None;
+        let mut prev_author: Option<String> = None;
+        let mut prev_kind: Option<MessageKind> = None;
+        let mut prev_created_at: Option<String> = None;
+        let mut prev_color: Option<Color> = None;
+        let mut first_message = true;
+
         if !thread.body.trim().is_empty() {
             last_day = calendar_day_key(&thread.created_at);
+            let resolved_color = theme::author_color_avoiding(&thread.author, prev_color);
             let card = message_card(
                 snapshot,
                 MessageKind::ThreadRoot,
+                HeaderMode::Full,
+                prev_color,
                 &thread.author,
                 Some(&thread.created_at),
                 thread.edited_at.as_deref(),
@@ -83,27 +121,53 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &mut content_row,
                 card,
             );
+            prev_author = Some(thread.author.clone());
+            prev_kind = Some(MessageKind::ThreadRoot);
+            prev_created_at = Some(thread.created_at.clone());
+            prev_color = Some(resolved_color);
+            first_message = false;
         }
-        for (idx, comment) in snapshot.comments.iter().enumerate() {
+        for comment in snapshot.comments.iter() {
             let day = calendar_day_key(&comment.created_at);
-            let day_changed = day.is_some() && day != last_day;
-            if idx == 0 {
-                append_plain_item(&mut items, &mut content_row, message_gap());
-            }
+            let day_changed = day.is_some() && last_day.is_some() && day != last_day;
+            let continue_group = !day_changed
+                && should_continue_group(
+                    prev_author.as_deref(),
+                    prev_kind,
+                    prev_created_at.as_deref(),
+                    &comment.author,
+                    MessageKind::Comment,
+                    Some(&comment.created_at),
+                );
             if day_changed && let Some(label) = calendar_day_label(&comment.created_at) {
+                append_plain_item(&mut items, &mut content_row, message_gap());
                 append_plain_item(
                     &mut items,
                     &mut content_row,
                     date_divider(&label, message_width),
                 );
                 append_plain_item(&mut items, &mut content_row, message_gap());
+            } else if !continue_group && !first_message {
+                append_plain_item(&mut items, &mut content_row, message_gap());
             }
             if day.is_some() {
                 last_day = day;
             }
+            let header_mode = if continue_group {
+                HeaderMode::Suppressed
+            } else {
+                HeaderMode::Full
+            };
+            // For follow-ups inside a group, keep the same color as prev_color
+            // (no avoidance — it's the same author). For new groups, avoid the
+            // previous group's color so two stacked groups don't share a hue.
+            let avoid = if continue_group { None } else { prev_color };
+            let resolved_color = theme::author_color_avoiding(&comment.author, avoid);
             let card = message_card(
                 snapshot,
                 MessageKind::Comment,
+                header_mode,
+                avoid,
                 &comment.author,
                 Some(&comment.created_at),
                 comment.edited_at.as_deref(),
@@ -122,9 +186,11 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &mut content_row,
                 card,
             );
-            if idx + 1 < snapshot.comments.len() {
-                append_plain_item(&mut items, &mut content_row, message_gap());
-            }
+            prev_author = Some(comment.author.clone());
+            prev_kind = Some(MessageKind::Comment);
+            prev_created_at = Some(comment.created_at.clone());
+            prev_color = Some(resolved_color);
+            first_message = false;
         }
     } else {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
@@ -183,11 +249,14 @@ pub(crate) fn draw_search_detail(
             items.push(ListItem::new(vec![
                 Line::from(vec![
                     Span::styled(format!("{:<8}", kind), theme::muted()),
-                    Span::styled(result.label.clone(), style),
+                    Span::styled(sanitize_terminal_visible_text(&result.label), style),
                 ]),
                 Line::from(vec![
-                    Span::styled(format!("{}  ", result.context), theme::muted()),
-                    Span::raw(result.snippet.clone()),
+                    Span::styled(
+                        format!("{}  ", sanitize_terminal_visible_text(&result.context)),
+                        theme::muted(),
+                    ),
+                    Span::raw(sanitize_terminal_visible_text(&result.snippet)),
                 ]),
                 Line::from(""),
             ]));
@@ -229,10 +298,16 @@ pub(crate) fn draw_thread_header(
     };
     let mut spans = Vec::new();
     if let Some(slug) = channel_slug {
-        spans.push(Span::styled(format!("#{slug}"), title_style));
+        spans.push(Span::styled(
+            format!("#{}", sanitize_terminal_visible_text(slug)),
+            title_style,
+        ));
         spans.push(Span::styled(" › ", theme::muted()));
     }
-    spans.push(Span::styled(title.to_string(), title_style));
+    spans.push(Span::styled(
+        sanitize_terminal_visible_text(title),
+        title_style,
+    ));
     if let Some(meta) = meta.filter(|value| !value.is_empty()) {
         let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
         let remaining = (area.width as usize).saturating_sub(used);
@@ -268,7 +343,11 @@ pub(crate) fn draw_pane_header(frame: &mut Frame, area: Rect, title: &str, style
     }
     let header = Rect::new(area.x, area.y, area.width, 1);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(title.to_string(), style))).style(theme::panel()),
+        Paragraph::new(Line::from(Span::styled(
+            sanitize_terminal_visible_text(title),
+            style,
+        )))
+        .style(theme::panel()),
         header,
     );
 }
@@ -392,13 +471,34 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         );
         return;
     } else {
+        let mut prev_author: Option<String> = None;
+        let mut prev_kind: Option<MessageKind> = None;
+        let mut prev_created_at: Option<String> = None;
+        let mut prev_color: Option<Color> = None;
         for (idx, message) in snapshot.conversation_messages.iter().enumerate() {
-            if idx > 0 {
+            let continue_group = should_continue_group(
+                prev_author.as_deref(),
+                prev_kind,
+                prev_created_at.as_deref(),
+                &message.author,
+                MessageKind::Dm,
+                Some(&message.created_at),
+            );
+            if idx > 0 && !continue_group {
                 append_plain_item(&mut items, &mut content_row, message_gap());
             }
+            let header_mode = if continue_group {
+                HeaderMode::Suppressed
+            } else {
+                HeaderMode::Full
+            };
+            let avoid = if continue_group { None } else { prev_color };
+            let resolved_color = theme::author_color_avoiding(&message.author, avoid);
             let card = message_card(
                 snapshot,
                 MessageKind::Dm,
+                header_mode,
+                avoid,
                 &message.author,
                 Some(&message.created_at),
                 message.edited_at.as_deref(),
@@ -417,6 +517,10 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 &mut content_row,
                 card,
             );
+            prev_author = Some(message.author.clone());
+            prev_kind = Some(MessageKind::Dm);
+            prev_created_at = Some(message.created_at.clone());
+            prev_color = Some(resolved_color);
         }
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);

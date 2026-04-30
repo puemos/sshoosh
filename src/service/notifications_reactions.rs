@@ -114,10 +114,12 @@ impl ServerState {
                 channel_id: row.get("channel_id"),
                 channel_slug: row.get("channel_slug"),
                 thread_id: row.get("thread_id"),
-                thread_title: row.get("thread_title"),
+                thread_title: row
+                    .get::<Option<String>>("thread_title")
+                    .map(|title| sanitize_single_line_text(&title)),
                 conversation_id: row.get("conversation_id"),
-                title: row.get("title"),
-                body: row.get("body"),
+                title: sanitize_single_line_text(&row.get::<String>("title")),
+                body: sanitize_stored_text(&row.get::<String>("body")),
                 created_at: row.get("created_at"),
                 read_at: row.get("read_at"),
             })

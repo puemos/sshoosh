@@ -24,6 +24,12 @@ pub(crate) fn calendar_day_key(value: &str) -> Option<String> {
         .ok()
 }
 
+pub(crate) fn seconds_between(earlier: &str, later: &str) -> Option<i64> {
+    let a = OffsetDateTime::parse(earlier, &Rfc3339).ok()?;
+    let b = OffsetDateTime::parse(later, &Rfc3339).ok()?;
+    Some((b - a).whole_seconds())
+}
+
 pub(crate) fn format_human_timestamp(value: &str) -> String {
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
     format_human_timestamp_at(value, OffsetDateTime::now_utc(), offset)

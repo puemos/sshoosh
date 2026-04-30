@@ -10,7 +10,9 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         let thread = load_thread_meta_tx(&mut tx, thread_id).await?;
         ensure_can_modify_thread(&mut tx, actor_id, &thread, false).await?;
+        let title = sanitize_single_line_text(title);
         let title = title.trim();
+        let body = sanitize_stored_text(body);
         let body = body.trim();
         anyhow::ensure!(!title.is_empty(), "Thread title is required");
         anyhow::ensure!(!body.is_empty(), "Thread body is required");
@@ -75,6 +77,7 @@ impl ServerState {
         let mut tx = begin(self.db.write_pool()).await?;
         let thread = load_thread_meta_tx(&mut tx, thread_id).await?;
         ensure_can_modify_thread(&mut tx, actor_id, &thread, false).await?;
+        let title = sanitize_single_line_text(title);
         let title = title.trim();
         anyhow::ensure!(!title.is_empty(), "Thread title is required");
         let next_key = normalize_name_key(title);

@@ -188,10 +188,6 @@ pub(crate) enum KeysCommand {
         key: String,
         label: String,
     },
-    Attach {
-        key: String,
-        username: String,
-    },
     Revoke {
         key: String,
     },

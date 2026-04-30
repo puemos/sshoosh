@@ -1,5 +1,4 @@
 use super::*;
-pub(crate) const MAX_PENDING_ACCOUNTS: i64 = 64;
 
 impl ServerState {
     pub async fn new(db: Database) -> anyhow::Result<Self> {
@@ -27,7 +26,6 @@ impl ServerState {
     ) -> anyhow::Result<Account> {
         let mut tx = self.db.write_pool().begin().await?;
         let now = now();
-        cleanup_pending_accounts_tx(&mut tx).await?;
 
         if let Some(row) = query(
             "SELECT a.id, a.username, a.display_name, a.role, a.activated_at, a.pending_username
@@ -43,20 +41,16 @@ impl ServerState {
         {
             let account_id: String = row.get("id");
             let activated = row.get::<Option<String>>("activated_at").is_some();
-            if activated {
-                query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
-                    .bind(&now)
-                    .bind(&now)
-                    .bind(&account_id)
-                    .execute(&mut tx)
-                    .await?;
-            } else {
-                query("UPDATE accounts SET updated_at = ? WHERE id = ?")
-                    .bind(&now)
-                    .bind(&account_id)
-                    .execute(&mut tx)
-                    .await?;
-            }
+            anyhow::ensure!(
+                activated,
+                "Pending SSH keys are not supported; reconnect as username+<token> or ask an owner/admin to add your key"
+            );
+            query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(&now)
+                .bind(&account_id)
+                .execute(&mut tx)
+                .await?;
             query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
                 .bind(&now)
                 .bind(fingerprint)
@@ -68,71 +62,9 @@ impl ServerState {
 
         let Some((desired_username, token)) = login_username.split_once('+') else {
             let username = normalize_username(login_username)?;
-            let existing_pending: Option<String> = query_scalar(
-                "SELECT id
-                 FROM accounts
-                 WHERE activated_at IS NULL
-                   AND disabled_at IS NULL
-                   AND pending_username IS NOT NULL
-                   AND lower(pending_username) = lower(?)
-                 LIMIT 1",
-            )
-            .bind(&username)
-            .fetch_optional(&mut tx)
-            .await?;
-            anyhow::ensure!(
-                existing_pending.is_none(),
-                "An activation is already pending for this username"
+            bail!(
+                "Invite token required for unknown SSH keys; connect as {username}+<token> or ask an owner/admin to add your key"
             );
-            let pending_count: i64 = query_scalar(
-                "SELECT COUNT(*)
-                 FROM accounts
-                 WHERE activated_at IS NULL
-                   AND disabled_at IS NULL
-                   AND pending_username IS NOT NULL",
-            )
-            .fetch_one(&mut tx)
-            .await?;
-            anyhow::ensure!(
-                pending_count < MAX_PENDING_ACCOUNTS,
-                "Too many pending account activations; ask an owner/admin for an invite token"
-            );
-            let account_id = id();
-            let internal_username = pending_internal_username(&account_id);
-            query(
-                "INSERT INTO accounts
-                 (id, username, display_name, role, settings_json, created_at, updated_at, pending_username)
-                 VALUES (?, ?, ?, 'member', '{}', ?, ?, ?)",
-            )
-            .bind(&account_id)
-            .bind(&internal_username)
-            .bind(&username)
-            .bind(&now)
-            .bind(&now)
-            .bind(&username)
-            .execute(&mut tx)
-            .await?;
-            query(
-                "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at, last_used_at)
-                 VALUES (?, ?, ?, ?, 'default', ?, ?)",
-            )
-            .bind(id())
-            .bind(&account_id)
-            .bind(fingerprint)
-            .bind(public_key)
-            .bind(&now)
-            .bind(&now)
-            .execute(&mut tx)
-            .await?;
-            tx.commit().await?;
-            return Ok(Account {
-                id: account_id,
-                username: internal_username,
-                display_name: username.clone(),
-                role: Role::Member,
-                activated: false,
-                pending_username: Some(username),
-            });
         };
         let username = normalize_username(desired_username)?;
         let token_hash = code_hash(token);
@@ -672,24 +604,4 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         send_dm(self.db.write_pool(), &actor_id, &conversation_id, &body).await
     }
-}
-
-pub(crate) async fn cleanup_pending_accounts_tx(tx: &mut DbTransaction) -> anyhow::Result<()> {
-    let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(7))
-        .format(&time::format_description::well_known::Rfc3339)?;
-    query(
-        "DELETE FROM accounts
-         WHERE activated_at IS NULL
-           AND pending_username IS NOT NULL
-           AND created_at < ?",
-    )
-    .bind(cutoff)
-    .execute(tx)
-    .await?;
-    Ok(())
-}
-
-fn pending_internal_username(account_id: &str) -> String {
-    let compact = account_id.replace('-', "");
-    format!("pending-{}", &compact[..24])
 }

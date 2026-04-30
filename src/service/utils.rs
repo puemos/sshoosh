@@ -84,8 +84,9 @@ pub(crate) async fn search_visible(
             "comment" => SearchKind::Comment,
             _ => SearchKind::Dm,
         };
-        let title: String = row.get("title");
-        let body: String = row.get("body");
+        let title = sanitize_single_line_text(&row.get::<String>("title"));
+        let body = sanitize_stored_text(&row.get::<String>("body"));
+        let context = sanitize_single_line_text(&row.get::<String>("context"));
         let label = match kind {
             SearchKind::Thread => title.clone(),
             SearchKind::Comment => format!("{title} comment"),
@@ -94,7 +95,7 @@ pub(crate) async fn search_visible(
         results.push(SearchResult {
             kind,
             label,
-            context: row.get("context"),
+            context,
             snippet: snippet(&format!("{title}\n{body}"), search),
             channel_id: row.get("channel_id"),
             thread_id: row.get("thread_id"),
@@ -111,10 +112,12 @@ pub(crate) fn account_from_row(row: DbRow) -> anyhow::Result<Account> {
     Ok(Account {
         id: row.get("id"),
         username: row.get("username"),
-        display_name: row.get("display_name"),
+        display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
         role: Role::from_db(row.get::<String>("role").as_str())?,
         activated: activated.is_some(),
-        pending_username: row.get("pending_username"),
+        pending_username: row
+            .get::<Option<String>>("pending_username")
+            .map(|username| sanitize_single_line_text(&username)),
     })
 }
 
@@ -123,7 +126,9 @@ pub(crate) fn ssh_key_summary_from_row(row: DbRow) -> SshKeySummary {
         id: row.get("id"),
         username: row.get("username"),
         fingerprint: row.get("fingerprint"),
-        label: row.get("label"),
+        label: row
+            .get::<Option<String>>("label")
+            .map(|label| sanitize_single_line_text(&label)),
         created_at: row.get("created_at"),
         last_used_at: row.get("last_used_at"),
         revoked_at: row.get("revoked_at"),
@@ -247,6 +252,30 @@ pub(crate) fn normalize_name_key(input: &str) -> String {
         }
     }
     out.trim_matches('-').to_string()
+}
+
+pub(crate) fn sanitize_stored_text(input: &str) -> String {
+    input
+        .chars()
+        .filter_map(|ch| match ch {
+            '\r' => Some('\n'),
+            '\n' => Some('\n'),
+            '\t' => Some(' '),
+            ch if ch.is_control() => None,
+            ch => Some(ch),
+        })
+        .collect()
+}
+
+pub(crate) fn sanitize_single_line_text(input: &str) -> String {
+    input
+        .chars()
+        .filter_map(|ch| match ch {
+            '\r' | '\n' | '\t' => Some(' '),
+            ch if ch.is_control() => None,
+            ch => Some(ch),
+        })
+        .collect()
 }
 
 pub(crate) fn id() -> String {

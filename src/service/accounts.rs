@@ -25,7 +25,7 @@ impl ServerState {
                 Ok(AccountSummary {
                     id: row.get("id"),
                     username: row.get("username"),
-                    display_name: row.get("display_name"),
+                    display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
                     role: Role::from_db(row.get::<String>("role").as_str())?,
                     activated: row.get::<Option<String>>("activated_at").is_some(),
                     disabled: row.get::<Option<String>>("disabled_at").is_some(),
@@ -187,6 +187,7 @@ impl ServerState {
         username: &str,
         display_name: &str,
     ) -> anyhow::Result<()> {
+        let display_name = sanitize_single_line_text(display_name);
         let display_name = display_name.trim();
         anyhow::ensure!(
             (1..=80).contains(&display_name.chars().count()),
@@ -265,6 +266,10 @@ impl ServerState {
         };
         let now = now();
         let key_id = id();
+        let label = label
+            .map(sanitize_single_line_text)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         query(
             "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at)
              VALUES (?, ?, ?, ?, ?, ?)",
@@ -273,7 +278,7 @@ impl ServerState {
         .bind(&target.id)
         .bind(&parsed.fingerprint)
         .bind(&parsed.public_key)
-        .bind(label.map(str::trim).filter(|value| !value.is_empty()))
+        .bind(label.as_deref())
         .bind(&now)
         .execute(&mut tx)
         .await
@@ -300,10 +305,7 @@ impl ServerState {
             id: key_id,
             username: target.username,
             fingerprint: parsed.fingerprint,
-            label: label
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned),
+            label,
             created_at: now,
             last_used_at: None,
             revoked_at: None,
@@ -343,6 +345,7 @@ impl ServerState {
             ensure_can_manage_account(&actor, &target)?;
         }
         let key_id: String = row.get("id");
+        let label = sanitize_single_line_text(label);
         let label = label.trim();
         let label = (!label.is_empty()).then_some(label);
         query("UPDATE ssh_keys SET label = ? WHERE id = ?")
@@ -356,71 +359,6 @@ impl ServerState {
             "ssh_key.labeled",
             Some(&key_id),
             serde_json::json!({"username": target.username, "label": label}),
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn attach_ssh_key(
-        &self,
-        actor_id: &str,
-        key: &str,
-        username: &str,
-    ) -> anyhow::Result<()> {
-        let mut tx = begin(self.db.write_pool()).await?;
-        require_admin_tx(&mut tx, actor_id).await?;
-        let target = load_account_by_username_tx(&mut tx, username).await?;
-        let row = query(
-            "SELECT k.id, k.account_id, a.username AS old_username
-             FROM ssh_keys k
-             JOIN accounts a ON a.id = k.account_id
-             WHERE (k.id LIKE ? OR k.fingerprint = ?) AND k.revoked_at IS NULL",
-        )
-        .bind(format!("{}%", key.trim()))
-        .bind(key.trim())
-        .fetch_optional(&mut tx)
-        .await?;
-        let Some(row) = row else {
-            bail!("Active SSH key not found");
-        };
-        let key_id: String = row.get("id");
-        let old_account_id: String = row.get("account_id");
-        query("UPDATE ssh_keys SET account_id = ? WHERE id = ?")
-            .bind(&target.id)
-            .bind(&key_id)
-            .execute(&mut tx)
-            .await?;
-        let remaining_keys: i64 = query_scalar(
-            "SELECT COUNT(*) FROM ssh_keys WHERE account_id = ? AND revoked_at IS NULL",
-        )
-        .bind(&old_account_id)
-        .fetch_one(&mut tx)
-        .await?;
-        if remaining_keys == 0 {
-            let now = now();
-            query("UPDATE accounts SET disabled_at = ?, updated_at = ? WHERE id = ? AND activated_at IS NULL")
-                .bind(&now)
-                .bind(&now)
-                .bind(&old_account_id)
-                .execute(&mut tx)
-                .await?;
-        }
-        insert_audit(
-            &mut tx,
-            Some(actor_id),
-            "ssh_key.attached",
-            Some(&key_id),
-            serde_json::json!({"from_account_id": old_account_id, "to_username": target.username}),
-        )
-        .await?;
-        insert_event(
-            &mut tx,
-            None,
-            None,
-            None,
-            "ssh_key.attached",
-            serde_json::json!({"key_id": key_id, "account_id": target.id}),
         )
         .await?;
         tx.commit().await?;

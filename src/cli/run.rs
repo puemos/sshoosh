@@ -1,4 +1,6 @@
 use super::*;
+use std::io::Write;
+
 use sshoosh::output::cli::{
     format_accounts, format_audit, format_channel_members, format_channels, format_invites,
     format_keys, format_notifications,
@@ -158,10 +160,6 @@ pub async fn run() -> anyhow::Result<()> {
                     state.label_ssh_key(&actor_id, &key, &label).await?;
                     println!("labeled key {key}");
                 }
-                KeysCommand::Attach { key, username } => {
-                    state.attach_ssh_key(&actor_id, &key, &username).await?;
-                    println!("attached key {key} to @{username}");
-                }
                 KeysCommand::Revoke { key } => {
                     state.revoke_ssh_key(&actor_id, &key).await?;
                     println!("revoked key {key}");
@@ -295,7 +293,7 @@ pub async fn run() -> anyhow::Result<()> {
             let content = state
                 .export_workspace(&actor_id, format, include_audit)
                 .await?;
-            fs::write(&out, content).with_context(|| format!("writing export {out}"))?;
+            write_sensitive_file(&out, content)?;
             println!("export written: {out}");
             Ok(())
         }
@@ -422,5 +420,48 @@ pub(crate) fn parse_export_format(format: &str) -> anyhow::Result<service::Expor
         "json" => Ok(service::ExportFormat::Json),
         "markdown" | "md" => Ok(service::ExportFormat::Markdown),
         value => anyhow::bail!("format must be json or markdown, got {value}"),
+    }
+}
+
+fn write_sensitive_file(path: &str, content: String) -> anyhow::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("creating sensitive export {path}"))?;
+    file.write_all(content.as_bytes())
+        .with_context(|| format!("writing export {path}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("securing export permissions {path}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod sensitive_file_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn write_sensitive_file_uses_owner_only_creation_and_refuses_overwrite() {
+        let path =
+            std::env::temp_dir().join(format!("sshoosh-export-{}.json", uuid::Uuid::now_v7()));
+        let path = path.to_string_lossy().to_string();
+
+        write_sensitive_file(&path, "secret".to_string()).expect("write sensitive file");
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let err = write_sensitive_file(&path, "again".to_string()).expect_err("no overwrite");
+        assert!(err.to_string().contains("creating sensitive export"));
+
+        let _ = fs::remove_file(path);
     }
 }

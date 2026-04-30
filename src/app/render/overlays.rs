@@ -550,8 +550,8 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
     }
 
     let max_width = area.width.saturating_sub(4).clamp(1, 56);
-    let text_width = banner
-        .text
+    let text = sanitize_terminal_visible_text(&banner.text);
+    let text_width = text
         .chars()
         .count()
         .saturating_add(6)
@@ -571,7 +571,7 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
     if max_height < 3 {
         return;
     }
-    let content_lines = wrapped_line_count(&banner.text, content_width);
+    let content_lines = wrapped_line_count(&text, content_width);
     let height = content_lines.saturating_add(2).max(3).min(max_height);
     let x = area.x + area.width.saturating_sub(width.saturating_add(2));
     let y = bottom_bar_top.saturating_sub(height.saturating_add(1));
@@ -584,7 +584,7 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
 
     let inner = elevated_panel(frame, rect, "");
     let glyph = if banner.error { "! " } else { "✓ " };
-    let body = format!("{glyph}{}", banner.text);
+    let body = format!("{glyph}{text}");
     frame.render_widget(
         Paragraph::new(body)
             .style(
@@ -600,6 +600,7 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
 
 pub(crate) fn wrapped_line_count(text: &str, width: usize) -> u16 {
     let width = width.max(1);
+    let text = sanitize_terminal_visible_text(text);
     let lines = text
         .lines()
         .map(|line| line.chars().count().max(1).div_ceil(width))
@@ -633,7 +634,7 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
     } else {
         (
             if banner.error { " Error " } else { " Message " },
-            vec![Line::from(banner.text.clone())],
+            vec![Line::from(sanitize_terminal_visible_text(&banner.text))],
         )
     };
     ui.hit_map.push(modal, HitTarget::BannerModal);
@@ -753,7 +754,10 @@ fn list_modal_line(values: &[String], widths: &[usize], header: bool) -> Line<'s
         if idx > 0 {
             spans.push(Span::raw("  "));
         }
-        let value = values.get(idx).cloned().unwrap_or_default();
+        let value = values
+            .get(idx)
+            .map(|value| sanitize_terminal_visible_text(value))
+            .unwrap_or_default();
         let text = pad_or_truncate(&value, *width);
         let style = if header {
             theme::elevated_muted().add_modifier(Modifier::BOLD)

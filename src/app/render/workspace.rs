@@ -213,9 +213,9 @@ pub(crate) fn unread_badge(count: i64) -> String {
 }
 
 pub(crate) fn truncate_text(value: impl AsRef<str>, max_chars: usize) -> String {
-    let value = value.as_ref();
+    let value = sanitize_terminal_visible_text(value.as_ref());
     if value.chars().count() <= max_chars {
-        return value.to_string();
+        return value;
     }
     if max_chars == 0 {
         return String::new();

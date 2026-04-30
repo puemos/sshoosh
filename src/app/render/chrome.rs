@@ -33,10 +33,16 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
         Line::from(""),
         Line::from(vec![
             Span::styled("Suggested username: ", theme::elevated_muted()),
-            Span::styled(suggested_username.to_string(), theme::elevated_accent()),
+            Span::styled(
+                sanitize_terminal_visible_text(suggested_username),
+                theme::elevated_accent(),
+            ),
         ]),
         Line::from(""),
-        Line::from(format!("> {}", ui.composer.buffer)),
+        Line::from(format!(
+            "> {}",
+            sanitize_terminal_visible_text(&ui.composer.buffer)
+        )),
     ]);
     frame.render_widget(
         Paragraph::new(text)

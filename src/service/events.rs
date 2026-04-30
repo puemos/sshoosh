@@ -44,7 +44,7 @@ pub(crate) fn validate_emoji(emoji: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         !emoji
             .chars()
-            .any(|ch| ch.is_ascii_alphanumeric() || ch.is_ascii_control()),
+            .any(|ch| ch.is_ascii_alphanumeric() || ch.is_control()),
         "Use a Unicode emoji reaction"
     );
     Ok(())
@@ -121,6 +121,9 @@ pub(crate) async fn upsert_search_index_tx(
     mut tx: &mut DbTransaction,
     input: SearchIndexInput<'_>,
 ) -> anyhow::Result<()> {
+    let title = sanitize_single_line_text(input.title);
+    let body = sanitize_stored_text(input.body);
+    let context = sanitize_single_line_text(input.context);
     query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
         .bind(input.kind)
         .bind(input.object_id)
@@ -136,9 +139,9 @@ pub(crate) async fn upsert_search_index_tx(
     .bind(input.channel_id)
     .bind(input.thread_id)
     .bind(input.conversation_id)
-    .bind(input.title)
-    .bind(input.body)
-    .bind(input.context)
+    .bind(&title)
+    .bind(&body)
+    .bind(&context)
     .execute(&mut tx)
     .await?;
     Ok(())
@@ -237,6 +240,8 @@ pub(crate) async fn create_notification_tx(
     }
     let id = id();
     let created_at = now();
+    let title = sanitize_single_line_text(input.title);
+    let body = sanitize_stored_text(input.body);
     query(
         "INSERT INTO notifications
          (id, account_id, actor_account_id, kind, source_kind, source_id, channel_id,
@@ -252,8 +257,8 @@ pub(crate) async fn create_notification_tx(
     .bind(input.channel_id)
     .bind(input.thread_id)
     .bind(input.conversation_id)
-    .bind(input.title)
-    .bind(input.body)
+    .bind(&title)
+    .bind(&body)
     .bind(&created_at)
     .execute(&mut tx)
     .await?;

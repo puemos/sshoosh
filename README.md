@@ -11,10 +11,10 @@
 ```sh
 sshoosh bootstrap-token
 cargo run -- serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER@127.0.0.1"
+ssh -p 2222 "$USER+TOKEN@127.0.0.1"
 ```
 
-Enter the one-time bootstrap token in the setup screen to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys connect as `username@host` and stay blocked in setup until they enter an invite token, or the key can be attached to an existing account by an owner/admin. The legacy `username+token@host` form is still supported. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+Connect as `username+TOKEN@host` with the one-time bootstrap token to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys must also connect as `username+invite-token@host`, or an owner/admin can add a key directly to an existing account. Unknown keys without a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
 ## Quick Deploy
 
@@ -157,7 +157,6 @@ sshoosh users role alice admin
 sshoosh keys list
 sshoosh keys add "ssh-ed25519 AAAA..." --username alice --label laptop
 sshoosh keys label <key-id-or-fingerprint> desktop
-sshoosh keys attach <pending-key-id-or-fingerprint> alice
 sshoosh keys revoke <key-id-or-fingerprint>
 
 sshoosh invites list

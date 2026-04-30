@@ -62,169 +62,16 @@ pub(crate) async fn create_invite_with_options(
 pub(crate) async fn accept_invite(
     pool: &Database,
     account_id: &str,
-    code: &str,
-    username: &str,
+    _code: &str,
+    _username: &str,
 ) -> anyhow::Result<()> {
-    let username = normalize_username(username)?;
     let mut tx = begin(pool).await?;
     let account = load_account_tx(&mut tx, account_id).await?;
     if account.activated {
         tx.commit().await?;
         return Ok(());
     }
-    let now = now();
-    let active_count: i64 = query_scalar(
-        "SELECT COUNT(*)
-         FROM accounts
-         WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
-    )
-    .fetch_one(&mut tx)
-    .await?;
-    let token_hash = code_hash(code.trim());
-    let mut bootstrap_token_id = None;
-    let mut invite_id = None;
-    let role = if active_count == 0 {
-        let token_id: Option<String> = query_scalar(
-            "SELECT id
-             FROM bootstrap_tokens
-             WHERE code_hash = ? AND used_at IS NULL
-             LIMIT 1",
-        )
-        .bind(&token_hash)
-        .fetch_optional(&mut tx)
-        .await?;
-        let Some(token_id) = token_id else {
-            bail!("Bootstrap token is invalid or already used");
-        };
-        bootstrap_token_id = Some(token_id);
-        Role::Owner
-    } else {
-        let invite = query(
-            "SELECT id, role_on_accept
-             FROM invites
-             WHERE code_hash = ?
-               AND accepted_at IS NULL
-               AND revoked_at IS NULL
-               AND (expires_at IS NULL OR expires_at > ?)",
-        )
-        .bind(&token_hash)
-        .bind(&now)
-        .fetch_optional(&mut tx)
-        .await?;
-        let Some(invite) = invite else {
-            bail!("Invite is invalid, expired, or already used");
-        };
-        invite_id = Some(invite.get::<String>("id"));
-        Role::from_db(invite.get::<String>("role_on_accept").as_str())?
-    };
-    let existing: Option<String> =
-        query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
-            .bind(&username)
-            .bind(account_id)
-            .fetch_optional(&mut tx)
-            .await?;
-    anyhow::ensure!(existing.is_none(), "Username is already taken");
-    query(
-        "UPDATE accounts
-         SET username = ?, display_name = ?, role = ?, activated_at = ?, updated_at = ?, pending_username = NULL
-         WHERE id = ?",
-    )
-    .bind(&username)
-    .bind(&username)
-    .bind(role.as_str())
-    .bind(&now)
-    .bind(&now)
-    .bind(account_id)
-    .execute(&mut tx)
-    .await?;
-    if let Some(token_id) = bootstrap_token_id {
-        query(
-            "UPDATE bootstrap_tokens
-             SET used_by_account_id = ?, used_at = ?
-             WHERE id = ? AND used_at IS NULL",
-        )
-        .bind(account_id)
-        .bind(&now)
-        .bind(token_id)
-        .execute(&mut tx)
-        .await?;
-    }
-    if let Some(invite_id) = invite_id {
-        query("UPDATE invites SET accepted_by_account_id = ?, accepted_at = ? WHERE id = ?")
-            .bind(account_id)
-            .bind(&now)
-            .bind(invite_id)
-            .execute(&mut tx)
-            .await?;
-    }
-    let general_id = ensure_general_channel_tx(&mut tx, account_id, &now).await?;
-    query(
-        "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(channel_id, account_id) DO NOTHING",
-    )
-    .bind(general_id)
-    .bind(account_id)
-    .bind(if role == Role::Owner {
-        "owner"
-    } else {
-        "member"
-    })
-    .bind(&now)
-    .execute(&mut tx)
-    .await?;
-    let event_kind = if role == Role::Owner {
-        "account.bootstrapped"
-    } else {
-        "invite.accepted"
-    };
-    insert_event(
-        &mut tx,
-        None,
-        None,
-        None,
-        event_kind,
-        serde_json::json!({"account_id": account_id, "username": username}),
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn ensure_general_channel_tx(
-    tx: &mut DbTransaction,
-    account_id: &str,
-    now: &str,
-) -> anyhow::Result<String> {
-    if let Some(general_id) =
-        query_scalar::<String>("SELECT id FROM channels WHERE slug = 'general'")
-            .fetch_optional(&mut *tx)
-            .await?
-    {
-        return Ok(general_id);
-    }
-    let channel_id = id();
-    query(
-        "INSERT INTO channels
-         (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
-         VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
-    )
-    .bind(&channel_id)
-    .bind(account_id)
-    .bind(now)
-    .bind(now)
-    .execute(&mut *tx)
-    .await?;
-    insert_event(
-        tx,
-        None,
-        None,
-        None,
-        "channel.created",
-        serde_json::json!({"channel_id": channel_id, "slug": "general"}),
-    )
-    .await?;
-    Ok(channel_id)
+    bail!("Invite tokens must be used during SSH login as username+token")
 }
 
 pub(crate) async fn create_channel(
@@ -325,6 +172,7 @@ pub(crate) async fn create_thread(
     channel_id: &str,
     title: &str,
 ) -> anyhow::Result<String> {
+    let title = sanitize_single_line_text(title);
     let title = title.trim();
     anyhow::ensure!(!title.is_empty(), "Thread title is required");
     let body = "";
@@ -414,7 +262,9 @@ pub(crate) async fn add_comment(
     thread_id: &str,
     body: &str,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(!body.trim().is_empty(), "Comment body is required");
+    let body = sanitize_stored_text(body);
+    let body = body.trim();
+    anyhow::ensure!(!body.is_empty(), "Comment body is required");
     let mut tx = begin(pool).await?;
     let row = query(
         "SELECT channel_id, last_comment_index FROM threads WHERE id = ? AND deleted_at IS NULL",
@@ -441,7 +291,7 @@ pub(crate) async fn add_comment(
     .bind(&channel_id)
     .bind(actor_id)
     .bind(next_index)
-    .bind(body.trim())
+    .bind(body)
     .bind(&now)
     .bind(&now)
     .execute(&mut tx)
@@ -488,7 +338,7 @@ pub(crate) async fn add_comment(
             thread_id: Some(thread_id),
             conversation_id: None,
             title: &thread_title,
-            body: body.trim(),
+            body,
             context: &format!("#{channel_slug}"),
         },
     )
@@ -504,7 +354,7 @@ pub(crate) async fn add_comment(
             conversation_id: None,
             obj_index: Some(next_index),
             title: &thread_title,
-            body: body.trim(),
+            body,
         },
     )
     .await?;
@@ -517,7 +367,7 @@ pub(crate) async fn add_comment(
             comment_id: &comment_id,
             obj_index: next_index,
             title: &thread_title,
-            body: body.trim(),
+            body,
         },
     )
     .await?;
@@ -619,7 +469,9 @@ pub(crate) async fn send_dm(
     conversation_id: &str,
     body: &str,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(!body.trim().is_empty(), "Message body is required");
+    let body = sanitize_stored_text(body);
+    let body = body.trim();
+    anyhow::ensure!(!body.is_empty(), "Message body is required");
     let mut tx = begin(pool).await?;
     let is_member: i64 = query_scalar(
         "SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND account_id = ?",
@@ -646,7 +498,7 @@ pub(crate) async fn send_dm(
     .bind(conversation_id)
     .bind(actor_id)
     .bind(next_index)
-    .bind(body.trim())
+    .bind(body)
     .bind(&now)
     .bind(&now)
     .execute(&mut tx)
@@ -674,7 +526,7 @@ pub(crate) async fn send_dm(
             thread_id: None,
             conversation_id: Some(conversation_id),
             title: "DM",
-            body: body.trim(),
+            body,
             context: "DM",
         },
     )
@@ -685,7 +537,7 @@ pub(crate) async fn send_dm(
         conversation_id,
         &message_id,
         next_index,
-        body.trim(),
+        body,
     )
     .await?;
     create_mention_notifications_tx(
@@ -699,7 +551,7 @@ pub(crate) async fn send_dm(
             conversation_id: Some(conversation_id),
             obj_index: Some(next_index),
             title: "DM",
-            body: body.trim(),
+            body,
         },
     )
     .await?;

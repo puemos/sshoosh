@@ -50,3 +50,15 @@ pub(crate) fn cursor_for_display_position(
 
     buffer.len()
 }
+
+pub(crate) fn sanitize_composer_paste(text: &str) -> String {
+    text.chars()
+        .filter_map(|ch| match ch {
+            '\r' => Some('\n'),
+            '\n' => Some('\n'),
+            '\t' => Some(' '),
+            ch if ch.is_control() => None,
+            ch => Some(ch),
+        })
+        .collect()
+}

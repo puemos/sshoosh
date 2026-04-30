@@ -67,7 +67,7 @@ pub(crate) fn draw_bottombar(
         .push(input, HitTarget::ComposerInput { scroll_y });
     let lines = if show_placeholder {
         vec![Line::from(vec![
-            Span::styled(prompt, theme::composer()),
+            Span::styled(sanitize_terminal_visible_text(&prompt), theme::composer()),
             Span::styled(
                 "  Press / for a command, Enter to write…",
                 theme::composer().fg(theme::MUTED),
@@ -75,7 +75,7 @@ pub(crate) fn draw_bottombar(
         ])]
     } else if let Some(hint) = inline_prompt {
         vec![Line::from(vec![
-            Span::styled(prompt, theme::composer()),
+            Span::styled(sanitize_terminal_visible_text(&prompt), theme::composer()),
             Span::styled(
                 hint.placeholder.clone(),
                 theme::composer()
@@ -86,7 +86,12 @@ pub(crate) fn draw_bottombar(
     } else {
         prompt
             .split('\n')
-            .map(|line| Line::from(Span::styled(line.to_string(), theme::composer())))
+            .map(|line| {
+                Line::from(Span::styled(
+                    sanitize_terminal_visible_text(line),
+                    theme::composer(),
+                ))
+            })
             .collect()
     };
     frame.render_widget(

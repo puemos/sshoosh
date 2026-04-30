@@ -504,6 +504,7 @@ pub(crate) async fn update_comment_body(
     obj_index: i64,
     body: &str,
 ) -> anyhow::Result<()> {
+    let body = sanitize_stored_text(body);
     let body = body.trim();
     anyhow::ensure!(!body.is_empty(), "Comment body is required");
     let mut tx = begin(pool).await?;
@@ -657,6 +658,7 @@ pub(crate) async fn update_dm_body(
     obj_index: i64,
     body: &str,
 ) -> anyhow::Result<()> {
+    let body = sanitize_stored_text(body);
     let body = body.trim();
     anyhow::ensure!(!body.is_empty(), "Message body is required");
     let mut tx = begin(pool).await?;

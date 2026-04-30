@@ -44,10 +44,18 @@ pub(crate) enum MessageKind {
     Dm,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HeaderMode {
+    Full,
+    Suppressed,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn message_card<'a>(
     snapshot: &Snapshot,
     kind: MessageKind,
+    header_mode: HeaderMode,
+    avoid_color: Option<Color>,
     author: &str,
     created_at: Option<&str>,
     edited_at: Option<&str>,
@@ -55,12 +63,15 @@ pub(crate) fn message_card<'a>(
     body: &str,
     width: usize,
 ) -> MessageCard<'a> {
-    let is_current_user = snapshot
-        .current_username
-        .as_deref()
-        .is_some_and(|username| username.eq_ignore_ascii_case(author));
-    let surface = message_surface(kind, body);
-    let gutter = theme::message_gutter(message_gutter(kind, is_current_user, body), surface);
+    let _ = snapshot.current_username.as_deref();
+    let surface = message_surface(body);
+    let author_color = theme::author_color_avoiding(author, avoid_color);
+    let gutter_color = if is_error_message(body) {
+        theme::MESSAGE_ERROR_GUTTER
+    } else {
+        author_color
+    };
+    let gutter = theme::message_gutter(gutter_color, surface);
     let valid_mentions: Vec<String> = snapshot
         .users
         .iter()
@@ -68,52 +79,68 @@ pub(crate) fn message_card<'a>(
         .collect();
     let mut lines = Vec::new();
     let mut links = Vec::new();
+    let mut row_idx: usize = 0;
 
-    lines.push(message_card_line(gutter, Vec::new()));
-    lines.push(message_card_line(
-        gutter,
-        message_meta_spans(
-            kind,
-            is_current_user,
-            author,
-            created_at,
-            edited_at,
-            reactions,
-            surface,
-        ),
-    ));
+    if matches!(header_mode, HeaderMode::Full) {
+        lines.push(message_card_line(
+            gutter,
+            header_spans(
+                kind,
+                author,
+                author_color,
+                created_at,
+                reactions,
+                surface,
+                width,
+            ),
+        ));
+        row_idx += 1;
+    }
 
-    for (row_idx, row) in render_message_body_with_mentions(body, width, &valid_mentions)
+    let body_rows: Vec<_> = render_message_body_with_mentions(body, width, &valid_mentions)
         .into_iter()
-        .enumerate()
-    {
-        let row_idx = row_idx.saturating_add(2);
+        .collect();
+    let last_body_idx = body_rows.len().saturating_sub(1);
+    for (idx, row) in body_rows.into_iter().enumerate() {
         let mut col = MESSAGE_PREFIX_WIDTH;
         let mut content = Vec::new();
+        let mut last_visible_chars: usize = 0;
         for run in row {
             let style = run.style.bg(surface);
-            let width = run.text.chars().count().min(u16::MAX as usize) as u16;
+            let chars = run.text.chars().count();
+            let span_width = chars.min(u16::MAX as usize) as u16;
             if let Some(url) = run
                 .link_url
                 .as_ref()
                 .filter(|url| is_openable_link_url(url))
-                && width > 0
+                && span_width > 0
             {
                 links.push(MessageLinkHit {
                     row: row_idx.min(u16::MAX as usize) as u16,
                     col,
-                    width,
+                    width: span_width,
                     url: url.clone(),
                     text: run.text.clone(),
                     style,
                 });
             }
-            col = col.saturating_add(width);
+            col = col.saturating_add(span_width);
+            last_visible_chars = last_visible_chars.saturating_add(chars);
             content.push(Span::styled(run.text, style));
         }
+        // Append "(edited)" inline at end of the last body line.
+        if idx == last_body_idx
+            && edited_at.is_some()
+            && last_visible_chars + 1 + EDITED_TAG.chars().count() <= width
+        {
+            content.push(Span::styled(
+                format!(" {EDITED_TAG}"),
+                theme::message_meta_on(surface),
+            ));
+        }
         lines.push(message_card_line(gutter, content));
+        row_idx += 1;
     }
-    lines.push(message_card_line(gutter, Vec::new()));
 
     MessageCard {
         item: ListItem::new(lines).style(theme::message_card_on(surface)),
@@ -122,62 +149,61 @@ pub(crate) fn message_card<'a>(
     }
 }
 
-fn message_meta_spans<'a>(
+const EDITED_TAG: &str = "(edited)";
+
+#[allow(clippy::too_many_arguments)]
+fn header_spans<'a>(
     kind: MessageKind,
-    is_current_user: bool,
     author: &str,
+    author_color: Color,
     created_at: Option<&str>,
-    edited_at: Option<&str>,
     reactions: Option<&str>,
     surface: Color,
+    width: usize,
 ) -> Vec<Span<'a>> {
-    let mut meta = vec![Span::styled(
-        format!("@{}", author),
-        theme::message_author_on(is_current_user, surface),
-    )];
+    let author_text = format!("@{}", sanitize_terminal_visible_text(author));
+    let author_chars = author_text.chars().count();
+
+    let mut right_parts: Vec<String> = Vec::new();
     if let Some(created_at) = created_at {
-        meta.push(Span::styled(
-            format!(" · {}", format_human_timestamp(created_at)),
-            theme::message_meta_on(surface),
-        ));
+        right_parts.push(format_human_timestamp(created_at));
     }
     if matches!(kind, MessageKind::ThreadRoot) {
-        meta.push(Span::styled(
-            " · thread root",
-            theme::message_meta_on(surface),
-        ));
-    }
-    if edited_at.is_some() {
-        meta.push(Span::styled(" · edited", theme::message_meta_on(surface)));
+        right_parts.push("thread root".to_string());
     }
     if let Some(reactions) = reactions.filter(|value| !value.is_empty()) {
-        meta.push(Span::styled(
-            format!(" · {reactions}"),
+        right_parts.push(sanitize_terminal_visible_text(reactions));
+    }
+    let right = right_parts.join(" · ");
+    let right_chars = right.chars().count();
+
+    let mut spans = vec![Span::styled(
+        author_text,
+        theme::message_author_on(author_color, surface),
+    )];
+    let used = author_chars.saturating_add(right_chars);
+    if width > used && !right.is_empty() {
+        let pad = width - used;
+        spans.push(Span::styled(
+            " ".repeat(pad),
+            theme::message_meta_on(surface),
+        ));
+        spans.push(Span::styled(right, theme::message_meta_on(surface)));
+    } else if !right.is_empty() {
+        // Not enough room to right-align — fall back to inline.
+        spans.push(Span::styled(
+            format!(" · {right}"),
             theme::message_meta_on(surface),
         ));
     }
-    meta
+    spans
 }
 
-fn message_surface(kind: MessageKind, body: &str) -> Color {
-    if matches!(kind, MessageKind::ThreadRoot) {
-        theme::MESSAGE_CARD_ROOT
-    } else if is_error_message(body) {
+fn message_surface(body: &str) -> Color {
+    if is_error_message(body) {
         theme::MESSAGE_CARD_FOCUSED
     } else {
         theme::MESSAGE_CARD
-    }
-}
-
-fn message_gutter(kind: MessageKind, is_current_user: bool, body: &str) -> Color {
-    if is_error_message(body) {
-        theme::MESSAGE_ERROR_GUTTER
-    } else if matches!(kind, MessageKind::ThreadRoot) {
-        theme::MESSAGE_ROOT_GUTTER
-    } else if is_current_user {
-        theme::MESSAGE_CURRENT_USER_GUTTER
-    } else {
-        theme::MESSAGE_GUTTER
     }
 }
 
