@@ -40,4 +40,6 @@ pub fn draw(
         UiMode::Compose if ui.composer.autocomplete.open => draw_autocomplete(frame, shell[3], ui),
         _ => {}
     }
+    draw_comment_menu(frame, area, ui);
+    draw_comment_delete_confirm(frame, area, ui);
 }

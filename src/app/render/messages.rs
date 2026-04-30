@@ -2,6 +2,7 @@ use super::*;
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
+    hit: Option<MessageCardHit>,
 }
 
 pub(crate) struct MessageLinkHit {
@@ -11,6 +12,12 @@ pub(crate) struct MessageLinkHit {
     url: String,
     text: String,
     style: Style,
+}
+
+pub(crate) struct MessageCardHit {
+    row: u16,
+    height: u16,
+    target: HitTarget,
 }
 
 pub(crate) fn message_card<'a>(
@@ -79,7 +86,20 @@ pub(crate) fn message_card<'a>(
     MessageCard {
         item: ListItem::new(lines).style(theme::message_card()),
         links,
+        hit: None,
     }
+}
+
+pub(crate) fn with_message_card_hit<'a>(
+    mut card: MessageCard<'a>,
+    target: HitTarget,
+) -> MessageCard<'a> {
+    card.hit = Some(MessageCardHit {
+        row: 0,
+        height: card.item.height().min(u16::MAX as usize) as u16,
+        target,
+    });
+    card
 }
 
 pub(crate) fn append_plain_item<'a>(
@@ -94,6 +114,7 @@ pub(crate) fn append_plain_item<'a>(
 pub(crate) fn append_message_card<'a>(
     items: &mut Vec<ListItem<'a>>,
     link_hits: &mut Vec<MessageLinkHit>,
+    card_hits: &mut Vec<MessageCardHit>,
     content_row: &mut u16,
     card: MessageCard<'a>,
 ) {
@@ -101,8 +122,32 @@ pub(crate) fn append_message_card<'a>(
         link.row = link.row.saturating_add(*content_row);
         link_hits.push(link);
     }
+    if let Some(mut hit) = card.hit {
+        hit.row = hit.row.saturating_add(*content_row);
+        card_hits.push(hit);
+    }
     *content_row = content_row.saturating_add(card.item.height().min(u16::MAX as usize) as u16);
     items.push(card.item);
+}
+
+pub(crate) fn register_card_hits(
+    ui: &mut UiState,
+    area: Rect,
+    card_hits: Vec<MessageCardHit>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for hit in card_hits {
+        let hit_bottom = hit.row.saturating_add(hit.height);
+        if hit_bottom <= offset_y || hit.row >= bottom {
+            continue;
+        }
+        let y = area.y + hit.row.saturating_sub(offset_y);
+        let clipped_bottom = hit_bottom.min(bottom);
+        let height = clipped_bottom.saturating_sub(offset_y.max(hit.row));
+        ui.hit_map
+            .push(Rect::new(area.x, y, area.width, height), hit.target);
+    }
 }
 
 pub(crate) fn register_link_hits(

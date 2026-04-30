@@ -8,7 +8,7 @@ mod cases {
 
     use crate::{
         db::Database,
-        service::{Channel, Conversation, ServerState, Snapshot, ThreadItem},
+        service::{Channel, CommentItem, Conversation, ServerState, Snapshot, ThreadItem},
     };
 
     use super::*;
@@ -85,6 +85,18 @@ mod cases {
         }
     }
 
+    fn comment(index: i64, author: &str, body: &str) -> CommentItem {
+        CommentItem {
+            id: format!("comment-{index}"),
+            author: author.to_string(),
+            obj_index: index,
+            body: body.to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            edited_at: None,
+            reactions: String::new(),
+        }
+    }
+
     fn click_region(app: &mut App, target: impl Fn(&HitTarget) -> bool) {
         let region = app
             .ui
@@ -101,6 +113,31 @@ mod cases {
         app.handle_input(
             format!(
                 "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+                column + 1,
+                row + 1,
+                column + 1,
+                row + 1
+            )
+            .as_bytes(),
+        );
+    }
+
+    fn right_click_region(app: &mut App, target: impl Fn(&HitTarget) -> bool) {
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| target(&region.target))
+            .cloned()
+            .expect("hit region");
+        right_click_at(app, region.rect.x, region.rect.y);
+    }
+
+    fn right_click_at(app: &mut App, column: u16, row: u16) {
+        app.handle_input(
+            format!(
+                "\x1b[<2;{};{}M\x1b[<2;{};{}m",
                 column + 1,
                 row + 1,
                 column + 1,
@@ -354,6 +391,122 @@ mod cases {
                 target: "@alice".to_string()
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn compose_ctrl_x_e_prefills_last_own_comment_edit() {
+        let mut app = test_app("quick-edit-shortcut").await;
+        app.snapshot.comments = vec![
+            comment(1, "alice", "not mine"),
+            comment(2, "owner", "first mine"),
+            comment(3, "owner", "latest mine"),
+        ];
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("draft");
+
+        app.handle_input(b"\x18e");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(
+            app.ui.composer.buffer,
+            "/comment edit #3 latest mine".to_string()
+        );
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn compose_ctrl_x_e_ignores_threads_without_own_comment() {
+        let mut app = test_app("quick-edit-no-own").await;
+        app.snapshot.comments = vec![comment(1, "alice", "not mine")];
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("draft");
+
+        app.handle_input(b"\x18e");
+
+        assert_eq!(app.ui.composer.buffer, "draft");
+        assert!(app.ui.banner.as_ref().is_some_and(
+            |banner| banner.error && banner.text == "No comment by you in this thread"
+        ));
+    }
+
+    #[tokio::test]
+    async fn right_click_own_comment_opens_menu_and_edit_prefills_command() {
+        let mut app = test_app("comment-menu-edit").await;
+        app.snapshot.comments = vec![comment(1, "alice", "not mine"), comment(2, "owner", "mine")];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(target, HitTarget::ThreadComment(2))
+        });
+
+        assert_eq!(app.ui.comment_menu.map(|menu| menu.index), Some(2));
+
+        app.render().expect("render menu");
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::CommentMenuEdit(2))
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/comment edit #2 mine");
+    }
+
+    #[tokio::test]
+    async fn right_click_other_users_comment_does_not_open_menu() {
+        let mut app = test_app("comment-menu-other").await;
+        app.snapshot.comments = vec![comment(1, "alice", "not mine")];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(target, HitTarget::ThreadComment(1))
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+    }
+
+    #[tokio::test]
+    async fn right_click_delete_requires_confirmation() {
+        let mut app = test_app("comment-menu-delete").await;
+        app.snapshot.comments = vec![comment(2, "owner", "mine")];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(target, HitTarget::ThreadComment(2))
+        });
+        app.render().expect("render menu");
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::CommentMenuDelete(2))
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(app.ui.comment_delete, Some(CommentDeleteState { index: 2 }));
+        assert!(app.actions.is_empty());
+
+        app.render().expect("render confirm");
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::CommentDeleteConfirm(2))
+        });
+
+        assert!(app.ui.comment_delete.is_none());
+        assert_eq!(app.actions, vec![Action::DeleteComment { index: 2 }]);
+    }
+
+    #[tokio::test]
+    async fn esc_closes_comment_menu_and_delete_confirmation() {
+        let mut app = test_app("comment-menu-esc").await;
+        app.ui.comment_menu = Some(CommentMenuState {
+            index: 1,
+            x: 10,
+            y: 10,
+        });
+
+        app.handle_input(b"\x1b");
+        assert!(app.ui.comment_menu.is_none());
+
+        app.ui.comment_delete = Some(CommentDeleteState { index: 1 });
+        app.handle_input(b"\x1b");
+        assert!(app.ui.comment_delete.is_none());
+        assert!(app.actions.is_empty());
     }
 
     #[tokio::test]

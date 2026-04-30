@@ -23,6 +23,16 @@ impl App {
             return;
         }
 
+        if self.ui.comment_delete.is_some() {
+            self.handle_comment_delete_key(key);
+            return;
+        }
+
+        if self.ui.comment_menu.is_some() && matches!(key, Key::Esc) {
+            self.close_comment_overlays();
+            return;
+        }
+
         if self
             .ui
             .banner
@@ -87,6 +97,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => self.start_mouse_click_or_selection(mouse),
             MouseEventKind::Drag(MouseButton::Left) => self.update_mouse_selection(mouse),
             MouseEventKind::Up(MouseButton::Left) => self.finish_mouse_click_or_selection(mouse),
+            MouseEventKind::Down(MouseButton::Right) => self.open_comment_menu_at(mouse),
             MouseEventKind::Down(_) => self.ui.selection.clear(),
             MouseEventKind::Moved => self.update_pointer_shape(mouse),
             MouseEventKind::Up(_) | MouseEventKind::Drag(_) => {}
@@ -206,6 +217,7 @@ impl App {
             HitTarget::WorkspaceDm(conversation_id) => self.select_conversation(conversation_id),
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
             HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
+            HitTarget::ThreadComment(_) => self.ui.active_pane = ActivePane::Detail,
             HitTarget::MessageLink(url) => {
                 self.ui.active_pane = ActivePane::Detail;
                 self.pending_link_open = Some(url);
@@ -240,6 +252,19 @@ impl App {
                 self.ui.mode = UiMode::Normal;
             }
             HitTarget::BottomBar(action) => self.run_bottom_bar_action(action),
+            HitTarget::CommentMenuBackdrop => self.close_comment_overlays(),
+            HitTarget::CommentMenuEdit(index) => {
+                self.prefill_comment_edit(index);
+            }
+            HitTarget::CommentMenuDelete(index) => {
+                self.ui.comment_menu = None;
+                self.ui.comment_delete = Some(CommentDeleteState { index });
+            }
+            HitTarget::CommentDeleteConfirm(index) => {
+                self.close_comment_overlays();
+                self.actions.push(Action::DeleteComment { index });
+            }
+            HitTarget::CommentDeleteCancel => self.close_comment_overlays(),
         }
     }
 
@@ -396,6 +421,10 @@ impl App {
             Key::Ctrl('u') => self.ui.composer.clear_before_cursor(),
             Key::Ctrl('k') => self.ui.composer.clear_after_cursor(),
             Key::Ctrl('w') => self.ui.composer.delete_word_before_cursor(),
+            Key::CtrlSeq('x', 'e') | Key::CtrlSeq('x', 'E') => {
+                self.prefill_last_own_comment_edit();
+                return;
+            }
             Key::Paste(text) => self.ui.composer.insert_str(&text.replace('\r', "\n")),
             Key::Char(ch) => self.ui.composer.insert(ch),
             _ => {}
@@ -461,5 +490,107 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    pub(crate) fn handle_comment_delete_key(&mut self, key: Key) {
+        let Some(confirm) = self.ui.comment_delete else {
+            return;
+        };
+        match key {
+            Key::Char('y') | Key::Char('Y') | Key::Enter | Key::ShiftEnter => {
+                self.close_comment_overlays();
+                self.actions.push(Action::DeleteComment {
+                    index: confirm.index,
+                });
+            }
+            Key::Esc | Key::Char('n') | Key::Char('N') | Key::Char('q') => {
+                self.close_comment_overlays();
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn open_comment_menu_at(&mut self, mouse: MouseEvent) {
+        self.ui.selection.clear();
+        let region = self
+            .ui
+            .hit_map
+            .hit_matching(mouse.column, mouse.row, |target| {
+                matches!(target, HitTarget::ThreadComment(_))
+            });
+        let Some(HitRegion {
+            target: HitTarget::ThreadComment(index),
+            ..
+        }) = region
+        else {
+            self.close_comment_overlays();
+            return;
+        };
+        if !self.is_own_comment(index) {
+            self.close_comment_overlays();
+            return;
+        }
+        self.ui.comment_delete = None;
+        self.ui.comment_menu = Some(CommentMenuState {
+            index,
+            x: mouse.column,
+            y: mouse.row,
+        });
+    }
+
+    pub(crate) fn prefill_last_own_comment_edit(&mut self) {
+        let Some(index) = self
+            .snapshot
+            .comments
+            .iter()
+            .rev()
+            .find(|comment| self.is_current_user(&comment.author))
+            .map(|comment| comment.obj_index)
+        else {
+            self.set_banner_err("No comment by you in this thread");
+            return;
+        };
+        self.prefill_comment_edit(index);
+    }
+
+    pub(crate) fn prefill_comment_edit(&mut self, index: i64) {
+        let Some(command) = self.comment_edit_command(index) else {
+            self.set_banner_err("Comment is not editable");
+            return;
+        };
+        self.close_comment_overlays();
+        self.ui.mode = UiMode::Compose;
+        self.ui.composer = ComposerState::from(command.as_str());
+        self.update_completions();
+    }
+
+    pub(crate) fn comment_edit_command(&self, index: i64) -> Option<String> {
+        let comment = self
+            .snapshot
+            .comments
+            .iter()
+            .find(|comment| comment.obj_index == index)?;
+        self.is_current_user(&comment.author)
+            .then(|| format!("/comment edit #{index} {}", comment.body))
+    }
+
+    pub(crate) fn is_own_comment(&self, index: i64) -> bool {
+        self.snapshot
+            .comments
+            .iter()
+            .find(|comment| comment.obj_index == index)
+            .is_some_and(|comment| self.is_current_user(&comment.author))
+    }
+
+    pub(crate) fn is_current_user(&self, author: &str) -> bool {
+        self.snapshot
+            .current_username
+            .as_deref()
+            .is_some_and(|username| username.eq_ignore_ascii_case(author))
+    }
+
+    pub(crate) fn close_comment_overlays(&mut self) {
+        self.ui.comment_menu = None;
+        self.ui.comment_delete = None;
     }
 }

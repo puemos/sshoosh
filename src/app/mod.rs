@@ -27,13 +27,12 @@ use self::{
     commands::{CommandExecutor, CommandRegistry},
     input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
     state::{
-        ActivePane, Banner, BottomBarAction, HitRegion, HitTarget, PaletteState, PromptState,
-        Route, SelectionAnchor, SelectionRange, UiMode, UiState,
+        ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
+        HitRegion, HitTarget, PaletteState, PromptState, Route, SelectionAnchor, SelectionRange,
+        UiMode, UiState,
     },
 };
 
-#[cfg(test)]
-use self::state::ComposerState;
 pub use self::state::ListModal;
 pub(crate) use self::util::*;
 

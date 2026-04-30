@@ -46,6 +46,8 @@ pub struct UiState {
     pub palette: PaletteState,
     pub prompt: PromptState,
     pub banner: Option<Banner>,
+    pub comment_menu: Option<CommentMenuState>,
+    pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
     pub hit_map: HitMap,
     pub link_overlays: Vec<LinkOverlay>,
@@ -65,6 +67,8 @@ impl Default for UiState {
             palette: PaletteState::default(),
             prompt: PromptState::default(),
             banner: None,
+            comment_menu: None,
+            comment_delete: None,
             search_selected: 0,
             hit_map: HitMap::default(),
             link_overlays: Vec::new(),
@@ -141,6 +145,19 @@ impl HitMap {
             .cloned()
     }
 
+    pub fn hit_matching(
+        &self,
+        column: u16,
+        row: u16,
+        predicate: impl Fn(&HitTarget) -> bool,
+    ) -> Option<HitRegion> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|entry| contains(entry.rect, column, row) && predicate(&entry.target))
+            .cloned()
+    }
+
     #[cfg(test)]
     pub fn entries(&self) -> &[HitRegion] {
         &self.entries
@@ -160,6 +177,7 @@ pub enum HitTarget {
     WorkspaceThread(String),
     WorkspaceDm(String),
     DetailScroll,
+    ThreadComment(i64),
     MessageLink(String),
     ComposerInput { scroll_y: u16 },
     AutocompleteScroll,
@@ -176,6 +194,11 @@ pub enum HitTarget {
     ConfirmQuitYes,
     ConfirmQuitNo,
     BottomBar(BottomBarAction),
+    CommentMenuBackdrop,
+    CommentMenuEdit(i64),
+    CommentMenuDelete(i64),
+    CommentDeleteConfirm(i64),
+    CommentDeleteCancel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -518,6 +541,18 @@ pub struct PromptState {
     pub prefix: String,
     pub placeholder: String,
     pub input: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommentMenuState {
+    pub index: i64,
+    pub x: u16,
+    pub y: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommentDeleteState {
+    pub index: i64,
 }
 
 #[derive(Clone, Debug)]

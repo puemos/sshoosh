@@ -133,6 +133,102 @@ pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, 
     }
 }
 
+pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState) {
+    if ui.comment_delete.is_some() {
+        return;
+    }
+    let Some(menu) = ui.comment_menu else {
+        return;
+    };
+    if area.width < 12 || area.height < 4 {
+        return;
+    }
+
+    ui.hit_map.push(area, HitTarget::CommentMenuBackdrop);
+    let width = 14.min(area.width);
+    let height = 4.min(area.height);
+    let max_x = area.x.saturating_add(area.width.saturating_sub(width));
+    let max_y = area.y.saturating_add(area.height.saturating_sub(height));
+    let rect = Rect::new(
+        menu.x.clamp(area.x, max_x),
+        menu.y.clamp(area.y, max_y),
+        width,
+        height,
+    );
+    let rows = [
+        ("Edit", HitTarget::CommentMenuEdit(menu.index)),
+        ("Delete", HitTarget::CommentMenuDelete(menu.index)),
+    ];
+
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        List::new(
+            rows.iter()
+                .map(|(label, _)| ListItem::new(Line::from(*label)))
+                .collect::<Vec<_>>(),
+        )
+        .style(theme::panel())
+        .block(panel(" Comment ", true)),
+        rect,
+    );
+
+    let row_area = Rect::new(
+        rect.x.saturating_add(1),
+        rect.y.saturating_add(1),
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(2),
+    );
+    for (idx, (_, target)) in rows.into_iter().enumerate() {
+        if idx as u16 >= row_area.height {
+            break;
+        }
+        ui.hit_map.push(
+            Rect::new(row_area.x, row_area.y + idx as u16, row_area.width, 1),
+            target,
+        );
+    }
+}
+
+pub(crate) fn draw_comment_delete_confirm(frame: &mut Frame, area: Rect, ui: &mut UiState) {
+    let Some(confirm) = ui.comment_delete else {
+        return;
+    };
+    if area.width < 24 || area.height < 5 {
+        return;
+    }
+
+    ui.hit_map.push(area, HitTarget::CommentDeleteCancel);
+    let modal = centered(area, 44, 7);
+    let text = format!("Delete comment #{}?  y / n", confirm.index);
+    frame.render_widget(Clear, modal);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(text.clone()),
+            Line::from(""),
+            Line::from(Span::styled("This cannot be undone.", theme::muted())),
+        ])
+        .alignment(Alignment::Center)
+        .style(theme::panel())
+        .block(panel(" Delete comment ", true).padding(Padding::uniform(1))),
+        modal,
+    );
+
+    let text_x = modal.x + modal.width.saturating_sub(text.chars().count() as u16) / 2;
+    let text_y = modal.y.saturating_add(2);
+    if let Some(y_pos) = text.find('y') {
+        ui.hit_map.push(
+            Rect::new(text_x + y_pos as u16, text_y, 1, 1),
+            HitTarget::CommentDeleteConfirm(confirm.index),
+        );
+    }
+    if let Some(n_pos) = text.rfind('n') {
+        ui.hit_map.push(
+            Rect::new(text_x + n_pos as u16, text_y, 1, 1),
+            HitTarget::CommentDeleteCancel,
+        );
+    }
+}
+
 pub(crate) fn draw_banner(frame: &mut Frame, area: Rect, ui: &mut UiState) {
     let Some(banner) = ui.banner.as_ref().filter(|banner| banner.active()).cloned() else {
         return;

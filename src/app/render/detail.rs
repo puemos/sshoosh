@@ -22,6 +22,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     draw_detail_header(frame, area, title, ui);
     let messages_area = pane_scroll_area(area);
     let mut link_hits = Vec::new();
+    let mut card_hits = Vec::new();
     let mut content_row = 0u16;
     if let Some(thread) = selected {
         if snapshot.comments_has_more {
@@ -70,7 +71,13 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &thread.body,
                 message_width,
             );
-            append_message_card(&mut items, &mut link_hits, &mut content_row, card);
+            append_message_card(
+                &mut items,
+                &mut link_hits,
+                &mut card_hits,
+                &mut content_row,
+                card,
+            );
         }
         for (idx, comment) in snapshot.comments.iter().enumerate() {
             if idx == 0 {
@@ -85,7 +92,14 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &comment.body,
                 message_width,
             );
-            append_message_card(&mut items, &mut link_hits, &mut content_row, card);
+            let card = with_message_card_hit(card, HitTarget::ThreadComment(comment.obj_index));
+            append_message_card(
+                &mut items,
+                &mut link_hits,
+                &mut card_hits,
+                &mut content_row,
+                card,
+            );
             if idx + 1 < snapshot.comments.len() {
                 append_plain_item(&mut items, &mut content_row, message_gap());
             }
@@ -102,6 +116,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
 }
 
@@ -292,6 +307,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let message_width = message_content_width(area);
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
+    let mut card_hits = Vec::new();
     let mut content_row = 0u16;
     let selected = snapshot
         .selected_conversation_id
@@ -327,11 +343,18 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 &message.body,
                 message_width,
             );
-            append_message_card(&mut items, &mut link_hits, &mut content_row, card);
+            append_message_card(
+                &mut items,
+                &mut link_hits,
+                &mut card_hits,
+                &mut content_row,
+                card,
+            );
         }
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
 }
 
