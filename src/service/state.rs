@@ -21,14 +21,14 @@ impl ServerState {
     ) -> anyhow::Result<Account> {
         let mut tx = self.db.write_pool().begin().await?;
         let now = now();
+        cleanup_pending_accounts_tx(&mut tx).await?;
 
         if let Some(row) = sqlx::query(
-            "SELECT a.id, a.username, a.display_name, a.role, a.activated_at
+            "SELECT a.id, a.username, a.display_name, a.role, a.activated_at, a.pending_username
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
              WHERE k.fingerprint = ?
                AND k.revoked_at IS NULL
-               AND a.activated_at IS NOT NULL
                AND a.disabled_at IS NULL",
         )
         .bind(fingerprint)
@@ -36,12 +36,21 @@ impl ServerState {
         .await?
         {
             let account_id: String = row.get("id");
-            sqlx::query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&now)
-                .bind(&account_id)
-                .execute(&mut *tx)
-                .await?;
+            let activated = row.get::<Option<String>, _>("activated_at").is_some();
+            if activated {
+                sqlx::query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+                    .bind(&now)
+                    .bind(&now)
+                    .bind(&account_id)
+                    .execute(&mut *tx)
+                    .await?;
+            } else {
+                sqlx::query("UPDATE accounts SET updated_at = ? WHERE id = ?")
+                    .bind(&now)
+                    .bind(&account_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
             sqlx::query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
                 .bind(&now)
                 .bind(fingerprint)
@@ -52,7 +61,43 @@ impl ServerState {
         }
 
         let Some((desired_username, token)) = login_username.split_once('+') else {
-            bail!("Unknown SSH key; use username+token to bootstrap or accept an invite");
+            let username = normalize_username(login_username)?;
+            let account_id = id();
+            let internal_username = pending_internal_username(&account_id);
+            sqlx::query(
+                "INSERT INTO accounts
+                 (id, username, display_name, role, settings_json, created_at, updated_at, pending_username)
+                 VALUES (?, ?, ?, 'member', '{}', ?, ?, ?)",
+            )
+            .bind(&account_id)
+            .bind(&internal_username)
+            .bind(&username)
+            .bind(&now)
+            .bind(&now)
+            .bind(&username)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at, last_used_at)
+                 VALUES (?, ?, ?, ?, 'default', ?, ?)",
+            )
+            .bind(id())
+            .bind(&account_id)
+            .bind(fingerprint)
+            .bind(public_key)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(Account {
+                id: account_id,
+                username: internal_username,
+                display_name: username.clone(),
+                role: Role::Member,
+                activated: false,
+                pending_username: Some(username),
+            });
         };
         let username = normalize_username(desired_username)?;
         let token_hash = code_hash(token);
@@ -116,8 +161,8 @@ impl ServerState {
 
         sqlx::query(
             "INSERT INTO accounts
-             (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at)
-             VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?)",
+             (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at, pending_username)
+             VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, NULL)",
         )
         .bind(&account_id)
         .bind(&username)
@@ -242,12 +287,13 @@ impl ServerState {
             display_name: username,
             role,
             activated: true,
+            pending_username: None,
         })
     }
 
     pub async fn reload_account(&self, account_id: &str) -> anyhow::Result<Account> {
         let row = sqlx::query(
-            "SELECT id, username, display_name, role, activated_at
+            "SELECT id, username, display_name, role, activated_at, pending_username
              FROM accounts WHERE id = ? AND disabled_at IS NULL",
         )
         .bind(account_id)
@@ -582,4 +628,26 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         send_dm(self.db.write_pool(), &actor_id, &conversation_id, &body).await
     }
+}
+
+pub(crate) async fn cleanup_pending_accounts_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> anyhow::Result<()> {
+    let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(7))
+        .format(&time::format_description::well_known::Rfc3339)?;
+    sqlx::query(
+        "DELETE FROM accounts
+         WHERE activated_at IS NULL
+           AND pending_username IS NOT NULL
+           AND created_at < ?",
+    )
+    .bind(cutoff)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+fn pending_internal_username(account_id: &str) -> String {
+    let compact = account_id.replace('-', "");
+    format!("pending-{}", &compact[..24])
 }

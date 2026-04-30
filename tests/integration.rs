@@ -641,12 +641,27 @@ async fn service_pair(state: &ServerState) -> ServerState {
 }
 
 #[tokio::test]
-async fn unknown_ssh_key_does_not_create_rows() {
+async fn unknown_ssh_key_creates_blocked_pending_account() {
     let (_config, state) = test_state("unknown-key").await;
-    let result = state
-        .ensure_account_for_key("intruder", "SHA256:unknown", "ssh-ed25519 unknown")
-        .await;
-    assert!(result.is_err(), "{result:?}");
+    let pending = state
+        .ensure_account_for_key("Alice", "SHA256:unknown", "ssh-ed25519 unknown")
+        .await
+        .expect("pending account");
+    assert!(!pending.activated);
+    assert_ne!(pending.username, "alice");
+    assert!(pending.username.starts_with("pending-"));
+    assert_eq!(pending.pending_username.as_deref(), Some("alice"));
+
+    let snapshot = state.snapshot(&pending.id, None, None, None).await;
+    assert!(snapshot.expect("pending snapshot").channels.is_empty());
+
+    let reconnected = state
+        .ensure_account_for_key("alice", "SHA256:unknown", "ssh-ed25519 unknown")
+        .await
+        .expect("pending reconnect");
+    assert_eq!(reconnected.id, pending.id);
+    assert!(!reconnected.activated);
+
     let account_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(state.db.read_pool())
         .await
@@ -655,8 +670,119 @@ async fn unknown_ssh_key_does_not_create_rows() {
         .fetch_one(state.db.read_pool())
         .await
         .expect("key count");
-    assert_eq!(account_count, 0);
-    assert_eq!(key_count, 0);
+    let alice_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'alice'")
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("alice count");
+    assert_eq!(account_count, 1);
+    assert_eq!(key_count, 1);
+    assert_eq!(alice_count, 0);
+}
+
+#[tokio::test]
+async fn pending_account_activates_with_bootstrap_token() {
+    let (_config, state) = test_state("pending-bootstrap").await;
+    let token = state.create_bootstrap_token().await.expect("token");
+    let pending = state
+        .ensure_account_for_key("owner", "SHA256:pending-owner", "ssh-ed25519 owner")
+        .await
+        .expect("pending owner");
+
+    let invalid = state
+        .accept_invite(pending.id.clone(), "wrong".to_string(), "owner".to_string())
+        .await;
+    assert!(invalid.is_err(), "{invalid:?}");
+    assert!(
+        !state
+            .reload_account(&pending.id)
+            .await
+            .expect("reload")
+            .activated
+    );
+
+    state
+        .accept_invite(pending.id.clone(), token, "owner".to_string())
+        .await
+        .expect("activate owner");
+    let owner = state.reload_account(&pending.id).await.expect("owner");
+    assert!(owner.activated);
+    assert_eq!(owner.username, "owner");
+    assert_eq!(owner.role, sshoosh::service::Role::Owner);
+    assert_eq!(owner.pending_username, None);
+
+    let channels = state
+        .snapshot(&owner.id, None, None, None)
+        .await
+        .expect("owner snapshot")
+        .channels;
+    assert!(channels.iter().any(|channel| channel.slug == "general"));
+}
+
+#[tokio::test]
+async fn pending_account_activates_with_invite_token_and_reuses_key() {
+    let (_config, state) = test_state("pending-invite").await;
+    let owner = bootstrap_owner(&state, "SHA256:pending-invite-owner", "ssh-ed25519 owner").await;
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let pending = state
+        .ensure_account_for_key("alice", "SHA256:pending-alice", "ssh-ed25519 alice")
+        .await
+        .expect("pending alice");
+
+    state
+        .accept_invite(pending.id.clone(), invite.clone(), "alice".to_string())
+        .await
+        .expect("activate alice");
+    let alice = state
+        .ensure_account_for_key("alice", "SHA256:pending-alice", "ssh-ed25519 alice")
+        .await
+        .expect("known alice");
+    assert!(alice.activated);
+    assert_eq!(alice.id, pending.id);
+    assert_eq!(alice.username, "alice");
+    assert_eq!(alice.role, sshoosh::service::Role::Member);
+
+    let reused = state
+        .ensure_account_for_key(
+            &format!("bob+{invite}"),
+            "SHA256:pending-bob",
+            "ssh-ed25519 bob",
+        )
+        .await;
+    assert!(reused.is_err(), "{reused:?}");
+}
+
+#[tokio::test]
+async fn stale_pending_accounts_are_cleaned_before_new_auth() {
+    let (_config, state) = test_state("pending-cleanup").await;
+    let owner = bootstrap_owner(&state, "SHA256:cleanup-owner", "ssh-ed25519 owner").await;
+    let pending = state
+        .ensure_account_for_key("stale", "SHA256:stale", "ssh-ed25519 stale")
+        .await
+        .expect("pending stale");
+    sqlx::query("UPDATE accounts SET created_at = '2000-01-01T00:00:00Z' WHERE id = ?")
+        .bind(&pending.id)
+        .execute(state.db.write_pool())
+        .await
+        .expect("age pending");
+
+    let fresh = state
+        .ensure_account_for_key("fresh", "SHA256:fresh", "ssh-ed25519 fresh")
+        .await
+        .expect("fresh pending");
+    assert_ne!(fresh.id, pending.id);
+    let stale_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+        .bind(&pending.id)
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("stale count");
+    let owner_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+        .bind(&owner.id)
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("owner count");
+    assert_eq!(stale_count, 0);
+    assert_eq!(owner_count, 1);
 }
 
 #[tokio::test]
@@ -859,7 +985,6 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .create_bootstrap_token()
         .await
         .expect("bootstrap token");
-    let login = format!("owner+{bootstrap_token}");
     let state_for_assert = state.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr: SocketAddr = listener.local_addr().expect("addr");
@@ -879,7 +1004,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("connect");
     let auth = session
         .authenticate_publickey(
-            login,
+            "owner",
             PrivateKeyWithHashAlg::new(
                 key,
                 session
@@ -900,12 +1025,24 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("pty");
     channel.request_shell(true).await.expect("shell");
 
+    let onboarding = read_until(&mut channel, "not activated").await;
+    assert!(
+        onboarding.contains("This SSH key is not activated yet"),
+        "{onboarding:?}"
+    );
+    assert!(onboarding.contains("Suggested username"), "{onboarding:?}");
+    assert!(!onboarding.contains("Channels"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1000h"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1002h"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1003h"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1006h"), "{onboarding:?}");
+    session
+        .data(channel.id(), format!("{bootstrap_token}\r").into_bytes())
+        .await
+        .expect("send bootstrap token");
+
     let first = read_until(&mut channel, "Channels").await;
     assert!(first.contains("Channels"), "{first:?}");
-    assert!(first.contains("\x1b[?1000h"), "{first:?}");
-    assert!(first.contains("\x1b[?1002h"), "{first:?}");
-    assert!(first.contains("\x1b[?1003h"), "{first:?}");
-    assert!(first.contains("\x1b[?1006h"), "{first:?}");
 
     session
         .data(channel.id(), sgr_drag((2, 4), (9, 4)))

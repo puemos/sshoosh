@@ -73,23 +73,50 @@ pub(crate) async fn accept_invite(
         return Ok(());
     }
     let now = now();
-    let invite = sqlx::query(
-        "SELECT id, role_on_accept
-         FROM invites
-         WHERE code_hash = ?
-           AND accepted_at IS NULL
-           AND revoked_at IS NULL
-           AND (expires_at IS NULL OR expires_at > ?)",
+    let active_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM accounts
+         WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
     )
-    .bind(code_hash(code.trim()))
-    .bind(&now)
-    .fetch_optional(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
-    let Some(invite) = invite else {
-        bail!("Invite is invalid, expired, or already used");
+    let token_hash = code_hash(code.trim());
+    let mut bootstrap_token_id = None;
+    let mut invite_id = None;
+    let role = if active_count == 0 {
+        let token_id: Option<String> = sqlx::query_scalar(
+            "SELECT id
+             FROM bootstrap_tokens
+             WHERE code_hash = ? AND used_at IS NULL
+             LIMIT 1",
+        )
+        .bind(&token_hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(token_id) = token_id else {
+            bail!("Bootstrap token is invalid or already used");
+        };
+        bootstrap_token_id = Some(token_id);
+        Role::Owner
+    } else {
+        let invite = sqlx::query(
+            "SELECT id, role_on_accept
+             FROM invites
+             WHERE code_hash = ?
+               AND accepted_at IS NULL
+               AND revoked_at IS NULL
+               AND (expires_at IS NULL OR expires_at > ?)",
+        )
+        .bind(&token_hash)
+        .bind(&now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(invite) = invite else {
+            bail!("Invite is invalid, expired, or already used");
+        };
+        invite_id = Some(invite.get::<String, _>("id"));
+        Role::from_db(invite.get::<String, _>("role_on_accept").as_str())?
     };
-    let invite_id: String = invite.get("id");
-    let role: String = invite.get("role_on_accept");
     let existing: Option<String> =
         sqlx::query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
             .bind(&username)
@@ -99,50 +126,105 @@ pub(crate) async fn accept_invite(
     anyhow::ensure!(existing.is_none(), "Username is already taken");
     sqlx::query(
         "UPDATE accounts
-         SET username = ?, display_name = ?, role = ?, activated_at = ?, updated_at = ?
+         SET username = ?, display_name = ?, role = ?, activated_at = ?, updated_at = ?, pending_username = NULL
          WHERE id = ?",
     )
     .bind(&username)
     .bind(&username)
-    .bind(&role)
+    .bind(role.as_str())
     .bind(&now)
     .bind(&now)
     .bind(account_id)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("UPDATE invites SET accepted_by_account_id = ?, accepted_at = ? WHERE id = ?")
-        .bind(account_id)
-        .bind(&now)
-        .bind(invite_id)
-        .execute(&mut *tx)
-        .await?;
-    if let Some(general_id) =
-        sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE slug = 'general'")
-            .fetch_optional(&mut *tx)
-            .await?
-    {
+    if let Some(token_id) = bootstrap_token_id {
         sqlx::query(
-            "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
-             VALUES (?, ?, 'member', ?)
-             ON CONFLICT(channel_id, account_id) DO NOTHING",
+            "UPDATE bootstrap_tokens
+             SET used_by_account_id = ?, used_at = ?
+             WHERE id = ? AND used_at IS NULL",
         )
-        .bind(general_id)
         .bind(account_id)
         .bind(&now)
+        .bind(token_id)
         .execute(&mut *tx)
         .await?;
     }
+    if let Some(invite_id) = invite_id {
+        sqlx::query("UPDATE invites SET accepted_by_account_id = ?, accepted_at = ? WHERE id = ?")
+            .bind(account_id)
+            .bind(&now)
+            .bind(invite_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let general_id = ensure_general_channel_tx(&mut tx, account_id, &now).await?;
+    sqlx::query(
+        "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(channel_id, account_id) DO NOTHING",
+    )
+    .bind(general_id)
+    .bind(account_id)
+    .bind(if role == Role::Owner {
+        "owner"
+    } else {
+        "member"
+    })
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    let event_kind = if role == Role::Owner {
+        "account.bootstrapped"
+    } else {
+        "invite.accepted"
+    };
     insert_event(
         &mut tx,
         None,
         None,
         None,
-        "invite.accepted",
+        event_kind,
         serde_json::json!({"account_id": account_id, "username": username}),
     )
     .await?;
     tx.commit().await?;
     Ok(())
+}
+
+async fn ensure_general_channel_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    now: &str,
+) -> anyhow::Result<String> {
+    if let Some(general_id) =
+        sqlx::query_scalar::<_, String>("SELECT id FROM channels WHERE slug = 'general'")
+            .fetch_optional(&mut **tx)
+            .await?
+    {
+        return Ok(general_id);
+    }
+    let channel_id = id();
+    sqlx::query(
+        "INSERT INTO channels
+         (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
+         VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
+    )
+    .bind(&channel_id)
+    .bind(account_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?;
+    insert_event(
+        tx,
+        None,
+        None,
+        None,
+        "channel.created",
+        serde_json::json!({"channel_id": channel_id, "slug": "general"}),
+    )
+    .await?;
+    Ok(channel_id)
 }
 
 pub(crate) async fn create_channel(

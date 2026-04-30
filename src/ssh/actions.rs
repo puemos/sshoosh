@@ -41,7 +41,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
         Action::AcceptInvite { code, username } => session
             .accept_invite(account_id, code, username)
             .await
-            .map(|_| ActionResult::message("Invite accepted")),
+            .map(|_| ActionResult::message("Setup complete")),
         Action::CreateChannel { name, private } => {
             match session.create_channel(account_id, name, private).await {
                 Ok(channel_id) => {

@@ -150,7 +150,7 @@ pub(crate) async fn load_account_by_username_tx(
     username: &str,
 ) -> anyhow::Result<Account> {
     let row = sqlx::query(
-        "SELECT id, username, display_name, role, activated_at
+        "SELECT id, username, display_name, role, activated_at, pending_username
          FROM accounts
          WHERE lower(username) = lower(?)",
     )

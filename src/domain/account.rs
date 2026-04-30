@@ -5,6 +5,7 @@ pub struct Account {
     pub display_name: String,
     pub role: Role,
     pub activated: bool,
+    pub pending_username: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

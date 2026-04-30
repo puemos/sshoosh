@@ -154,6 +154,7 @@ mod cases {
                 display_name: "Owner".to_string(),
                 role: Role::Owner,
                 activated: true,
+                pending_username: None,
             };
             let mut ui = UiState::default();
             terminal
@@ -214,6 +215,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![Channel {
@@ -281,6 +283,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::modal_ok("Invite code: abc123"));
@@ -307,6 +310,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::list(state::ListModal {
@@ -365,6 +369,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::list(state::ListModal {
@@ -394,6 +399,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::list(state::ListModal {
@@ -436,6 +442,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             search_query: Some("deploy".to_string()),
@@ -474,6 +481,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             threads: vec![ThreadItem {
@@ -522,6 +530,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::ok("Selection copied"));
@@ -560,6 +569,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState::default();
         ui.banner = Some(state::Banner::err("refresh failed"));
@@ -592,6 +602,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![
@@ -662,6 +673,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![
@@ -718,6 +730,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![Channel {
@@ -781,6 +794,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
@@ -846,6 +860,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
@@ -904,6 +919,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![Channel {
@@ -966,6 +982,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             channels: vec![Channel {
@@ -1137,6 +1154,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
@@ -1207,6 +1225,7 @@ mod cases {
             display_name: "Owner".to_string(),
             role: Role::Owner,
             activated: true,
+            pending_username: None,
         };
         let mut ui = UiState {
             mode: UiMode::Compose,

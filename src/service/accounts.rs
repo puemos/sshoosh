@@ -338,6 +338,7 @@ impl ServerState {
             display_name: String::new(),
             role: Role::from_db(row.get::<String, _>("role").as_str())?,
             activated: true,
+            pending_username: None,
         };
         if actor.id != target.id {
             ensure_can_manage_account(&actor, &target)?;
@@ -464,6 +465,7 @@ impl ServerState {
             display_name: String::new(),
             role: Role::from_db(row.get::<String, _>("role").as_str())?,
             activated: true,
+            pending_username: None,
         };
         if actor.id != target.id {
             ensure_can_manage_account(&actor, &target)?;

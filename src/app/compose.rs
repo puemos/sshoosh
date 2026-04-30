@@ -116,7 +116,12 @@ impl App {
             Some(value) => value.to_string(),
             None => String::new(),
         };
-        let username = parts.next().unwrap_or(&self.account.username).to_string();
+        let suggested_username = self
+            .account
+            .pending_username
+            .as_deref()
+            .unwrap_or(&self.account.username);
+        let username = parts.next().unwrap_or(suggested_username).to_string();
         self.actions.push(Action::AcceptInvite { code, username });
     }
 

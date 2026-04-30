@@ -105,31 +105,45 @@ impl russh::server::Handler for ClientHandler {
             let app = app.lock().await;
             app.account.id.clone()
         };
-        let presence_session_id = match state.begin_account_session(&account_id).await {
-            Ok(session_id) => Some(session_id),
-            Err(err) => {
-                tracing::debug!(error = ?err, "presence connect failed");
-                None
-            }
-        };
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(WORLD_TICK_INTERVAL);
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut last_render = Instant::now() - MIN_RENDER_GAP;
             let mut last_presence_touch = Instant::now();
+            let mut presence_session_id = if {
+                let app = app.lock().await;
+                app.account.activated
+            } {
+                match state.begin_account_session(&account_id).await {
+                    Ok(session_id) => Some(session_id),
+                    Err(err) => {
+                        tracing::debug!(error = ?err, "presence connect failed");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             loop {
                 tokio::select! {
                     _ = tick.tick() => {}
                     _ = signal.notify.notified() => {}
                 }
+                if presence_session_id.is_none() && {
+                    let app = app.lock().await;
+                    app.account.activated
+                } {
+                    match state.begin_account_session(&account_id).await {
+                        Ok(session_id) => presence_session_id = Some(session_id),
+                        Err(err) => tracing::debug!(error = ?err, "presence connect failed"),
+                    }
+                }
                 if last_presence_touch.elapsed() >= PRESENCE_HEARTBEAT_INTERVAL {
-                    let result = if let Some(session_id) = presence_session_id.as_deref() {
-                        state.touch_account_session(&account_id, session_id).await
-                    } else {
-                        state.touch_account(&account_id).await
-                    };
-                    if let Err(err) = result {
-                        tracing::debug!(error = ?err, "presence heartbeat failed");
+                    if let Some(session_id) = presence_session_id.as_deref() {
+                        if let Err(err) = state.touch_account_session(&account_id, session_id).await
+                        {
+                            tracing::debug!(error = ?err, "presence heartbeat failed");
+                        }
                     }
                     last_presence_touch = Instant::now();
                 }
@@ -155,13 +169,10 @@ impl russh::server::Handler for ClientHandler {
                     }
                 }
             }
-            let result = if let Some(session_id) = presence_session_id.as_deref() {
-                state.end_presence_session(&account_id, session_id).await
-            } else {
-                state.end_account_session(&account_id).await
-            };
-            if let Err(err) = result {
-                tracing::debug!(error = ?err, "presence disconnect failed");
+            if let Some(session_id) = presence_session_id.as_deref() {
+                if let Err(err) = state.end_presence_session(&account_id, session_id).await {
+                    tracing::debug!(error = ?err, "presence disconnect failed");
+                }
             }
         });
         Ok(())

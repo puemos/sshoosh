@@ -16,18 +16,22 @@ pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
 pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
     let modal = centered(area, 72, 13);
     let block = panel(" sshoosh setup ", true);
+    let suggested_username = account
+        .pending_username
+        .as_deref()
+        .unwrap_or(&account.username);
     let text = vec![
         Line::from(Span::styled(
             "This SSH key is not activated yet.",
             theme::unread(),
         )),
         Line::from(""),
-        Line::from("Ask an owner/admin for a one-time invite code."),
-        Line::from("Type the code and press Enter, or use: /join CODE username"),
+        Line::from("Enter the bootstrap token or ask an owner/admin for an invite code."),
+        Line::from("Type the secret and press Enter, or use: /join SECRET username"),
         Line::from(""),
         Line::from(vec![
             Span::styled("Suggested username: ", theme::muted()),
-            Span::styled(account.username.clone(), theme::accent()),
+            Span::styled(suggested_username.to_string(), theme::accent()),
         ]),
         Line::from(""),
         Line::from(format!("> {}", ui.composer.buffer)),

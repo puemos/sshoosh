@@ -114,6 +114,7 @@ pub(crate) fn account_from_row(row: sqlx::sqlite::SqliteRow) -> anyhow::Result<A
         display_name: row.get("display_name"),
         role: Role::from_db(row.get::<String, _>("role").as_str())?,
         activated: activated.is_some(),
+        pending_username: row.get("pending_username"),
     })
 }
 
