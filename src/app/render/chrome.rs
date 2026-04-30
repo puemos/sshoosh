@@ -97,11 +97,11 @@ fn sshoosh_splash_logo_lines(area: Rect) -> Vec<Line<'static>> {
         "                          ███▘                                  ███▘",
         "                         ▟██▘                                  ▟██▌",
         "     ▗▟███████▛▄███████▛▟███████▄ ▄███████▖▗▟███████▖▗▟███████▗███████▙",
-        "     ▟██▘     ▐██▛     ▐██▛  ███▌▟██▛  ███▘▟██▛ ▗███▚███▘     ███▘ ▐███",
-        "    ▝███████▙ ▜██████▙▗███▘ ▐██▛▟██▛  ▟██▛▟██▛  ███▘▝███████▖▟██▌  ███▌",
-        "         ███▘     ▟██▌▟██▌ ▗███▚███▘ ▐███▐███  ▐██▛     ▗███▐██▛  ▟██▛",
-        "  ▗████████▘▟███████▀▟██▛  ███▘▝███████▛▘▜███████▛▚███████▛▚███  ▗███",
-        " ▗▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄███▘ ▟███▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟██▘ ▗███▘",
+        "     ▟██▘     ▐██▛     ▗██▛  ▟██▌▟██▛  ███▘▟██▛ ▗███▚███▘     ███▘ ▐███",
+        "    ▝███████▙ ▜██████▙▗███  ▗██▛▐██▛  ▟██▛▟██▛  ███▘▝███████▖▟██▌  ███▌",
+        "         ███▘     ▟██▌▟██▘ ▗███▚███▘ ▐███▐███  ▐██▛     ▗███▐██▛  ▟██▛",
+        "  ▗████████▘▟███████▀▟██▛  ▟██▘▝███████▛▘▜███████▛▚███████▛▚███  ▗███",
+        " ▗▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▛  ▟███▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▟██▘ ▗███▘",
         " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘  ▝▀▀▘",
     ];
 
@@ -117,14 +117,19 @@ fn sshoosh_splash_logo_lines(area: Rect) -> Vec<Line<'static>> {
 }
 
 fn logo_lines(lines: &'static [&'static str]) -> Vec<Line<'static>> {
-    lines.iter().map(|line| logo_line(line)).collect()
+    let width = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or_default();
+    lines.iter().map(|line| logo_line(line, width)).collect()
 }
 
-fn logo_line(pattern: &'static str) -> Line<'static> {
+fn logo_line(pattern: &'static str, width: usize) -> Line<'static> {
     let fill = Style::default()
         .fg(theme::SUBTLE)
         .add_modifier(Modifier::BOLD);
-    let spans = pattern
+    let mut spans = pattern
         .chars()
         .map(|ch| match ch {
             '#' => Span::styled("█", fill),
@@ -135,6 +140,10 @@ fn logo_line(pattern: &'static str) -> Line<'static> {
             _ => Span::raw(" "),
         })
         .collect::<Vec<_>>();
+    let padding = width.saturating_sub(pattern.chars().count());
+    if padding > 0 {
+        spans.push(Span::raw(" ".repeat(padding)));
+    }
     Line::from(spans)
 }
 
