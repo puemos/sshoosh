@@ -97,7 +97,7 @@ input {
 .site-frame {
   width: min(100%, 760px);
   margin: 0 auto;
-  padding: 22px 20px 64px;
+  padding: 22px 20px 40px;
 }
 
 .topline {
@@ -218,8 +218,8 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 0;
   background: var(--surface);
-  margin: 0 0 12px;
-  padding: 10px;
+  margin: 0 0 14px;
+  padding: 18px;
   color: var(--fg);
   font-size: 0.92rem;
   line-height: 1.55;
@@ -233,10 +233,34 @@ h3 {
   padding: 0;
 }
 
-.doc-article pre,
-.doc-article pre span {
-  color: var(--fg) !important;
+.astro-code {
   background: var(--surface) !important;
+}
+
+.astro-code,
+.astro-code span {
+  color: var(--shiki-light, var(--fg));
+}
+
+html[data-theme="dark"] .astro-code,
+html[data-theme="dark"] .astro-code span {
+  color: var(--shiki-dark, var(--fg));
+}
+
+.bottombar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  margin-top: 56px;
+  padding-top: 10px;
+  color: var(--muted);
+}
+
+.bottombar a,
+.bottombar span {
+  color: var(--muted);
 }
 
 .actions {
