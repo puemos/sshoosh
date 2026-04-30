@@ -44,6 +44,33 @@ pub struct Conversation {
 }
 
 #[derive(Clone, Debug)]
+pub struct DmSidebarItem {
+    pub conversation_id: Option<String>,
+    pub peer_username: String,
+    pub last_message_index: i64,
+    pub unread_count: i64,
+    pub last_activity_at: Option<String>,
+    pub last_message_preview: Option<String>,
+    pub muted_until: Option<String>,
+    pub saved_at: Option<String>,
+}
+
+impl From<&Conversation> for DmSidebarItem {
+    fn from(conversation: &Conversation) -> Self {
+        Self {
+            conversation_id: Some(conversation.id.clone()),
+            peer_username: conversation.peer_username.clone(),
+            last_message_index: conversation.last_message_index,
+            unread_count: conversation.unread_count,
+            last_activity_at: conversation.last_activity_at.clone(),
+            last_message_preview: conversation.last_message_preview.clone(),
+            muted_until: conversation.muted_until.clone(),
+            saved_at: conversation.saved_at.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ConversationMessage {
     pub id: String,
     pub author: String,
@@ -62,6 +89,7 @@ pub struct Snapshot {
     pub threads: Vec<ThreadItem>,
     pub comments: Vec<CommentItem>,
     pub conversations: Vec<Conversation>,
+    pub dm_sidebar: Vec<DmSidebarItem>,
     pub conversation_messages: Vec<ConversationMessage>,
     pub comments_has_more: bool,
     pub conversation_messages_has_more: bool,

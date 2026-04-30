@@ -10,8 +10,8 @@ mod cases {
     use crate::{
         db::Database,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, ServerState, Snapshot,
-            ThreadItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, ServerState,
+            Snapshot, ThreadItem,
         },
     };
 
@@ -398,13 +398,82 @@ mod cases {
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
 
         app.render().expect("render");
-        click_region(
-            &mut app,
-            |target| matches!(target, HitTarget::WorkspaceDm(id) if id == "dm"),
-        );
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::WorkspaceDm {
+                    conversation_id: Some(id),
+                    ..
+                } if id == "dm"
+            )
+        });
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicking_dm_user_without_conversation_opens_dm() {
+        let mut app = test_app("workspace-clicks-new-dm").await;
+        app.snapshot.conversations.clear();
+        app.snapshot.dm_sidebar = vec![DmSidebarItem {
+            conversation_id: None,
+            peer_username: "bob".to_string(),
+            last_message_index: 0,
+            unread_count: 0,
+            last_activity_at: None,
+            last_message_preview: None,
+            muted_until: None,
+            saved_at: None,
+        }];
+        app.ui.active_pane = ActivePane::Rail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::WorkspaceDm {
+                    conversation_id: None,
+                    username,
+                } if username == "bob"
+            )
+        });
+
+        assert_eq!(
+            app.actions,
+            vec![Action::OpenDm {
+                target: "bob".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn keyboard_selecting_dm_user_without_conversation_opens_dm() {
+        let mut app = test_app("workspace-keyboard-new-dm").await;
+        app.snapshot.conversations.clear();
+        app.snapshot.dm_sidebar = vec![DmSidebarItem {
+            conversation_id: None,
+            peer_username: "bob".to_string(),
+            last_message_index: 0,
+            unread_count: 0,
+            last_activity_at: None,
+            last_message_preview: None,
+            muted_until: None,
+            saved_at: None,
+        }];
+        app.ui.active_pane = ActivePane::Rail;
+
+        app.apply_workspace_row(WorkspaceRow::Dm {
+            conversation_id: None,
+            username: "bob".to_string(),
+        });
+
+        assert_eq!(
+            app.actions,
+            vec![Action::OpenDm {
+                target: "bob".to_string()
+            }]
+        );
     }
 
     #[tokio::test]

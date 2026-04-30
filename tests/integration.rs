@@ -147,6 +147,99 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
 }
 
 #[tokio::test]
+async fn sqlite_snapshot_dm_sidebar_lists_all_users_with_recent_conversations_first() {
+    let (_config, state) = test_state("dm-sidebar").await;
+    let owner = bootstrap_owner(&state, "SHA256:dm-owner", "ssh-ed25519 owner").await;
+    let alice_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:dm-alice",
+        "ssh-ed25519 alice",
+        alice_invite,
+    )
+    .await;
+    let bob_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let bob = accept_invite_key(
+        &state,
+        "bob",
+        "SHA256:dm-bob",
+        "ssh-ed25519 bob",
+        bob_invite,
+    )
+    .await;
+    let charlie_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let charlie = accept_invite_key(
+        &state,
+        "charlie",
+        "SHA256:dm-charlie",
+        "ssh-ed25519 charlie",
+        charlie_invite,
+    )
+    .await;
+    let dave_invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let dave = accept_invite_key(
+        &state,
+        "dave",
+        "SHA256:dm-dave",
+        "ssh-ed25519 dave",
+        dave_invite,
+    )
+    .await;
+
+    let alice_dm = state
+        .open_dm(owner.id.clone(), alice.username.clone())
+        .await
+        .expect("open alice dm");
+    state
+        .send_dm(
+            owner.id.clone(),
+            alice_dm.clone(),
+            "hello alice".to_string(),
+        )
+        .await
+        .expect("send alice dm");
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let charlie_dm = state
+        .open_dm(owner.id.clone(), charlie.username.clone())
+        .await
+        .expect("open charlie dm");
+    state
+        .send_dm(
+            owner.id.clone(),
+            charlie_dm.clone(),
+            "hello charlie".to_string(),
+        )
+        .await
+        .expect("send charlie dm");
+
+    let snapshot = state
+        .snapshot(&owner.id, None, None, None)
+        .await
+        .expect("snapshot");
+    let usernames = snapshot
+        .dm_sidebar
+        .iter()
+        .map(|dm| dm.peer_username.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(usernames, vec!["charlie", "alice", "bob", "dave"]);
+    assert!(!usernames.contains(&owner.username.as_str()));
+    assert_eq!(
+        snapshot.dm_sidebar[0].conversation_id.as_deref(),
+        Some(charlie_dm.as_str())
+    );
+    assert_eq!(
+        snapshot.dm_sidebar[1].conversation_id.as_deref(),
+        Some(alice_dm.as_str())
+    );
+    assert!(snapshot.dm_sidebar[2].conversation_id.is_none());
+    assert!(snapshot.dm_sidebar[3].conversation_id.is_none());
+    assert_eq!(snapshot.dm_sidebar[2].peer_username, bob.username);
+    assert_eq!(snapshot.dm_sidebar[3].peer_username, dave.username);
+}
+
+#[tokio::test]
 async fn sqlite_services_track_session_presence_counts() {
     let (_config, state) = test_state("presence").await;
     let owner = bootstrap_owner(&state, "SHA256:presence-owner", "ssh-ed25519 owner").await;

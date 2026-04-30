@@ -67,7 +67,10 @@ pub struct App {
 pub(crate) enum WorkspaceRow {
     Channel(String),
     Thread(String),
-    Dm(String),
+    Dm {
+        conversation_id: Option<String>,
+        username: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

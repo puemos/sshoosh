@@ -288,6 +288,77 @@ pub(crate) async fn load_conversations(
         .collect())
 }
 
+pub(crate) async fn load_dm_sidebar(
+    pool: &Database,
+    account_id: &str,
+) -> anyhow::Result<Vec<DmSidebarItem>> {
+    let rows = query(
+        "SELECT peer.username AS peer_username,
+                c.id AS conversation_id,
+                COALESCE(c.last_message_index, 0) AS last_message_index,
+                CASE
+                  WHEN c.id IS NULL THEN 0
+                  WHEN me.muted_until IS NOT NULL AND me.muted_until > ? THEN 0
+                  ELSE (
+                    SELECT COUNT(*)
+                    FROM conversation_messages msg
+                    WHERE msg.conversation_id = c.id
+                      AND msg.deleted_at IS NULL
+                      AND msg.obj_index > me.last_read_index
+                  )
+                END AS unread_count,
+                c.last_activity_at,
+                me.muted_until,
+                me.saved_at,
+                (
+                    SELECT body
+                    FROM conversation_messages latest
+                    WHERE latest.conversation_id = c.id AND latest.deleted_at IS NULL
+                    ORDER BY latest.obj_index DESC
+                    LIMIT 1
+                ) AS last_message_preview
+         FROM accounts peer
+         LEFT JOIN conversations c
+           ON c.id = (
+             SELECT cm_other.conversation_id
+             FROM conversation_members cm_other
+             JOIN conversation_members cm_me
+               ON cm_me.conversation_id = cm_other.conversation_id
+              AND cm_me.account_id = ?
+             WHERE cm_other.account_id = peer.id
+             LIMIT 1
+           )
+          AND c.archived_at IS NULL
+         LEFT JOIN conversation_members me
+           ON me.conversation_id = c.id AND me.account_id = ?
+         WHERE peer.id <> ?
+           AND peer.activated_at IS NOT NULL
+           AND peer.disabled_at IS NULL
+         ORDER BY CASE WHEN c.id IS NULL THEN 1 ELSE 0 END,
+                  c.last_activity_at DESC,
+                  lower(peer.username) ASC",
+    )
+    .bind(now())
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| DmSidebarItem {
+            conversation_id: row.get("conversation_id"),
+            peer_username: row.get("peer_username"),
+            last_message_index: row.get("last_message_index"),
+            unread_count: row.get("unread_count"),
+            last_activity_at: row.get("last_activity_at"),
+            last_message_preview: row.get("last_message_preview"),
+            muted_until: row.get("muted_until"),
+            saved_at: row.get("saved_at"),
+        })
+        .collect())
+}
+
 pub(crate) async fn load_conversation_messages(
     pool: &Database,
     conversation_id: &str,

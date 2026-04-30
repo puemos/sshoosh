@@ -362,6 +362,7 @@ impl ServerState {
         };
 
         let conversations = load_conversations(self.db.read_pool(), account_id).await?;
+        let dm_sidebar = load_dm_sidebar(self.db.read_pool(), account_id).await?;
         let selected_conversation_id = selected_conversation_id
             .filter(|id| {
                 conversations
@@ -397,6 +398,7 @@ impl ServerState {
             threads,
             comments,
             conversations,
+            dm_sidebar,
             conversation_messages,
             comments_has_more,
             conversation_messages_has_more,

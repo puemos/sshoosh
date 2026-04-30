@@ -13,8 +13,8 @@ mod cases {
     use crate::{
         app::state,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, Role, SearchKind,
-            SearchResult, ThreadItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, Role,
+            SearchKind, SearchResult, ThreadItem,
         },
     };
 
@@ -813,6 +813,55 @@ mod cases {
         let dm_item = cell_for_text(buffer, width, height, "@alice");
         assert_eq!(dm_item.fg, theme::MUTED);
         assert!(!dm_item.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn workspace_renders_dm_users_without_conversations() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            dm_sidebar: vec![DmSidebarItem {
+                conversation_id: None,
+                peer_username: "bob".to_string(),
+                last_message_index: 0,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            selected_channel_id: Some("general".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("DMs"));
+        assert!(rendered.contains("@bob"));
+        assert!(rendered.contains("offline"));
     }
 
     #[test]

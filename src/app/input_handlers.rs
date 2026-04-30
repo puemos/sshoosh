@@ -136,7 +136,7 @@ impl App {
             HitTarget::WorkspaceScroll
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
-            | HitTarget::WorkspaceDm(_) => self.move_workspace(delta),
+            | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll | HitTarget::MessageLink(_) => self.move_detail(delta),
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
@@ -243,7 +243,14 @@ impl App {
                     self.select_thread(channel_id, thread_id);
                 }
             }
-            HitTarget::WorkspaceDm(conversation_id) => self.select_conversation(conversation_id),
+            HitTarget::WorkspaceDm {
+                conversation_id: Some(conversation_id),
+                ..
+            } => self.select_conversation(conversation_id),
+            HitTarget::WorkspaceDm {
+                conversation_id: None,
+                username,
+            } => self.actions.push(Action::OpenDm { target: username }),
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
             HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
             HitTarget::EditableMessage(_) => self.ui.active_pane = ActivePane::Detail,

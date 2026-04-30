@@ -65,9 +65,23 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         "DMs",
         theme::section_header(matches!(&ui.route, Route::Dms)),
     ))));
-    for dm in &snapshot.conversations {
+    let fallback_dm_sidebar;
+    let dm_sidebar = if snapshot.dm_sidebar.is_empty() {
+        fallback_dm_sidebar = snapshot
+            .conversations
+            .iter()
+            .map(crate::service::DmSidebarItem::from)
+            .collect::<Vec<_>>();
+        fallback_dm_sidebar.as_slice()
+    } else {
+        snapshot.dm_sidebar.as_slice()
+    };
+    for dm in dm_sidebar {
         let row = items.len() as u16;
-        let selected = snapshot.selected_conversation_id.as_deref() == Some(dm.id.as_str())
+        let selected = dm
+            .conversation_id
+            .as_deref()
+            .is_some_and(|id| snapshot.selected_conversation_id.as_deref() == Some(id))
             && matches!(ui.route, Route::Dms);
         let unread_badge = unread_badge(dm.unread_count);
         let state_badge = dm_state_badge(snapshot, dm);
@@ -83,7 +97,13 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             Span::styled(state_badge, theme::muted()),
             Span::styled(unread_badge, theme::unread()),
         ])));
-        row_hits.push((row, HitTarget::WorkspaceDm(dm.id.clone())));
+        row_hits.push((
+            row,
+            HitTarget::WorkspaceDm {
+                conversation_id: dm.conversation_id.clone(),
+                username: dm.peer_username.clone(),
+            },
+        ));
     }
     ensure_scroll_row_visible(&mut ui.workspace_scroll, selected_y, scroll_area.height);
     let scroll_offset_y = ui.workspace_scroll.offset().y;
@@ -157,7 +177,7 @@ pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String 
     out
 }
 
-pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::Conversation) -> String {
+pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::DmSidebarItem) -> String {
     let mut out = String::new();
     out.push(' ');
     out.push_str(match snapshot.presence_for(&dm.peer_username) {

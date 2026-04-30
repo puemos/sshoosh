@@ -75,12 +75,22 @@ impl App {
                 );
             }
         }
-        rows.extend(
-            self.snapshot
-                .conversations
-                .iter()
-                .map(|dm| WorkspaceRow::Dm(dm.id.clone())),
-        );
+        if self.snapshot.dm_sidebar.is_empty() {
+            rows.extend(
+                self.snapshot
+                    .conversations
+                    .iter()
+                    .map(|dm| WorkspaceRow::Dm {
+                        conversation_id: Some(dm.id.clone()),
+                        username: dm.peer_username.clone(),
+                    }),
+            );
+        } else {
+            rows.extend(self.snapshot.dm_sidebar.iter().map(|dm| WorkspaceRow::Dm {
+                conversation_id: dm.conversation_id.clone(),
+                username: dm.peer_username.clone(),
+            }));
+        }
         rows
     }
 
@@ -101,7 +111,26 @@ impl App {
                 .snapshot
                 .selected_conversation_id
                 .as_ref()
-                .map(|id| WorkspaceRow::Dm(id.clone())),
+                .and_then(|id| {
+                    self.snapshot
+                        .dm_sidebar
+                        .iter()
+                        .find(|dm| dm.conversation_id.as_deref() == Some(id.as_str()))
+                        .map(|dm| WorkspaceRow::Dm {
+                            conversation_id: Some(id.clone()),
+                            username: dm.peer_username.clone(),
+                        })
+                        .or_else(|| {
+                            self.snapshot
+                                .conversations
+                                .iter()
+                                .find(|dm| dm.id == *id)
+                                .map(|dm| WorkspaceRow::Dm {
+                                    conversation_id: Some(id.clone()),
+                                    username: dm.peer_username.clone(),
+                                })
+                        })
+                }),
             _ => self
                 .snapshot
                 .selected_channel_id
@@ -158,16 +187,23 @@ impl App {
                 }
                 self.refresh_requested = true;
             }
-            WorkspaceRow::Dm(conversation_id) => {
-                let changed = self.snapshot.selected_conversation_id.as_deref()
-                    != Some(conversation_id.as_str());
-                self.snapshot.selected_conversation_id = Some(conversation_id);
-                self.ui.route = Route::Dms;
-                self.ui.active_pane = ActivePane::Rail;
-                if changed {
-                    self.snapshot.conversation_messages.clear();
-                    self.reset_detail_scroll();
-                    self.refresh_requested = true;
+            WorkspaceRow::Dm {
+                conversation_id,
+                username,
+            } => {
+                if let Some(conversation_id) = conversation_id {
+                    let changed = self.snapshot.selected_conversation_id.as_deref()
+                        != Some(conversation_id.as_str());
+                    self.snapshot.selected_conversation_id = Some(conversation_id);
+                    self.ui.route = Route::Dms;
+                    self.ui.active_pane = ActivePane::Rail;
+                    if changed {
+                        self.snapshot.conversation_messages.clear();
+                        self.reset_detail_scroll();
+                        self.refresh_requested = true;
+                    }
+                } else {
+                    self.actions.push(Action::OpenDm { target: username });
                 }
             }
         }
