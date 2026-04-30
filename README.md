@@ -153,7 +153,7 @@ Bare URLs and Markdown links render as OSC8 terminal hyperlinks where supported.
 
 V1 creates durable in-app notifications for `@username` mentions, new DMs, and replies to threads you participate in. Muted threads and muted DMs suppress new notifications until the mute expires. Use `/notification list`, `/notification mentions`, and `/notification read` in the TUI or `sshoosh notifications ...` from the CLI.
 
-Outgoing webhooks are admin-managed. Each notification queues delivery jobs for enabled webhooks, and a background worker retries failed deliveries with exponential backoff before marking them failed. Delivery history is visible with `/webhooks` or `sshoosh webhooks list`.
+Outgoing webhooks are admin-managed. Each notification queues delivery jobs for enabled webhooks, and a background worker retries failed deliveries with exponential backoff before marking them failed. Delivery history is visible with `/webhook list` or `sshoosh webhooks list`.
 
 Webhook payloads are JSON and include the notification kind, title, body, and notification id. Use HTTPS endpoints in production.
 
