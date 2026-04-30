@@ -75,6 +75,14 @@ pub fn unread() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+pub fn selection() -> Style {
+    Style::default().fg(BG).bg(ACCENT)
+}
+
+pub fn strong_selection() -> Style {
+    selection().add_modifier(Modifier::BOLD)
+}
+
 pub fn message_author(is_current_user: bool) -> Style {
     Style::default()
         .fg(if is_current_user { ACCENT_SOFT } else { ACCENT })
@@ -88,6 +96,33 @@ pub fn message_meta() -> Style {
 
 pub fn message_body() -> Style {
     Style::default().fg(TEXT).bg(CARD)
+}
+
+pub fn message_link() -> Style {
+    Style::default()
+        .fg(ACCENT_SOFT)
+        .bg(CARD)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
+pub fn message_link_target() -> Style {
+    Style::default().fg(MUTED).bg(CARD)
+}
+
+pub fn message_code() -> Style {
+    Style::default().fg(SUBTLE).bg(CARD)
+}
+
+pub fn message_strong(style: Style) -> Style {
+    style.add_modifier(Modifier::BOLD)
+}
+
+pub fn message_emphasis(style: Style) -> Style {
+    style.add_modifier(Modifier::ITALIC)
+}
+
+pub fn message_strikethrough(style: Style) -> Style {
+    style.add_modifier(Modifier::CROSSED_OUT)
 }
 
 pub fn message_card() -> Style {

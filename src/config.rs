@@ -6,4 +6,5 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub server_key_path: PathBuf,
+    pub mouse_enabled: bool,
 }

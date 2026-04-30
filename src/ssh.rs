@@ -24,7 +24,11 @@ use tokio::{
 use crate::{
     app::{Action, App},
     config::Config,
-    service::{Account, NextUnread, ServerState},
+    service::{
+        Account, AccountSummary, AuditEntry, ChannelDirectoryItem, ChannelMemberSummary,
+        InviteSummary, MentionSummary, NextUnread, NotificationSummary, ServerState, SshKeySummary,
+        WebhookDeliverySummary, WebhookSummary,
+    },
     terminal,
 };
 
@@ -37,6 +41,7 @@ const EXIT_MESSAGE: &str = "\r\nBye from sshoosh.\r\n";
 #[derive(Clone)]
 struct Server {
     state: ServerState,
+    mouse_enabled: bool,
 }
 
 pub async fn run(config: Config, state: ServerState) -> anyhow::Result<()> {
@@ -61,7 +66,10 @@ pub async fn run_with_listener(
         keepalive_max: 3,
         ..Default::default()
     });
-    let server = Server { state };
+    let server = Server {
+        state,
+        mouse_enabled: config.mouse_enabled,
+    };
     tracing::info!(addr = %listener.local_addr()?, "sshoosh ssh server listening");
 
     loop {
@@ -69,7 +77,8 @@ pub async fn run_with_listener(
         let ssh_config = ssh_config.clone();
         let server = server.clone();
         tokio::spawn(async move {
-            let handler = ClientHandler::new(server.state.clone(), Some(peer_addr));
+            let handler =
+                ClientHandler::new(server.state.clone(), Some(peer_addr), server.mouse_enabled);
             match russh::server::run_stream(ssh_config, tcp, handler).await {
                 Ok(session) => {
                     if let Err(err) = session.await {
@@ -119,6 +128,7 @@ impl RenderSignal {
 
 struct ClientHandler {
     state: ServerState,
+    mouse_enabled: bool,
     account: Option<Account>,
     peer_addr: Option<SocketAddr>,
     channel: Option<Channel<Msg>>,
@@ -129,9 +139,10 @@ struct ClientHandler {
 }
 
 impl ClientHandler {
-    fn new(state: ServerState, peer_addr: Option<SocketAddr>) -> Self {
+    fn new(state: ServerState, peer_addr: Option<SocketAddr>, mouse_enabled: bool) -> Self {
         Self {
             state,
+            mouse_enabled,
             account: None,
             peer_addr,
             channel: None,
@@ -147,7 +158,7 @@ impl russh::server::Server for Server {
     type Handler = ClientHandler;
 
     fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
-        ClientHandler::new(self.state.clone(), peer_addr)
+        ClientHandler::new(self.state.clone(), peer_addr, self.mouse_enabled)
     }
 }
 
@@ -246,7 +257,8 @@ impl russh::server::Handler for ClientHandler {
         };
         let channel_id = chan.id();
         let handle = session.handle();
-        let init = terminal::enter_alt_screen();
+        let mouse_enabled = self.mouse_enabled;
+        let init = terminal::enter_alt_screen(mouse_enabled);
         let _ = timeout(Duration::from_millis(100), handle.data(channel_id, init)).await;
 
         let state = self.state.clone();
@@ -282,13 +294,15 @@ impl russh::server::Handler for ClientHandler {
                     Ok(should_quit) => {
                         last_render = Instant::now();
                         if should_quit {
-                            clean_disconnect(&handle, channel_id).await;
+                            clean_disconnect(&handle, channel_id, mouse_enabled).await;
                             break;
                         }
                     }
                     Err(err) => {
                         tracing::debug!(error = ?err, "render loop failed");
-                        let _ = handle.data(channel_id, terminal::leave_alt_screen()).await;
+                        let _ = handle
+                            .data(channel_id, terminal::leave_alt_screen(mouse_enabled))
+                            .await;
                         let _ = handle.eof(channel_id).await;
                         let _ = handle.close(channel_id).await;
                         break;
@@ -431,11 +445,12 @@ async fn render_once(
 }
 
 async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Action) {
-    let (account_id, channel_id, thread_id, conversation_id) = {
+    let (account_id, channel_id, channel_slug, thread_id, conversation_id) = {
         let app = app.lock().await;
         (
             app.account.id.clone(),
             app.selected_channel_id(),
+            app.selected_channel_slug(),
             app.selected_thread_id(),
             app.selected_conversation_id(),
         )
@@ -444,6 +459,10 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
     let result = match action {
         Action::CreateInvite => state
             .create_invite(account_id)
+            .await
+            .map(|code| format!("Invite code: {code}")),
+        Action::CreateInviteWithOptions { role, ttl_hours } => state
+            .create_invite_with_options(&account_id, role, ttl_hours)
             .await
             .map(|code| format!("Invite code: {code}")),
         Action::AcceptInvite { code, username } => state
@@ -466,6 +485,56 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             }
             Err(err) => Err(err),
         },
+        Action::LeaveChannel { slug } => {
+            if let Some(slug) = slug.or(channel_slug.clone()) {
+                state
+                    .leave_channel(&account_id, &slug)
+                    .await
+                    .map(|_| format!("Left {slug}"))
+            } else {
+                Err(anyhow::anyhow!("No channel selected"))
+            }
+        }
+        Action::ListChannels => state
+            .list_channels(&account_id, false)
+            .await
+            .map(|rows| format_channels(&rows)),
+        Action::RenameChannel { slug, name } => {
+            if let Some(slug) = slug.or(channel_slug.clone()) {
+                state
+                    .rename_channel(&account_id, &slug, &name)
+                    .await
+                    .map(|_| format!("Renamed {slug}"))
+            } else {
+                Err(anyhow::anyhow!("No channel selected"))
+            }
+        }
+        Action::SetChannelTopic { slug, topic } => {
+            if let Some(slug) = slug.or(channel_slug.clone()) {
+                state
+                    .set_channel_topic(&account_id, &slug, &topic)
+                    .await
+                    .map(|_| format!("Updated {slug} topic"))
+            } else {
+                Err(anyhow::anyhow!("No channel selected"))
+            }
+        }
+        Action::SetChannelArchived { slug, archived } => {
+            if let Some(slug) = slug.or(channel_slug.clone()) {
+                state
+                    .set_channel_archived(&account_id, &slug, archived)
+                    .await
+                    .map(|_| {
+                        if archived {
+                            format!("Archived {slug}")
+                        } else {
+                            format!("Unarchived {slug}")
+                        }
+                    })
+            } else {
+                Err(anyhow::anyhow!("No channel selected"))
+            }
+        }
         Action::CreateThread { title, body } => match channel_id {
             Some(channel_id) => match state
                 .create_thread(account_id, channel_id.clone(), title, body)
@@ -495,7 +564,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                 .add_comment(account_id, thread_id, body)
                 .await
                 .map(|_| "Comment added".to_string()),
-            (_, None) => Err(anyhow::anyhow!("No thread selected; use /thread title")),
+            (_, None) => Err(anyhow::anyhow!("No thread selected; use /thread new title")),
         },
         Action::OpenDm { target } => match state.open_dm(account_id, target).await {
             Ok(conversation_id) => {
@@ -519,7 +588,7 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
                     Err(err) => Err(err),
                 }
             }
-            None => Err(anyhow::anyhow!("No DM selected; use /dm @user")),
+            None => Err(anyhow::anyhow!("No DM selected; use /dm open @user")),
         },
         Action::MarkThreadRead => match thread_id {
             Some(thread_id) => state
@@ -566,11 +635,280 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
             Ok(None) => Ok("No unread activity".to_string()),
             Err(err) => Err(err),
         },
+        Action::ListUsers => state
+            .list_accounts(&account_id)
+            .await
+            .map(|rows| format_accounts(&rows)),
+        Action::SetUsername { username } => state
+            .rename_user(&account_id, &account_id, &username)
+            .await
+            .map(|_| format!("Username updated to @{username}")),
+        Action::SetProfile { display_name } => state
+            .set_display_name(&account_id, &account_id, &display_name)
+            .await
+            .map(|_| "Profile updated".to_string()),
+        Action::SetUserDisabled { username, disabled } => state
+            .set_user_disabled(&account_id, &username, disabled)
+            .await
+            .map(|_| {
+                if disabled {
+                    format!("Disabled @{username}")
+                } else {
+                    format!("Enabled @{username}")
+                }
+            }),
+        Action::SetUserRole { username, role } => state
+            .set_user_role(&account_id, &username, role)
+            .await
+            .map(|_| format!("Set @{username} role to {}", role.as_str())),
+        Action::ListKeys => state
+            .list_ssh_keys(&account_id)
+            .await
+            .map(|rows| format_keys(&rows)),
+        Action::ListMyKeys => state
+            .list_my_ssh_keys(&account_id)
+            .await
+            .map(|rows| format_keys(&rows)),
+        Action::AddKey { public_key, label } => state
+            .add_ssh_key(&account_id, None, &public_key, label.as_deref())
+            .await
+            .map(|row| format!("Added key {}", row.fingerprint)),
+        Action::LabelKey { key, label } => state
+            .label_ssh_key(&account_id, &key, &label)
+            .await
+            .map(|_| "SSH key label updated".to_string()),
+        Action::RevokeKey { key } => state
+            .revoke_ssh_key(&account_id, &key)
+            .await
+            .map(|_| "SSH key revoked".to_string()),
+        Action::ListInvites => state
+            .list_invites(&account_id)
+            .await
+            .map(|rows| format_invites(&rows)),
+        Action::RevokeInvite { invite_id } => state
+            .revoke_invite(&account_id, &invite_id)
+            .await
+            .map(|_| "Invite revoked".to_string()),
+        Action::ListChannelMembers { slug } => state
+            .list_channel_members(&account_id, &slug)
+            .await
+            .map(|rows| format_channel_members(&rows)),
+        Action::AddChannelMember { slug, username } => state
+            .add_channel_member(&account_id, &slug, &username)
+            .await
+            .map(|_| format!("Added @{username} to {slug}")),
+        Action::RemoveChannelMember { slug, username } => state
+            .remove_channel_member(&account_id, &slug, &username)
+            .await
+            .map(|_| format!("Removed @{username} from {slug}")),
+        Action::RenameThread { title } => match thread_id {
+            Some(thread_id) => state
+                .rename_thread(&account_id, &thread_id, &title)
+                .await
+                .map(|_| "Thread renamed".to_string()),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::DeleteThread => match thread_id {
+            Some(thread_id) => state
+                .delete_thread(&account_id, &thread_id)
+                .await
+                .map(|_| "Thread deleted".to_string()),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::SetThreadArchived { archived } => match thread_id {
+            Some(thread_id) => state
+                .set_thread_archived(&account_id, &thread_id, archived)
+                .await
+                .map(|_| {
+                    if archived {
+                        "Thread archived".to_string()
+                    } else {
+                        "Thread unarchived".to_string()
+                    }
+                }),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::SetThreadPinned { pinned } => match thread_id {
+            Some(thread_id) => state
+                .set_thread_pinned(&account_id, &thread_id, pinned)
+                .await
+                .map(|_| {
+                    if pinned {
+                        "Thread pinned".to_string()
+                    } else {
+                        "Thread unpinned".to_string()
+                    }
+                }),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::SetThreadMuted { ttl_hours } => match (conversation_id, thread_id) {
+            (Some(conversation_id), _) => state
+                .set_conversation_muted(&account_id, &conversation_id, ttl_hours)
+                .await
+                .map(|_| mute_message(ttl_hours, "DM")),
+            (None, Some(thread_id)) => state
+                .set_thread_muted(&account_id, &thread_id, ttl_hours)
+                .await
+                .map(|_| mute_message(ttl_hours, "Thread")),
+            _ => Err(anyhow::anyhow!("No thread or DM selected")),
+        },
+        Action::SetThreadSaved { saved } => match (conversation_id, thread_id) {
+            (Some(conversation_id), _) => state
+                .set_conversation_saved(&account_id, &conversation_id, saved)
+                .await
+                .map(|_| saved_message(saved, "DM")),
+            (None, Some(thread_id)) => state
+                .set_thread_saved(&account_id, &thread_id, saved)
+                .await
+                .map(|_| saved_message(saved, "Thread")),
+            _ => Err(anyhow::anyhow!("No thread or DM selected")),
+        },
+        Action::EditComment { index, body } => match thread_id {
+            Some(thread_id) => state
+                .edit_comment(&account_id, &thread_id, index, &body)
+                .await
+                .map(|_| format!("Comment #{index} edited")),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::DeleteComment { index } => match thread_id {
+            Some(thread_id) => state
+                .delete_comment(&account_id, &thread_id, index)
+                .await
+                .map(|_| format!("Comment #{index} deleted")),
+            None => Err(anyhow::anyhow!("No thread selected")),
+        },
+        Action::EditDm { index, body } => match conversation_id {
+            Some(conversation_id) => state
+                .edit_dm(&account_id, &conversation_id, index, &body)
+                .await
+                .map(|_| format!("DM #{index} edited")),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::DeleteDm { index } => match conversation_id {
+            Some(conversation_id) => state
+                .delete_dm(&account_id, &conversation_id, index)
+                .await
+                .map(|_| format!("DM #{index} deleted")),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::SetDmMuted { ttl_hours } => match conversation_id {
+            Some(conversation_id) => state
+                .set_conversation_muted(&account_id, &conversation_id, ttl_hours)
+                .await
+                .map(|_| mute_message(ttl_hours, "DM")),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::SetDmSaved { saved } => match conversation_id {
+            Some(conversation_id) => state
+                .set_conversation_saved(&account_id, &conversation_id, saved)
+                .await
+                .map(|_| saved_message(saved, "DM")),
+            None => Err(anyhow::anyhow!("No DM selected")),
+        },
+        Action::React { emoji, index } => {
+            react_or_unreact(
+                state,
+                &account_id,
+                thread_id.as_deref(),
+                conversation_id.as_deref(),
+                emoji,
+                index,
+                false,
+            )
+            .await
+        }
+        Action::Unreact { emoji, index } => {
+            react_or_unreact(
+                state,
+                &account_id,
+                thread_id.as_deref(),
+                conversation_id.as_deref(),
+                emoji,
+                index,
+                true,
+            )
+            .await
+        }
+        Action::ListMentions => state
+            .list_mentions(&account_id, 50)
+            .await
+            .map(|rows| format_mentions(&rows)),
+        Action::ListNotifications => state
+            .list_notifications(&account_id, 50)
+            .await
+            .map(|rows| format_notifications(&rows)),
+        Action::MarkNotificationRead { notification_id } => state
+            .mark_notification_read(&account_id, notification_id.as_deref())
+            .await
+            .map(|_| "Notifications marked read".to_string()),
+        Action::ListWebhooks => state
+            .list_webhooks(&account_id)
+            .await
+            .map(|(webhooks, deliveries)| format_webhooks(&webhooks, &deliveries)),
+        Action::AddWebhook { name, url } => state
+            .add_webhook(&account_id, &name, &url)
+            .await
+            .map(|id| format!("Webhook added: {id}")),
+        Action::RemoveWebhook { webhook_id } => state
+            .remove_webhook(&account_id, &webhook_id)
+            .await
+            .map(|_| "Webhook removed".to_string()),
+        Action::ListAudit => state
+            .list_audit(&account_id, 100)
+            .await
+            .map(|rows| format_audit(&rows)),
+        Action::Search { query } => {
+            let limit = app.lock().await.reset_search_limit();
+            match state.search_page(&account_id, &query, limit).await {
+                Ok(page) => {
+                    app.lock()
+                        .await
+                        .set_search_results(query, page.results, page.has_more, true);
+                    Ok("Search complete".to_string())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        Action::LoadMore => {
+            let search_request = {
+                let mut app = app.lock().await;
+                if let Some(query) = app.search_query() {
+                    let limit = app.increase_search_limit();
+                    Some((query, limit))
+                } else {
+                    None
+                }
+            };
+            if let Some((query, limit)) = search_request {
+                match state.search_page(&account_id, &query, limit).await {
+                    Ok(page) => {
+                        app.lock().await.set_search_results(
+                            query,
+                            page.results,
+                            page.has_more,
+                            false,
+                        );
+                        Ok("Loaded more results".to_string())
+                    }
+                    Err(err) => Err(err),
+                }
+            } else {
+                let limit = app.lock().await.increase_history_limit();
+                app.lock().await.force_full_repaint();
+                Ok(format!("Loaded latest {limit} history items"))
+            }
+        }
+        Action::LoadOlder => {
+            let limit = app.lock().await.increase_history_limit();
+            app.lock().await.force_full_repaint();
+            Ok(format!("Loaded older history up to {limit} items"))
+        }
     };
 
     let mut app = app.lock().await;
     match result {
         Ok(message) if message.starts_with("Invite code:") => app.set_banner_modal_ok(message),
+        Ok(message) if message.contains('\n') => app.set_banner_modal_ok(message),
         Ok(message) => app.set_banner_ok(message),
         Err(err) => app.set_banner_err(err.to_string()),
     }
@@ -579,8 +917,48 @@ async fn process_action(state: &ServerState, app: &Arc<Mutex<App>>, action: Acti
     }
 }
 
-async fn clean_disconnect(handle: &russh::server::Handle, channel_id: ChannelId) {
-    let _ = handle.data(channel_id, terminal::leave_alt_screen()).await;
+async fn react_or_unreact(
+    state: &ServerState,
+    account_id: &str,
+    thread_id: Option<&str>,
+    conversation_id: Option<&str>,
+    emoji: String,
+    index: Option<i64>,
+    remove: bool,
+) -> anyhow::Result<String> {
+    if let Some(conversation_id) = conversation_id {
+        let index = index.ok_or_else(|| anyhow::anyhow!("DM reaction requires a message index"))?;
+        state
+            .react_to_dm(account_id, conversation_id, index, &emoji, remove)
+            .await?;
+    } else if let Some(thread_id) = thread_id {
+        if let Some(index) = index {
+            state
+                .react_to_comment(account_id, thread_id, index, &emoji, remove)
+                .await?;
+        } else {
+            state
+                .react_to_thread(account_id, thread_id, &emoji, remove)
+                .await?;
+        }
+    } else {
+        anyhow::bail!("No thread or DM selected");
+    }
+    Ok(if remove {
+        format!("Removed {emoji} reaction")
+    } else {
+        format!("Reacted {emoji}")
+    })
+}
+
+async fn clean_disconnect(
+    handle: &russh::server::Handle,
+    channel_id: ChannelId,
+    mouse_enabled: bool,
+) {
+    let _ = handle
+        .data(channel_id, terminal::leave_alt_screen(mouse_enabled))
+        .await;
     let _ = handle
         .data(channel_id, EXIT_MESSAGE.as_bytes().to_vec())
         .await;
@@ -593,4 +971,206 @@ fn reject_publickey_only() -> Auth {
         proceed_with_methods: Some(russh::MethodSet::from(&[russh::MethodKind::PublicKey][..])),
         partial_success: false,
     }
+}
+
+fn format_accounts(rows: &[AccountSummary]) -> String {
+    let mut out = String::from("Users\n");
+    for row in rows {
+        let state = if row.disabled {
+            "disabled"
+        } else if row.activated {
+            "active"
+        } else {
+            "pending"
+        };
+        out.push_str(&format!(
+            "@{}  {}  {}  last_seen:{}\n",
+            row.username,
+            row.role.as_str(),
+            state,
+            row.last_seen_at.as_deref().unwrap_or("-")
+        ));
+    }
+    out
+}
+
+fn format_keys(rows: &[SshKeySummary]) -> String {
+    let mut out = String::from("SSH keys\n");
+    for row in rows {
+        let state = row.revoked_at.as_deref().unwrap_or("active");
+        out.push_str(&format!(
+            "{}  @{}  {}  {}\n",
+            short_id(&row.id),
+            row.username,
+            row.fingerprint,
+            state
+        ));
+    }
+    out
+}
+
+fn format_invites(rows: &[InviteSummary]) -> String {
+    let mut out = String::from("Invites\n");
+    for row in rows {
+        let state = if row.accepted_at.is_some() {
+            "accepted"
+        } else if row.revoked_at.is_some() {
+            "revoked"
+        } else {
+            "open"
+        };
+        out.push_str(&format!(
+            "{}  {}  by @{}  {}  expires:{}\n",
+            short_id(&row.id),
+            row.role_on_accept.as_str(),
+            row.created_by,
+            state,
+            row.expires_at.as_deref().unwrap_or("-")
+        ));
+    }
+    out
+}
+
+fn format_channel_members(rows: &[ChannelMemberSummary]) -> String {
+    let title = rows
+        .first()
+        .map(|row| format!("Members of #{}\n", row.channel_slug))
+        .unwrap_or_else(|| "Members\n".to_string());
+    let mut out = title;
+    for row in rows {
+        out.push_str(&format!(
+            "@{}  {}  joined:{}\n",
+            row.username, row.role, row.joined_at
+        ));
+    }
+    out
+}
+
+fn format_channels(rows: &[ChannelDirectoryItem]) -> String {
+    let mut out = String::from("Channels\n");
+    for row in rows {
+        out.push_str(&format!(
+            "#{}  {}  {}  {}{}\n",
+            row.slug,
+            row.visibility,
+            if row.joined { "joined" } else { "joinable" },
+            if row.archived { "archived" } else { "active" },
+            row.topic
+                .as_ref()
+                .map(|topic| format!("  {topic}"))
+                .unwrap_or_default()
+        ));
+    }
+    out
+}
+
+fn format_mentions(rows: &[MentionSummary]) -> String {
+    let mut out = String::from("Mentions\n");
+    for row in rows {
+        out.push_str(&format!(
+            "{}  @{}  {}  {}  {}\n",
+            short_id(&row.id),
+            row.actor_username,
+            row.source_kind,
+            if row.read_at.is_some() {
+                "read"
+            } else {
+                "unread"
+            },
+            row.body.replace('\n', " ")
+        ));
+    }
+    out
+}
+
+fn format_notifications(rows: &[NotificationSummary]) -> String {
+    let mut out = String::from("Notifications\n");
+    for row in rows {
+        out.push_str(&format!(
+            "{}  {}  {}  {}  {}\n",
+            short_id(&row.id),
+            row.kind,
+            row.actor_username
+                .as_ref()
+                .map(|username| format!("@{username}"))
+                .unwrap_or_else(|| "-".to_string()),
+            if row.read_at.is_some() {
+                "read"
+            } else {
+                "unread"
+            },
+            row.body.replace('\n', " ")
+        ));
+    }
+    out
+}
+
+fn format_webhooks(webhooks: &[WebhookSummary], deliveries: &[WebhookDeliverySummary]) -> String {
+    let mut out = String::from("Webhooks\n");
+    for row in webhooks {
+        out.push_str(&format!(
+            "{}  {}  {}  {}\n",
+            short_id(&row.id),
+            row.name,
+            if row.enabled && row.disabled_at.is_none() {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            row.url
+        ));
+    }
+    out.push_str("\nDeliveries\n");
+    for row in deliveries {
+        out.push_str(&format!(
+            "{}  {}  {}  attempts:{}  next:{}{}\n",
+            short_id(&row.id),
+            row.webhook_name,
+            row.status,
+            row.attempts,
+            row.next_attempt_at,
+            row.last_error
+                .as_ref()
+                .map(|err| format!("  error:{err}"))
+                .unwrap_or_default()
+        ));
+    }
+    out
+}
+
+fn format_audit(rows: &[AuditEntry]) -> String {
+    let mut out = String::from("Audit\n");
+    for row in rows {
+        out.push_str(&format!(
+            "{}  {}  {}  {}  {}\n",
+            row.created_at,
+            row.actor_username
+                .as_ref()
+                .map(|username| format!("@{username}"))
+                .unwrap_or_else(|| "-".to_string()),
+            row.action,
+            row.target.as_deref().unwrap_or("-"),
+            row.metadata_json
+        ));
+    }
+    out
+}
+
+fn mute_message(ttl_hours: Option<i64>, label: &str) -> String {
+    match ttl_hours {
+        Some(hours) => format!("{label} muted for {hours}h"),
+        None => format!("{label} unmuted"),
+    }
+}
+
+fn saved_message(saved: bool, label: &str) -> String {
+    if saved {
+        format!("{label} saved")
+    } else {
+        format!("{label} unsaved")
+    }
+}
+
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
 }

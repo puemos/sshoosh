@@ -4,10 +4,10 @@ use std::{
 };
 
 use crate::service::Snapshot;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use tui_scrollview::ScrollViewState;
 
-use super::commands::PaletteItem;
+use super::{commands::PaletteItem, input::MouseModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
@@ -26,16 +26,12 @@ pub enum ActivePane {
     Detail,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Route {
     Channel(String),
+    #[default]
     Dms,
-}
-
-impl Default for Route {
-    fn default() -> Self {
-        Self::Dms
-    }
+    Search,
 }
 
 #[derive(Clone, Debug)]
@@ -50,7 +46,10 @@ pub struct UiState {
     pub palette: PaletteState,
     pub prompt: PromptState,
     pub banner: Option<Banner>,
+    pub search_selected: usize,
     pub hit_map: HitMap,
+    pub link_overlays: Vec<LinkOverlay>,
+    pub selection: SelectionState,
 }
 
 impl Default for UiState {
@@ -66,9 +65,55 @@ impl Default for UiState {
             palette: PaletteState::default(),
             prompt: PromptState::default(),
             banner: None,
+            search_selected: 0,
             hit_map: HitMap::default(),
+            link_overlays: Vec::new(),
+            selection: SelectionState::default(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkOverlay {
+    pub rect: Rect,
+    pub url: String,
+    pub text: String,
+    pub style: ratatui::style::Style,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SelectionState {
+    pub pending: Option<SelectionAnchor>,
+    pub range: Option<SelectionRange>,
+    pub text: String,
+    pub copy_requested: bool,
+}
+
+impl SelectionState {
+    pub fn clear(&mut self) {
+        self.pending = None;
+        self.range = None;
+        self.text.clear();
+        self.copy_requested = false;
+    }
+
+    pub fn active_range(&self) -> Option<SelectionRange> {
+        self.range
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionAnchor {
+    pub at: Position,
+    pub region: Option<HitRegion>,
+    pub modifiers: MouseModifiers,
+    pub moved: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelectionRange {
+    pub start: Position,
+    pub end: Position,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -115,6 +160,7 @@ pub enum HitTarget {
     WorkspaceThread(String),
     WorkspaceDm(String),
     DetailScroll,
+    MessageLink(String),
     ComposerInput { scroll_y: u16 },
     AutocompleteScroll,
     AutocompleteRow(usize),
@@ -162,7 +208,9 @@ impl UiState {
                 self.active_pane = ActivePane::Detail;
             }
             let _ = conversation_id;
-        } else if let Some(channel_id) = snapshot.selected_channel_id.clone() {
+        } else if self.route != Route::Search
+            && let Some(channel_id) = snapshot.selected_channel_id.clone()
+        {
             self.route = Route::Channel(channel_id);
         }
     }
@@ -398,23 +446,12 @@ impl PaletteState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PromptState {
     pub title: String,
     pub prefix: String,
     pub placeholder: String,
     pub input: String,
-}
-
-impl Default for PromptState {
-    fn default() -> Self {
-        Self {
-            title: String::new(),
-            prefix: String::new(),
-            placeholder: String::new(),
-            input: String::new(),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

@@ -7,34 +7,184 @@ mod theme;
 use ratatui::layout::{Position, Rect};
 
 use crate::{
-    service::{Account, LiveEvent, ServerState, Snapshot},
+    service::{
+        Account, DEFAULT_HISTORY_LIMIT, LiveEvent, MAX_HISTORY_LIMIT, Role, SearchResult,
+        ServerState, Snapshot,
+    },
     terminal::{self, SharedBuffer, SshooshTerminal},
 };
+
+const DEFAULT_SEARCH_LIMIT: i64 = 50;
+const SEARCH_PAGE_SIZE: i64 = 50;
+const MAX_SEARCH_LIMIT: i64 = 500;
 
 use self::{
     commands::{CommandExecutor, CommandRegistry},
     input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
     state::{
         ActivePane, Banner, BottomBarAction, ComposerState, HitRegion, HitTarget, PaletteState,
-        PromptState, Route, UiMode, UiState,
+        PromptState, Route, SelectionAnchor, SelectionRange, UiMode, UiState,
     },
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     CreateInvite,
-    AcceptInvite { code: String, username: String },
-    CreateChannel { name: String, private: bool },
-    JoinChannel { slug: String },
-    CreateThread { title: String, body: String },
-    AddComment { body: String },
-    OpenDm { target: String },
-    SendDm { body: String },
+    CreateInviteWithOptions {
+        role: Role,
+        ttl_hours: Option<i64>,
+    },
+    AcceptInvite {
+        code: String,
+        username: String,
+    },
+    CreateChannel {
+        name: String,
+        private: bool,
+    },
+    JoinChannel {
+        slug: String,
+    },
+    LeaveChannel {
+        slug: Option<String>,
+    },
+    ListChannels,
+    RenameChannel {
+        slug: Option<String>,
+        name: String,
+    },
+    SetChannelTopic {
+        slug: Option<String>,
+        topic: String,
+    },
+    SetChannelArchived {
+        slug: Option<String>,
+        archived: bool,
+    },
+    CreateThread {
+        title: String,
+        body: String,
+    },
+    AddComment {
+        body: String,
+    },
+    OpenDm {
+        target: String,
+    },
+    SendDm {
+        body: String,
+    },
     MarkThreadRead,
     MarkThreadUnread,
     MarkDmRead,
     MarkDmUnread,
     NextUnread,
+    ListUsers,
+    SetUsername {
+        username: String,
+    },
+    SetProfile {
+        display_name: String,
+    },
+    SetUserDisabled {
+        username: String,
+        disabled: bool,
+    },
+    SetUserRole {
+        username: String,
+        role: Role,
+    },
+    ListKeys,
+    ListMyKeys,
+    AddKey {
+        public_key: String,
+        label: Option<String>,
+    },
+    LabelKey {
+        key: String,
+        label: String,
+    },
+    RevokeKey {
+        key: String,
+    },
+    ListInvites,
+    RevokeInvite {
+        invite_id: String,
+    },
+    ListChannelMembers {
+        slug: String,
+    },
+    AddChannelMember {
+        slug: String,
+        username: String,
+    },
+    RemoveChannelMember {
+        slug: String,
+        username: String,
+    },
+    RenameThread {
+        title: String,
+    },
+    DeleteThread,
+    SetThreadArchived {
+        archived: bool,
+    },
+    SetThreadPinned {
+        pinned: bool,
+    },
+    SetThreadMuted {
+        ttl_hours: Option<i64>,
+    },
+    SetThreadSaved {
+        saved: bool,
+    },
+    EditComment {
+        index: i64,
+        body: String,
+    },
+    DeleteComment {
+        index: i64,
+    },
+    EditDm {
+        index: i64,
+        body: String,
+    },
+    DeleteDm {
+        index: i64,
+    },
+    SetDmMuted {
+        ttl_hours: Option<i64>,
+    },
+    SetDmSaved {
+        saved: bool,
+    },
+    React {
+        emoji: String,
+        index: Option<i64>,
+    },
+    Unreact {
+        emoji: String,
+        index: Option<i64>,
+    },
+    ListMentions,
+    ListNotifications,
+    MarkNotificationRead {
+        notification_id: Option<String>,
+    },
+    ListWebhooks,
+    AddWebhook {
+        name: String,
+        url: String,
+    },
+    RemoveWebhook {
+        webhook_id: String,
+    },
+    ListAudit,
+    Search {
+        query: String,
+    },
+    LoadMore,
+    LoadOlder,
 }
 
 pub struct App {
@@ -50,6 +200,12 @@ pub struct App {
     decoder: InputDecoder,
     actions: Vec<Action>,
     refresh_requested: bool,
+    pending_link_open: Option<String>,
+    pending_clipboard_copy: Option<String>,
+    desired_pointer_shape: PointerShape,
+    emitted_pointer_shape: PointerShape,
+    history_limit: i64,
+    search_limit: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +213,22 @@ enum WorkspaceRow {
     Channel(String),
     Thread(String),
     Dm(String),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PointerShape {
+    #[default]
+    Default,
+    Pointer,
+}
+
+impl PointerShape {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Pointer => "pointer",
+        }
+    }
 }
 
 impl App {
@@ -84,20 +256,45 @@ impl App {
             decoder: InputDecoder::default(),
             actions: Vec::new(),
             refresh_requested: false,
+            pending_link_open: None,
+            pending_clipboard_copy: None,
+            desired_pointer_shape: PointerShape::Default,
+            emitted_pointer_shape: PointerShape::Default,
+            history_limit: DEFAULT_HISTORY_LIMIT,
+            search_limit: DEFAULT_SEARCH_LIMIT,
         })
     }
 
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
-        self.account = self.state.reload_account(&self.account.id).await?;
+        self.account = match self.state.reload_account(&self.account.id).await {
+            Ok(account) => account,
+            Err(err) => {
+                self.running = false;
+                return Err(err);
+            }
+        };
+        let search_query = self.snapshot.search_query.clone();
+        let search_results = self.snapshot.search_results.clone();
+        let search_has_more = self.snapshot.search_has_more;
         self.snapshot = self
             .state
-            .snapshot(
+            .snapshot_with_history_limit(
                 &self.account.id,
                 self.snapshot.selected_channel_id.as_deref(),
                 self.snapshot.selected_thread_id.as_deref(),
                 self.snapshot.selected_conversation_id.as_deref(),
+                self.history_limit,
             )
             .await?;
+        if self.ui.route == Route::Search {
+            self.snapshot.search_query = search_query;
+            self.snapshot.search_results = search_results;
+            self.snapshot.search_has_more = search_has_more;
+            self.ui.search_selected = self
+                .ui
+                .search_selected
+                .min(self.snapshot.search_results.len().saturating_sub(1));
+        }
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
         self.refresh_requested = false;
@@ -144,6 +341,19 @@ impl App {
         self.snapshot.selected_channel_id.clone()
     }
 
+    pub fn selected_channel_slug(&self) -> Option<String> {
+        self.snapshot
+            .selected_channel_id
+            .as_ref()
+            .and_then(|id| {
+                self.snapshot
+                    .channels
+                    .iter()
+                    .find(|channel| &channel.id == id)
+            })
+            .map(|channel| channel.slug.clone())
+    }
+
     pub fn selected_thread_id(&self) -> Option<String> {
         self.snapshot.selected_thread_id.clone()
     }
@@ -152,7 +362,35 @@ impl App {
         self.snapshot.selected_conversation_id.clone()
     }
 
+    pub fn search_query(&self) -> Option<String> {
+        matches!(self.ui.route, Route::Search)
+            .then(|| self.snapshot.search_query.clone())
+            .flatten()
+    }
+
+    pub fn reset_search_limit(&mut self) -> i64 {
+        self.search_limit = DEFAULT_SEARCH_LIMIT;
+        self.search_limit
+    }
+
+    pub fn increase_search_limit(&mut self) -> i64 {
+        self.search_limit = self
+            .search_limit
+            .saturating_add(SEARCH_PAGE_SIZE)
+            .min(MAX_SEARCH_LIMIT);
+        self.search_limit
+    }
+
+    pub fn increase_history_limit(&mut self) -> i64 {
+        self.history_limit = self
+            .history_limit
+            .saturating_add(DEFAULT_HISTORY_LIMIT)
+            .min(MAX_HISTORY_LIMIT);
+        self.history_limit
+    }
+
     pub fn select_channel(&mut self, channel_id: String) {
+        self.reset_history_limit();
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = None;
         self.snapshot.selected_conversation_id = None;
@@ -166,6 +404,7 @@ impl App {
     }
 
     pub fn select_thread(&mut self, channel_id: String, thread_id: String) {
+        self.reset_history_limit();
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = Some(thread_id);
         self.snapshot.selected_conversation_id = None;
@@ -173,6 +412,7 @@ impl App {
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::Detail;
         self.ui.threads_collapsed = false;
+        self.actions.push(Action::MarkThreadRead);
         self.refresh_requested = true;
     }
 
@@ -182,16 +422,42 @@ impl App {
     }
 
     pub fn select_conversation(&mut self, conversation_id: String) {
+        self.reset_history_limit();
         self.snapshot.selected_conversation_id = Some(conversation_id);
         self.reset_detail_scroll();
         self.ui.route = Route::Dms;
         self.ui.active_pane = ActivePane::Detail;
+        self.actions.push(Action::MarkDmRead);
         self.refresh_requested = true;
     }
 
     pub fn select_conversation_at_bottom(&mut self, conversation_id: String) {
         self.select_conversation(conversation_id);
         self.scroll_detail_to_bottom();
+    }
+
+    pub fn set_search_results(
+        &mut self,
+        query: String,
+        results: Vec<SearchResult>,
+        has_more: bool,
+        reset_selection: bool,
+    ) {
+        self.snapshot.search_query = Some(query);
+        self.snapshot.search_results = results;
+        self.snapshot.search_has_more = has_more;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.route = Route::Search;
+        self.ui.active_pane = ActivePane::Detail;
+        if reset_selection {
+            self.ui.search_selected = 0;
+            self.reset_detail_scroll();
+        } else {
+            self.ui.search_selected = self
+                .ui
+                .search_selected
+                .min(self.snapshot.search_results.len().saturating_sub(1));
+        }
     }
 
     pub fn handle_input(&mut self, bytes: &[u8]) {
@@ -210,6 +476,8 @@ impl App {
             return;
         }
 
+        self.ui.selection.clear();
+
         if matches!(key, Key::Ctrl('c') | Key::Ctrl('d')) {
             self.running = false;
             return;
@@ -221,8 +489,17 @@ impl App {
             .as_ref()
             .is_some_and(|banner| banner.modal_active())
         {
-            if matches!(key, Key::Esc | Key::Enter | Key::ShiftEnter) {
-                self.ui.banner = None;
+            match key {
+                Key::Esc | Key::Enter | Key::ShiftEnter => {
+                    self.ui.banner = None;
+                }
+                Key::Char('c') | Key::Char('C') => {
+                    if let Some(code) = self.active_invite_code().map(str::to_string) {
+                        self.pending_clipboard_copy = Some(code);
+                        self.ui.banner = Some(Banner::ok("Invite code copied"));
+                    }
+                }
+                _ => {}
             }
             return;
         }
@@ -249,29 +526,41 @@ impl App {
             .as_ref()
             .is_some_and(|banner| banner.modal_active())
         {
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                self.ui.banner = None;
-            }
+            self.ui.selection.clear();
             return;
         }
-
-        let Some(region) = self.ui.hit_map.hit(mouse.column, mouse.row) else {
-            return;
-        };
 
         match mouse.kind {
-            MouseEventKind::ScrollUp => self.handle_mouse_scroll(&region.target, -3),
-            MouseEventKind::ScrollDown => self.handle_mouse_scroll(&region.target, 3),
-            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {}
-            MouseEventKind::Down(MouseButton::Left) => self.handle_mouse_click(region, mouse),
-            MouseEventKind::Drag(MouseButton::Left) => {
-                self.handle_mouse_drag(&region.target, mouse)
+            MouseEventKind::ScrollUp => {
+                self.ui.selection.clear();
+                if let Some(region) = self.ui.hit_map.hit(mouse.column, mouse.row) {
+                    self.handle_mouse_scroll(&region.target, -3);
+                }
             }
-            MouseEventKind::Down(_)
-            | MouseEventKind::Up(_)
-            | MouseEventKind::Drag(_)
-            | MouseEventKind::Moved => {}
+            MouseEventKind::ScrollDown => {
+                self.ui.selection.clear();
+                if let Some(region) = self.ui.hit_map.hit(mouse.column, mouse.row) {
+                    self.handle_mouse_scroll(&region.target, 3);
+                }
+            }
+            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {}
+            MouseEventKind::Down(MouseButton::Left) => self.start_mouse_click_or_selection(mouse),
+            MouseEventKind::Drag(MouseButton::Left) => self.update_mouse_selection(mouse),
+            MouseEventKind::Up(MouseButton::Left) => self.finish_mouse_click_or_selection(mouse),
+            MouseEventKind::Down(_) => self.ui.selection.clear(),
+            MouseEventKind::Moved => self.update_pointer_shape(mouse),
+            MouseEventKind::Up(_) | MouseEventKind::Drag(_) => {}
         }
+    }
+
+    fn update_pointer_shape(&mut self, mouse: MouseEvent) {
+        self.desired_pointer_shape = match self.ui.hit_map.hit(mouse.column, mouse.row) {
+            Some(HitRegion {
+                target: HitTarget::MessageLink(_),
+                ..
+            }) => PointerShape::Pointer,
+            _ => PointerShape::Default,
+        };
     }
 
     fn handle_mouse_scroll(&mut self, target: &HitTarget, delta: isize) {
@@ -280,7 +569,7 @@ impl App {
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
             | HitTarget::WorkspaceDm(_) => self.move_workspace(delta),
-            HitTarget::DetailScroll => self.move_detail(delta),
+            HitTarget::DetailScroll | HitTarget::MessageLink(_) => self.move_detail(delta),
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
                 for _ in 0..steps {
@@ -305,11 +594,57 @@ impl App {
         }
     }
 
-    fn handle_mouse_drag(&mut self, target: &HitTarget, mouse: MouseEvent) {
-        if matches!(target, HitTarget::ComposerInput { .. }) {
-            if let Some(region) = self.ui.hit_map.hit(mouse.column, mouse.row) {
-                self.handle_mouse_click(region, mouse);
-            }
+    fn start_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
+        self.ui.selection.clear();
+        self.ui.selection.pending = Some(SelectionAnchor {
+            at: mouse_position(mouse),
+            region: self.ui.hit_map.hit(mouse.column, mouse.row),
+            modifiers: mouse.modifiers,
+            moved: false,
+        });
+    }
+
+    fn update_mouse_selection(&mut self, mouse: MouseEvent) {
+        let Some(anchor) = self.ui.selection.pending.as_mut() else {
+            return;
+        };
+        let end = mouse_position(mouse);
+        if end == anchor.at && !anchor.moved {
+            return;
+        }
+        anchor.moved = true;
+        self.ui.selection.range = Some(SelectionRange {
+            start: anchor.at,
+            end,
+        });
+    }
+
+    fn finish_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
+        let Some(mut anchor) = self.ui.selection.pending.take() else {
+            return;
+        };
+        let end = mouse_position(mouse);
+        if end != anchor.at {
+            anchor.moved = true;
+            self.ui.selection.range = Some(SelectionRange {
+                start: anchor.at,
+                end,
+            });
+        }
+        if anchor.moved || self.ui.selection.range.is_some() {
+            self.ui.selection.copy_requested = true;
+            return;
+        }
+        self.ui.selection.clear();
+        if let Some(region) = anchor
+            .region
+            .or_else(|| self.ui.hit_map.hit(mouse.column, mouse.row))
+        {
+            let mut mouse = mouse;
+            mouse.modifiers.shift |= anchor.modifiers.shift;
+            mouse.modifiers.alt |= anchor.modifiers.alt;
+            mouse.modifiers.control |= anchor.modifiers.control;
+            self.handle_mouse_click(region, mouse);
         }
     }
 
@@ -331,6 +666,10 @@ impl App {
             HitTarget::WorkspaceDm(conversation_id) => self.select_conversation(conversation_id),
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
             HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
+            HitTarget::MessageLink(url) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.pending_link_open = Some(url);
+            }
             HitTarget::ComposerInput { scroll_y } => {
                 if self.account.activated && self.ui.mode != UiMode::Compose {
                     self.ui.mode = UiMode::Compose;
@@ -355,7 +694,7 @@ impl App {
                 self.ui.mode = UiMode::Normal;
             }
             HitTarget::PromptInput => {}
-            HitTarget::BannerModal => self.ui.banner = None,
+            HitTarget::BannerModal => {}
             HitTarget::ConfirmQuitYes => self.running = false,
             HitTarget::ConfirmQuitNo | HitTarget::ConfirmQuitBackdrop => {
                 self.ui.mode = UiMode::Normal;
@@ -445,9 +784,9 @@ impl App {
             Key::Char('i') | Key::Char('r') => self.enter_compose(""),
             Key::Char('/') => self.enter_compose("/"),
             Key::Char(' ') => self.toggle_threads(),
-            Key::Char('t') => self.enter_compose("/thread "),
-            Key::Char('d') => self.enter_compose("/dm "),
-            Key::Char('c') => self.enter_compose("/channel "),
+            Key::Char('t') => self.enter_compose("/thread new "),
+            Key::Char('d') => self.enter_compose("/dm open "),
+            Key::Char('c') => self.enter_compose("/channel new "),
             Key::Char('n') => self.actions.push(Action::NextUnread),
             Key::Char('N') => self.actions.push(Action::NextUnread),
             Key::Char('m') => self.actions.push(Action::MarkThreadRead),
@@ -484,10 +823,20 @@ impl App {
                 if !self.accept_autocomplete_tab() {
                     self.ui.composer.autocomplete.next();
                 }
+                return;
             }
-            Key::BackTab => self.ui.composer.autocomplete.previous(),
-            Key::Down => self.ui.composer.autocomplete.next(),
-            Key::Up => self.ui.composer.autocomplete.previous(),
+            Key::BackTab => {
+                self.ui.composer.autocomplete.previous();
+                return;
+            }
+            Key::Down if self.ui.composer.autocomplete.open => {
+                self.ui.composer.autocomplete.next();
+                return;
+            }
+            Key::Up if self.ui.composer.autocomplete.open => {
+                self.ui.composer.autocomplete.previous();
+                return;
+            }
             Key::Backspace => self.ui.composer.backspace(),
             Key::Delete => self.ui.composer.delete(),
             Key::Left | Key::Ctrl('b') => self.ui.composer.move_left(),
@@ -605,7 +954,7 @@ impl App {
                 title,
                 prefix,
                 placeholder,
-            } => self.open_prompt(title, prefix, placeholder),
+            } => self.open_prompt(&title, &prefix, &placeholder),
             CommandExecutor::SwitchChannel(id) => {
                 self.snapshot.selected_channel_id = Some(id.clone());
                 self.snapshot.selected_conversation_id = None;
@@ -650,6 +999,9 @@ impl App {
     fn accept_autocomplete_if_incomplete(&mut self) -> bool {
         let replacement = self.ui.composer.autocomplete.selected_replacement();
         if let Some((range, value)) = replacement {
+            if self.ui.composer.buffer.get(range.clone()) == Some(value.as_str()) {
+                return false;
+            }
             self.ui.composer.replace_range(range, &value);
             self.update_completions();
             return true;
@@ -731,6 +1083,10 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: isize) {
+        if self.ui.route == Route::Search {
+            self.move_search(delta);
+            return;
+        }
         if self.ui.active_pane == ActivePane::Detail {
             self.move_detail(delta);
         } else {
@@ -761,6 +1117,18 @@ impl App {
                 self.ui.detail_scroll.scroll_down();
             }
         }
+    }
+
+    fn move_search(&mut self, delta: isize) {
+        let len = self.snapshot.search_results.len();
+        if len == 0 {
+            return;
+        }
+        self.ui.search_selected = clamp_index(self.ui.search_selected, delta, len);
+    }
+
+    fn reset_history_limit(&mut self) {
+        self.history_limit = DEFAULT_HISTORY_LIMIT;
     }
 
     fn reset_detail_scroll(&mut self) {
@@ -888,6 +1256,10 @@ impl App {
     }
 
     fn activate_selection(&mut self) {
+        if self.ui.route == Route::Search {
+            self.activate_search_result();
+            return;
+        }
         match self.ui.active_pane {
             ActivePane::Detail => self.enter_compose(""),
             ActivePane::Rail => {
@@ -916,7 +1288,24 @@ impl App {
             }
             ActivePane::List => {
                 self.ui.active_pane = ActivePane::Detail;
+                self.actions.push(Action::MarkThreadRead);
             }
+        }
+    }
+
+    fn activate_search_result(&mut self) {
+        let Some(result) = self
+            .snapshot
+            .search_results
+            .get(self.ui.search_selected)
+            .cloned()
+        else {
+            return;
+        };
+        if let (Some(channel_id), Some(thread_id)) = (result.channel_id, result.thread_id) {
+            self.select_thread(channel_id, thread_id);
+        } else if let Some(conversation_id) = result.conversation_id {
+            self.select_conversation(conversation_id);
         }
     }
 
@@ -984,6 +1373,7 @@ impl App {
 
         if matches!(self.ui.route, Route::Dms) {
             self.ui.active_pane = ActivePane::Detail;
+            self.actions.push(Action::MarkDmRead);
             return;
         }
 
@@ -995,6 +1385,7 @@ impl App {
         }
         if self.snapshot.selected_thread_id.is_some() {
             self.ui.active_pane = ActivePane::Detail;
+            self.actions.push(Action::MarkThreadRead);
         }
     }
 
@@ -1024,8 +1415,54 @@ impl App {
         let commands = self.commands.specs();
         self.terminal.draw(|frame| {
             render::draw(frame, account, snapshot, ui, commands);
+            render::apply_selection(frame, ui);
         })?;
-        Ok(self.shared.take())
+        let mut output = self.shared.take();
+        for link in &self.ui.link_overlays {
+            output.extend(terminal::osc8_hyperlink_at(
+                link.rect, &link.url, &link.text, link.style,
+            ));
+        }
+        if self.pending_link_open.take().is_some() {
+            self.ui.banner = Some(Banner::ok(
+                "Link is available through terminal hyperlink support",
+            ));
+        }
+        if self.desired_pointer_shape != self.emitted_pointer_shape {
+            output.extend(terminal::pointer_shape(self.desired_pointer_shape.as_str()));
+            self.emitted_pointer_shape = self.desired_pointer_shape;
+        }
+        if self.ui.selection.copy_requested {
+            self.ui.selection.copy_requested = false;
+            if !self.ui.selection.text.is_empty() {
+                output.extend(terminal::osc52_copy(&self.ui.selection.text));
+                self.ui.banner = Some(Banner::ok("Selection copied"));
+            }
+            self.ui.selection.clear();
+        }
+        if let Some(text) = self.pending_clipboard_copy.take()
+            && !text.is_empty()
+        {
+            output.extend(terminal::osc52_copy(&text));
+        }
+        Ok(output)
+    }
+
+    fn active_invite_code(&self) -> Option<&str> {
+        self.ui
+            .banner
+            .as_ref()
+            .filter(|banner| banner.modal_active())
+            .and_then(|banner| banner.text.strip_prefix("Invite code:"))
+            .map(str::trim)
+            .filter(|code| !code.is_empty())
+    }
+}
+
+fn mouse_position(mouse: MouseEvent) -> Position {
+    Position {
+        x: mouse.column,
+        y: mouse.row,
     }
 }
 
@@ -1132,6 +1569,12 @@ mod tests {
                 unread_count: 0,
                 last_activity_at: None,
                 created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: String::new(),
             }],
             conversations: vec![Conversation {
                 id: "dm".to_string(),
@@ -1140,6 +1583,8 @@ mod tests {
                 unread_count: 0,
                 last_activity_at: None,
                 last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -1160,12 +1605,83 @@ mod tests {
     }
 
     fn click_at(app: &mut App, column: u16, row: u16) {
-        app.handle_input(format!("\x1b[<0;{};{}M", column + 1, row + 1).as_bytes());
+        app.handle_input(
+            format!(
+                "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+                column + 1,
+                row + 1,
+                column + 1,
+                row + 1
+            )
+            .as_bytes(),
+        );
+    }
+
+    fn move_at(app: &mut App, column: u16, row: u16) {
+        app.handle_input(format!("\x1b[<35;{};{}M", column + 1, row + 1).as_bytes());
+    }
+
+    fn drag_at(app: &mut App, start: Position, end: Position) {
+        app.handle_input(
+            format!(
+                "\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m",
+                start.x + 1,
+                start.y + 1,
+                end.x + 1,
+                end.y + 1,
+                end.x + 1,
+                end.y + 1
+            )
+            .as_bytes(),
+        );
+    }
+
+    #[tokio::test]
+    async fn arrow_keys_navigate_open_autocomplete() {
+        let mut app = test_app("autocomplete-arrows").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+        assert_eq!(app.ui.composer.autocomplete.selected, 0);
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.composer.autocomplete.selected, 1);
+
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.composer.autocomplete.selected, 0);
+    }
+
+    #[tokio::test]
+    async fn invite_modal_c_copies_code_and_shows_toast() {
+        let mut app = test_app("invite-copy").await;
+        app.set_banner_modal_ok("Invite code: copy-me");
+
+        app.handle_input(b"c");
+        let output = app.render().expect("render copy");
+        let output = String::from_utf8_lossy(&output);
+
+        assert!(output.contains("\x1b]52;c;Y29weS1tZQ==\x07"), "{output:?}");
+        assert!(output.contains("Invite code copied"), "{output:?}");
+        assert_eq!(app.active_invite_code(), None);
+    }
+
+    #[tokio::test]
+    async fn invite_modal_does_not_close_on_mouse_click() {
+        let mut app = test_app("invite-click").await;
+        app.set_banner_modal_ok("Invite code: stay-open");
+        app.render().expect("render modal");
+
+        click_region(&mut app, |target| matches!(target, HitTarget::BannerModal));
+
+        assert_eq!(app.active_invite_code(), Some("stay-open"));
     }
 
     #[tokio::test]
     async fn mouse_clicks_workspace_thread_and_dm_rows() {
         let mut app = test_app("workspace-clicks").await;
+        app.ui.active_pane = ActivePane::Rail;
         app.render().expect("render");
 
         click_region(
@@ -1183,6 +1699,94 @@ mod tests {
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn link_text_is_hyperlinked_and_click_requests_open() {
+        let mut app = test_app("link-clicks").await;
+        app.snapshot.threads[0].body = "https://openai.com".to_string();
+        app.ui.active_pane = ActivePane::Detail;
+
+        let output = String::from_utf8_lossy(&app.render().expect("render")).into_owned();
+        assert!(
+            output.contains("\x1b]8;;https://openai.com\x1b\\https://openai.com\x1b]8;;\x1b\\"),
+            "{output:?}"
+        );
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(&region.target, HitTarget::MessageLink(url) if url == "https://openai.com")
+            })
+            .cloned()
+            .expect("link hit region");
+
+        click_at(&mut app, region.rect.x, region.rect.y);
+
+        assert_eq!(app.pending_link_open.as_deref(), Some("https://openai.com"));
+    }
+
+    #[tokio::test]
+    async fn mouse_hover_changes_pointer_shape_for_links() {
+        let mut app = test_app("link-hover").await;
+        app.snapshot.threads[0].body = "https://openai.com".to_string();
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(&region.target, HitTarget::MessageLink(_)))
+            .cloned()
+            .expect("link hit region");
+
+        move_at(&mut app, region.rect.x, region.rect.y);
+        let output = String::from_utf8_lossy(&app.render().expect("render pointer")).into_owned();
+        assert!(output.contains("\x1b]22;pointer\x1b\\"), "{output:?}");
+
+        move_at(&mut app, 0, 0);
+        let output = String::from_utf8_lossy(&app.render().expect("render default")).into_owned();
+        assert!(output.contains("\x1b]22;default\x1b\\"), "{output:?}");
+    }
+
+    #[tokio::test]
+    async fn mouse_drag_selects_text_and_suppresses_click_action() {
+        let mut app = test_app("drag-selects").await;
+        app.ui.active_pane = ActivePane::List;
+        app.render().expect("render");
+        let thread_region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::WorkspaceThread(_)))
+            .cloned()
+            .expect("thread row");
+
+        drag_at(
+            &mut app,
+            Position {
+                x: thread_region.rect.x,
+                y: thread_region.rect.y,
+            },
+            Position {
+                x: thread_region.rect.x + 8,
+                y: thread_region.rect.y,
+            },
+        );
+
+        assert_eq!(app.ui.active_pane, ActivePane::List);
+        assert!(app.ui.selection.range.is_some());
+        assert!(app.ui.selection.copy_requested);
+        let output =
+            String::from_utf8_lossy(&app.render().expect("render after select")).into_owned();
+        assert!(output.contains("\x1b]52;c;"), "{output:?}");
+        assert!(app.ui.selection.range.is_none());
+        assert!(app.ui.selection.text.is_empty());
+        assert!(!app.ui.selection.copy_requested);
     }
 
     #[tokio::test]
@@ -1208,8 +1812,34 @@ mod tests {
         click_region(&mut app, |target| {
             matches!(target, HitTarget::AutocompleteRow(0))
         });
-        assert_eq!(app.ui.composer.buffer, "/invite");
+        assert_eq!(app.ui.composer.buffer, "/invite ");
         assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn exact_dm_autocomplete_enter_submits_command() {
+        let mut app = test_app("dm-enter-submit").await;
+        app.snapshot.users.push(crate::service::UserPresence {
+            username: "alice".to_string(),
+            display_name: "Alice".to_string(),
+            last_seen_at: None,
+            connected: true,
+        });
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("/dm @alice");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(
+            app.actions,
+            vec![Action::OpenDm {
+                target: "@alice".to_string()
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1221,7 +1851,7 @@ mod tests {
             matches!(target, HitTarget::PaletteRow(0))
         });
         assert_eq!(app.ui.mode, UiMode::Prompt);
-        assert_eq!(app.ui.prompt.prefix, "/thread ");
+        assert_eq!(app.ui.prompt.prefix, "/thread new ");
 
         app.render().expect("render");
         click_at(&mut app, 0, 0);
