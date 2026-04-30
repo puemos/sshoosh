@@ -147,86 +147,8 @@ fn logo_line(pattern: &'static str, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-pub(crate) fn draw_topbar(
-    frame: &mut Frame,
-    area: Rect,
-    _account: &Account,
-    _snapshot: &Snapshot,
-    _ui: &mut UiState,
-) {
-    if area.is_empty() {
-        return;
-    }
-    frame.render_widget(Block::default().style(theme::topbar()), area);
-    let content_y = area.y.saturating_add(area.height.saturating_sub(1) / 2);
-    let content_x = area.x.saturating_add(1);
-    let content_width = area.width.saturating_sub(2);
-    if content_width == 0 {
-        return;
-    }
-
-    let logo = "sshoosh";
-    let logo_width = char_width(logo);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            logo,
-            theme::topbar_tab()
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::ITALIC),
-        )))
-        .style(theme::topbar()),
-        Rect::new(
-            content_x,
-            content_y,
-            (logo_width as u16).min(content_width),
-            1,
-        ),
-    );
-
-    let workspace = "workspace main";
-    let workspace_width = char_width(workspace);
-    if logo_width.saturating_add(1).saturating_add(workspace_width) > content_width as usize {
-        return;
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("workspace ", theme::topbar().fg(theme::MUTED)),
-            Span::styled(
-                "main",
-                theme::topbar().fg(theme::TEXT).add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .style(theme::topbar()),
-        Rect::new(
-            content_x.saturating_add(content_width.saturating_sub(workspace_width as u16)),
-            content_y,
-            workspace_width as u16,
-            1,
-        ),
-    );
-}
-
 pub(crate) fn char_width(value: &str) -> usize {
     value.chars().count()
-}
-
-pub(crate) fn draw_horizontal_divider(frame: &mut Frame, area: Rect, color: ratatui::style::Color) {
-    draw_horizontal_divider_with_bg(frame, area, color, theme::BG);
-}
-
-pub(crate) fn draw_horizontal_divider_with_bg(
-    frame: &mut Frame,
-    area: Rect,
-    color: ratatui::style::Color,
-    bg: ratatui::style::Color,
-) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    frame.render_widget(
-        Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(color).bg(bg)),
-        area,
-    );
 }
 
 pub(crate) fn active_label(snapshot: &Snapshot, ui: &UiState) -> String {
@@ -272,10 +194,6 @@ pub(crate) fn draw_body(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: 
     }
 }
 
-pub(crate) fn pane_divider_x(area: Rect) -> Option<u16> {
-    (area.width >= 80).then(|| area.x.saturating_add(WORKSPACE_PANE_WIDTH))
-}
-
 pub(crate) fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
     if area.is_empty() {
         return;
@@ -284,29 +202,6 @@ pub(crate) fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(divider).style(Style::default().fg(theme::BORDER).bg(theme::BG)),
         area,
-    );
-}
-
-pub(crate) fn draw_pane_divider_intersections(frame: &mut Frame, area: Rect, top_separator: Rect) {
-    let Some(x) = pane_divider_x(area) else {
-        return;
-    };
-    if top_separator.height > 0 {
-        draw_divider_cell(frame, x, top_separator.y, "┬", theme::BORDER, theme::BG);
-    }
-}
-
-pub(crate) fn draw_divider_cell(
-    frame: &mut Frame,
-    x: u16,
-    y: u16,
-    symbol: &'static str,
-    color: ratatui::style::Color,
-    bg: ratatui::style::Color,
-) {
-    frame.render_widget(
-        Paragraph::new(symbol).style(Style::default().fg(color).bg(bg)),
-        Rect::new(x, y, 1, 1),
     );
 }
 

@@ -2,8 +2,6 @@ use ratatui::style::{Color, Modifier, Style};
 
 // Dark palette adapted from bensimms.moe for terminal UI roles.
 pub const BG: Color = Color::Rgb(34, 37, 41); // #222529
-pub const TOPBAR: Color = BG;
-pub const TOPBAR_DARK: Color = BG;
 pub const COMPOSER: Color = Color::Rgb(41, 44, 47); // #292C2F
 pub const KEYCAP: Color = Color::Rgb(52, 56, 59); // #34383B
 pub const BADGE: Color = Color::Rgb(36, 39, 42); // #24272A
@@ -30,14 +28,6 @@ pub fn panel() -> Style {
 
 pub fn elevated_panel() -> Style {
     Style::default().fg(TEXT).bg(ELEVATED_PANEL)
-}
-
-pub fn topbar() -> Style {
-    Style::default().fg(MUTED).bg(TOPBAR)
-}
-
-pub fn topbar_tab() -> Style {
-    Style::default().fg(SUBTLE).bg(TOPBAR_DARK)
 }
 
 pub fn composer() -> Style {

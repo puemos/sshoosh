@@ -19,17 +19,12 @@ pub fn draw(
     let shell = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(1),
             Constraint::Min(6),
             Constraint::Length(bottombar_height(ui)),
         ])
         .split(area);
-    draw_topbar(frame, shell[0], account, snapshot, ui);
-    draw_horizontal_divider(frame, shell[1], theme::BORDER);
-    draw_body(frame, shell[2], snapshot, ui);
-    draw_bottombar(frame, shell[3], account, snapshot, ui);
-    draw_pane_divider_intersections(frame, area, shell[1]);
+    draw_body(frame, shell[0], snapshot, ui);
+    draw_bottombar(frame, shell[1], account, snapshot, ui);
     draw_banner(frame, area, ui);
     if ui.startup_splash_active() {
         draw_startup_splash(frame, area, ui);
@@ -40,7 +35,7 @@ pub fn draw(
         UiMode::Prompt => draw_prompt(frame, area, centered(area, 58, 7), ui),
         UiMode::Help => draw_help(frame, area, help_modal_area(area), commands, ui),
         UiMode::ConfirmQuit => draw_confirm_quit(frame, area, centered(area, 42, 5), ui),
-        UiMode::Compose if ui.composer.autocomplete.open => draw_autocomplete(frame, shell[3], ui),
+        UiMode::Compose if ui.composer.autocomplete.open => draw_autocomplete(frame, shell[1], ui),
         _ => {}
     }
     draw_comment_menu(frame, area, ui);

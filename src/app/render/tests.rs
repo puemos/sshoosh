@@ -181,7 +181,7 @@ mod cases {
     }
 
     #[test]
-    fn topbar_and_pane_headers_use_compact_aligned_layout() {
+    fn pane_headers_use_compact_aligned_layout_without_topbar() {
         let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let account = Account {
@@ -234,34 +234,9 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        for x in 0..120 {
-            assert_eq!(
-                buffer.cell((x, 0)).expect("topbar padding bg").bg,
-                theme::TOPBAR
-            );
-        }
-        let logo = buffer.cell((1, 1)).expect("logo");
-        assert_eq!(logo.symbol(), "s");
-        assert!(logo.modifier.contains(Modifier::ITALIC));
-        for x in 0..120 {
-            assert_eq!(buffer.cell((x, 1)).expect("topbar bg").bg, theme::TOPBAR);
-        }
-        for x in 0..120 {
-            assert_eq!(
-                buffer.cell((x, 2)).expect("topbar bottom padding bg").bg,
-                theme::TOPBAR
-            );
-        }
-        let topbar = row_text(buffer, 120, 1);
-        assert!(topbar.starts_with(" sshoosh"));
-        assert!(topbar.contains("workspace main"));
-        let workspace_x = position_for_text(buffer, 120, 24, "workspace main")
-            .expect("workspace label")
-            .0;
-        assert_eq!(workspace_x + "workspace main".chars().count() as u16, 119);
-        assert!(!topbar.contains("#general"));
-        assert!(!topbar.contains("notifications:2"));
-        assert!(!topbar.contains("mentions:1"));
+        let top_row = row_text(buffer, 120, 0);
+        assert!(!top_row.contains("sshoosh"));
+        assert!(!top_row.contains("workspace main"));
         let bottom_status = row_text(buffer, 120, 23);
         assert!(bottom_status.contains("normal"));
         assert!(bottom_status.contains("#general"));
@@ -280,10 +255,7 @@ mod cases {
                 .iter()
                 .any(|region| matches!(region.target, HitTarget::TopbarMentions))
         );
-        assert_eq!(buffer.cell((0, 3)).expect("top divider").symbol(), "─");
-        assert_eq!(buffer.cell((38, 3)).expect("top connector").symbol(), "┬");
-        assert_eq!(buffer.cell((119, 3)).expect("top divider").symbol(), "─");
-        assert_eq!(buffer.cell((38, 4)).expect("pane divider").symbol(), "│");
+        assert_eq!(buffer.cell((38, 0)).expect("pane divider").symbol(), "│");
         assert_eq!(buffer.cell((38, 19)).expect("pane divider").symbol(), "│");
         assert_eq!(buffer.cell((0, 20)).expect("footer bg").bg, theme::COMPOSER);
         assert_eq!(
@@ -294,8 +266,8 @@ mod cases {
             buffer.cell((119, 20)).expect("footer bg").bg,
             theme::COMPOSER
         );
-        assert_eq!(buffer.cell((1, 5)).expect("workspace header").symbol(), "C");
-        assert_eq!(buffer.cell((40, 5)).expect("detail header").symbol(), "w");
+        assert_eq!(buffer.cell((1, 1)).expect("workspace header").symbol(), "C");
+        assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "w");
     }
 
     #[test]
@@ -1090,15 +1062,15 @@ mod cases {
             .unwrap();
 
         assert!(matches!(
-            ui.hit_map.hit(1, 6).map(|region| region.target),
+            ui.hit_map.hit(1, 2).map(|region| region.target),
             Some(HitTarget::WorkspaceChannel(id)) if id == "general"
         ));
         assert!(matches!(
-            ui.hit_map.hit(1, 7).map(|region| region.target),
+            ui.hit_map.hit(1, 3).map(|region| region.target),
             Some(HitTarget::WorkspaceThread(id)) if id == "thread"
         ));
         assert!(matches!(
-            ui.hit_map.hit(40, 6).map(|region| region.target),
+            ui.hit_map.hit(40, 2).map(|region| region.target),
             Some(HitTarget::DetailScroll)
         ));
         assert!(matches!(
