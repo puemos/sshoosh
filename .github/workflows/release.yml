@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package Unix binary
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          asset="sshoosh-${tag}-${{ matrix.target }}"
+          mkdir -p "dist/${asset}"
+          cp "target/${{ matrix.target }}/release/sshoosh" "dist/${asset}/sshoosh"
+          tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
+
+      - name: Package Windows binary
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $asset = "sshoosh-$tag-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist/$asset" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/sshoosh.exe" "dist/$asset/sshoosh.exe"
+          Compress-Archive -Path "dist/$asset" -DestinationPath "dist/$asset.zip"
+
+      - name: Upload packaged binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sshoosh-${{ github.ref_name }}-${{ matrix.target }}
+          path: dist/sshoosh-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Download packaged binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          files=(sshoosh-"${GITHUB_REF_NAME}"-*)
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/sshoosh-${{ github.ref_name }}-*
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true

@@ -185,12 +185,21 @@ cargo run -- dev-ssh --host 127.0.0.1 --port 2222
 
 ## Release Binary
 
+Tagged releases build and publish binaries for Linux x64, Linux arm64, macOS Intel, macOS Apple Silicon, and Windows x64. Create a version tag to publish the release artifacts:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+For local installs:
+
 ```sh
 cargo build --release
 install -m 0755 target/release/sshoosh /usr/local/bin/sshoosh
 ```
 
-The release artifact is a single `sshoosh` binary. Runtime state is just the SQLite database and SSH host key configured by `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`.
+Each release artifact contains a single `sshoosh` binary. Runtime state is just the SQLite database and SSH host key configured by `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`.
 
 ## systemd
 
