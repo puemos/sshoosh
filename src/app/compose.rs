@@ -2,7 +2,7 @@ use super::*;
 impl App {
     pub(crate) fn enter_compose(&mut self, initial: &str) {
         self.ui.mode = UiMode::Compose;
-        self.ui.composer = ComposerState::from(initial);
+        self.ui.composer.start(initial);
         self.update_completions();
     }
 
@@ -106,7 +106,7 @@ impl App {
 
     pub(crate) fn submit_onboarding(&mut self) {
         let body = self.ui.composer.buffer.trim().to_string();
-        self.ui.composer = ComposerState::default();
+        self.ui.composer.reset_input();
         if body.is_empty() {
             return;
         }
@@ -129,10 +129,11 @@ impl App {
         let body = self.ui.composer.buffer.trim().to_string();
         if body.is_empty() {
             self.ui.mode = UiMode::Normal;
+            self.ui.composer.reset_input();
             return;
         }
         self.ui.composer.push_history(body.clone());
-        self.ui.composer = ComposerState::default();
+        self.ui.composer.reset_input();
         self.ui.mode = UiMode::Normal;
 
         if body.starts_with('/') {

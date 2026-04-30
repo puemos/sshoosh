@@ -147,6 +147,27 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn arrow_keys_walk_command_history_in_compose() {
+        let mut app = test_app("command-history-arrows").await;
+
+        app.handle_input(b"/older\n/more\nhello\n/");
+        assert_eq!(app.ui.composer.buffer, "/");
+
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.composer.buffer, "/more");
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.composer.buffer, "/older");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.composer.buffer, "/more");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.composer.buffer, "/");
+    }
+
+    #[tokio::test]
     async fn invite_modal_c_copies_code_and_shows_toast() {
         let mut app = test_app("invite-copy").await;
         app.set_banner_modal_ok("Invite code: copy-me");

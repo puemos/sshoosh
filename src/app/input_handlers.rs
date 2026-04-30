@@ -267,7 +267,7 @@ impl App {
             }
             BottomBarAction::CloseMode => {
                 if self.ui.mode == UiMode::Compose {
-                    self.ui.composer = ComposerState::default();
+                    self.ui.composer.reset_input();
                 }
                 self.ui.mode = UiMode::Normal;
             }
@@ -346,7 +346,7 @@ impl App {
                     self.ui.composer.autocomplete.open = false;
                 } else {
                     self.ui.mode = UiMode::Normal;
-                    self.ui.composer = ComposerState::default();
+                    self.ui.composer.reset_input();
                 }
             }
             Key::Enter => {
@@ -367,6 +367,14 @@ impl App {
             }
             Key::BackTab => {
                 self.ui.composer.autocomplete.previous();
+                return;
+            }
+            Key::Up if self.ui.composer.previous_history() => {
+                self.update_completions();
+                return;
+            }
+            Key::Down if self.ui.composer.next_history() => {
+                self.update_completions();
                 return;
             }
             Key::Down if self.ui.composer.autocomplete.open => {

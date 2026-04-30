@@ -221,6 +221,8 @@ pub struct ComposerState {
     pub buffer: String,
     pub cursor: usize,
     pub history: Vec<String>,
+    history_position: Option<usize>,
+    history_draft: Option<String>,
     pub autocomplete: AutocompleteState,
 }
 
@@ -235,17 +237,32 @@ impl From<&str> for ComposerState {
 }
 
 impl ComposerState {
+    pub fn start(&mut self, value: &str) {
+        self.buffer = value.to_string();
+        self.cursor = value.len();
+        self.history_position = None;
+        self.history_draft = None;
+        self.autocomplete = AutocompleteState::default();
+    }
+
+    pub fn reset_input(&mut self) {
+        self.start("");
+    }
+
     pub fn insert(&mut self, ch: char) {
+        self.cancel_history_navigation();
         self.buffer.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
     }
 
     pub fn insert_str(&mut self, text: &str) {
+        self.cancel_history_navigation();
         self.buffer.insert_str(self.cursor, text);
         self.cursor += text.len();
     }
 
     pub fn replace_range(&mut self, range: Range<usize>, text: &str) {
+        self.cancel_history_navigation();
         self.buffer.replace_range(range.clone(), text);
         self.cursor = range.start + text.len();
     }
@@ -254,6 +271,7 @@ impl ComposerState {
         if self.cursor == 0 {
             return;
         }
+        self.cancel_history_navigation();
         let prev = self.buffer[..self.cursor]
             .char_indices()
             .last()
@@ -267,6 +285,7 @@ impl ComposerState {
         if self.cursor >= self.buffer.len() {
             return;
         }
+        self.cancel_history_navigation();
         let next = self.buffer[self.cursor..]
             .char_indices()
             .nth(1)
@@ -320,24 +339,71 @@ impl ComposerState {
     }
 
     pub fn clear_before_cursor(&mut self) {
+        self.cancel_history_navigation();
         self.buffer.drain(..self.cursor);
         self.cursor = 0;
     }
 
     pub fn clear_after_cursor(&mut self) {
+        self.cancel_history_navigation();
         self.buffer.truncate(self.cursor);
     }
 
     pub fn delete_word_before_cursor(&mut self) {
         let end = self.cursor;
         self.move_word_left();
+        self.cancel_history_navigation();
         self.buffer.drain(self.cursor..end);
     }
 
     pub fn push_history(&mut self, line: String) {
-        if !line.trim().is_empty() {
+        if line.starts_with('/') && !line.trim().is_empty() {
             self.history.push(line);
         }
+        self.history_position = None;
+        self.history_draft = None;
+    }
+
+    pub fn previous_history(&mut self) -> bool {
+        if self.history.is_empty() {
+            return false;
+        }
+        let position = match self.history_position {
+            Some(position) => position.saturating_sub(1),
+            None => {
+                self.history_draft = Some(self.buffer.clone());
+                self.history.len() - 1
+            }
+        };
+        self.load_history(position);
+        true
+    }
+
+    pub fn next_history(&mut self) -> bool {
+        let Some(position) = self.history_position else {
+            return false;
+        };
+        if position + 1 < self.history.len() {
+            self.load_history(position + 1);
+        } else {
+            let draft = self.history_draft.take().unwrap_or_default();
+            self.buffer = draft;
+            self.cursor = self.buffer.len();
+            self.history_position = None;
+        }
+        true
+    }
+
+    fn load_history(&mut self, position: usize) {
+        self.history_position = Some(position);
+        self.buffer = self.history[position].clone();
+        self.cursor = self.buffer.len();
+        self.autocomplete = AutocompleteState::default();
+    }
+
+    fn cancel_history_navigation(&mut self) {
+        self.history_position = None;
+        self.history_draft = None;
     }
 }
 
