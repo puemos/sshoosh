@@ -575,7 +575,6 @@ mod cases {
             .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let rendered = format!("{buffer:?}");
         assert!(!row_text(buffer, width, 0).contains("Selection copied"));
 
         let (text_x, text_y) =
