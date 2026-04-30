@@ -187,6 +187,55 @@ async fn sqlite_services_track_session_presence_counts() {
 }
 
 #[tokio::test]
+async fn sqlite_services_share_presence_sessions_across_state_handles() {
+    let (_config, state) = test_state("presence-cross-state").await;
+    let owner = state
+        .ensure_account_for_key("owner", "SHA256:presence-cross-owner", "ssh-ed25519 owner")
+        .await
+        .expect("owner");
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice_pending = state
+        .ensure_account_for_key("alice", "SHA256:presence-cross-alice", "ssh-ed25519 alice")
+        .await
+        .expect("alice pending");
+    state
+        .accept_invite(alice_pending.id.clone(), invite, "alice".to_string())
+        .await
+        .expect("accept alice");
+    let alice = state
+        .reload_account(&alice_pending.id)
+        .await
+        .expect("alice");
+    let follower = service_pair(&state).await;
+
+    let owner_session = state
+        .begin_account_session(&owner.id)
+        .await
+        .expect("begin owner session");
+    let snapshot = follower
+        .snapshot(&alice.id, None, None, None)
+        .await
+        .expect("snapshot from another handle");
+    assert_eq!(
+        snapshot.presence_for("owner"),
+        sshoosh::service::PresenceState::Online
+    );
+
+    state
+        .end_presence_session(&owner.id, &owner_session)
+        .await
+        .expect("end owner session");
+    let snapshot = follower
+        .snapshot(&alice.id, None, None, None)
+        .await
+        .expect("snapshot after disconnect");
+    assert_ne!(
+        snapshot.presence_for("owner"),
+        sshoosh::service::PresenceState::Online
+    );
+}
+
+#[tokio::test]
 async fn sqlite_services_reject_duplicate_thread_and_channel_names() {
     let (_config, state) = test_state("duplicate-names").await;
     let owner = state
@@ -708,9 +757,9 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("dismiss help");
 
     session
-        .data(channel.id(), b"/\r".to_vec())
+        .data(channel.id(), b"/invite new\r".to_vec())
         .await
-        .expect("send invite shortcut");
+        .expect("send invite command");
     let invite_output = read_until(&mut channel, "Enter or Esc closes").await;
     assert!(invite_output.contains("Invite code"), "{invite_output:?}");
     session
