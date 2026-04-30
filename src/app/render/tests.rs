@@ -1866,15 +1866,21 @@ mod cases {
             mode: UiMode::Compose,
             ..UiState::default()
         };
-        ui.composer.buffer = "hello\nworld".to_string();
+        ui.composer.buffer = "hello\nworld\n1\n2\n3".to_string();
         ui.composer.cursor = ui.composer.buffer.len();
 
         terminal
             .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
             .unwrap();
-        let rendered = format!("{:?}", terminal.backend().buffer());
-        assert!(rendered.contains("hello"));
-        assert!(rendered.contains("world"));
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{:?}", buffer);
+        let hello_pos = position_for_text(buffer, 100, 30, "hello").expect("hello position");
+        let world_pos = position_for_text(buffer, 100, 30, "world").expect("world position");
+
+        assert_eq!(world_pos.1, hello_pos.1 + 1);
+        assert!(row_text(buffer, 100, hello_pos.1 + 2).contains("1"));
+        assert!(row_text(buffer, 100, hello_pos.1 + 3).contains("2"));
+        assert!(row_text(buffer, 100, hello_pos.1 + 4).contains("3▌"));
         assert!(rendered.contains("shift-enter"));
         assert!(rendered.contains("newline"));
     }

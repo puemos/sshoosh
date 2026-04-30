@@ -59,19 +59,22 @@ pub(crate) fn draw_bottombar(
         .saturating_sub(input.height);
     ui.hit_map
         .push(input, HitTarget::ComposerInput { scroll_y });
-    let line = if show_placeholder {
-        Line::from(vec![
+    let lines = if show_placeholder {
+        vec![Line::from(vec![
             Span::styled(prompt, theme::composer()),
             Span::styled(
                 "  Press / for a command, Enter to write…",
                 theme::composer().fg(theme::MUTED),
             ),
-        ])
+        ])]
     } else {
-        Line::from(Span::styled(prompt, theme::composer()))
+        prompt
+            .split('\n')
+            .map(|line| Line::from(Span::styled(line.to_string(), theme::composer())))
+            .collect()
     };
     frame.render_widget(
-        Paragraph::new(line)
+        Paragraph::new(lines)
             .style(theme::composer())
             .scroll((scroll_y, 0))
             .wrap(Wrap { trim: false }),
