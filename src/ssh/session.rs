@@ -103,6 +103,7 @@ impl russh::server::Handler for ClientHandler {
             }
             app.account.id.clone()
         };
+        self.terminal_active = true;
         let _ = timeout(Duration::from_millis(100), handle.data(channel_id, init)).await;
 
         let state = self.state.clone();
@@ -221,9 +222,10 @@ impl russh::server::Handler for ClientHandler {
 
     async fn channel_eof(
         &mut self,
-        _channel: ChannelId,
-        _session: &mut Session,
+        channel: ChannelId,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.cleanup_terminal(channel, session);
         if let Some(app) = self.app.as_ref() {
             app.lock().await.running = false;
         }
@@ -232,12 +234,23 @@ impl russh::server::Handler for ClientHandler {
 
     async fn channel_close(
         &mut self,
-        _channel: ChannelId,
-        _session: &mut Session,
+        channel: ChannelId,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.cleanup_terminal(channel, session);
         if let Some(app) = self.app.as_ref() {
             app.lock().await.running = false;
         }
         Ok(())
+    }
+}
+
+impl ClientHandler {
+    fn cleanup_terminal(&mut self, channel: ChannelId, session: &mut Session) {
+        if !self.terminal_active {
+            return;
+        }
+        self.terminal_active = false;
+        let _ = session.data(channel, terminal::leave_alt_screen(self.mouse_enabled));
     }
 }

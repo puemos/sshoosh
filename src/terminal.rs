@@ -15,7 +15,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
 };
 
-const MOUSE_ENABLE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
+const MOUSE_ENABLE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 const MOUSE_DISABLE: &[u8] = b"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
 const NOTIFICATION_TITLE_LIMIT: usize = 80;
 const NOTIFICATION_BODY_LIMIT: usize = 240;
@@ -262,8 +262,8 @@ mod tests {
 
         assert!(enter.contains("\x1b[?1000h"));
         assert!(enter.contains("\x1b[?1002h"));
-        assert!(enter.contains("\x1b[?1003h"));
         assert!(enter.contains("\x1b[?1006h"));
+        assert!(!enter.contains("\x1b[?1003h"));
         assert!(!enter.contains("\x1b[?1015h"));
         assert!(enter.contains("\x1b[?2004h"));
         assert!(leave.contains("\x1b[?1006l"));

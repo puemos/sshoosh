@@ -98,6 +98,7 @@ pub(crate) struct ClientHandler {
     pub(crate) input_tx: Option<mpsc::Sender<Vec<u8>>>,
     pub(crate) input_rx: Option<mpsc::Receiver<Vec<u8>>>,
     pub(crate) render_signal: Option<Arc<RenderSignal>>,
+    pub(crate) terminal_active: bool,
 }
 
 impl ClientHandler {
@@ -116,6 +117,7 @@ impl ClientHandler {
             input_tx: None,
             input_rx: None,
             render_signal: None,
+            terminal_active: false,
         }
     }
 }

@@ -1034,8 +1034,8 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(!onboarding.contains("Channels"), "{onboarding:?}");
     assert!(onboarding.contains("\x1b[?1000h"), "{onboarding:?}");
     assert!(onboarding.contains("\x1b[?1002h"), "{onboarding:?}");
-    assert!(onboarding.contains("\x1b[?1003h"), "{onboarding:?}");
     assert!(onboarding.contains("\x1b[?1006h"), "{onboarding:?}");
+    assert!(!onboarding.contains("\x1b[?1003h"), "{onboarding:?}");
     session
         .data(channel.id(), format!("{bootstrap_token}\r").into_bytes())
         .await
