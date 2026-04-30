@@ -8,7 +8,10 @@ mod cases {
 
     use crate::{
         db::Database,
-        service::{Channel, CommentItem, Conversation, ServerState, Snapshot, ThreadItem},
+        service::{
+            Channel, CommentItem, Conversation, ConversationMessage, ServerState, Snapshot,
+            ThreadItem,
+        },
     };
 
     use super::*;
@@ -88,6 +91,18 @@ mod cases {
     fn comment(index: i64, author: &str, body: &str) -> CommentItem {
         CommentItem {
             id: format!("comment-{index}"),
+            author: author.to_string(),
+            obj_index: index,
+            body: body.to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            edited_at: None,
+            reactions: String::new(),
+        }
+    }
+
+    fn dm_message(index: i64, author: &str, body: &str) -> ConversationMessage {
+        ConversationMessage {
+            id: format!("dm-message-{index}"),
             author: author.to_string(),
             obj_index: index,
             body: body.to_string(),
@@ -456,20 +471,68 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn compose_ctrl_x_e_prefills_last_own_dm_edit() {
+        let mut app = test_app("quick-edit-dm").await;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.ui.route = Route::Dms;
+        app.snapshot.conversation_messages = vec![
+            dm_message(1, "alice", "not mine"),
+            dm_message(2, "owner", "first mine"),
+            dm_message(3, "owner", "latest mine"),
+        ];
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("draft");
+
+        app.handle_input(b"\x18e");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/dm edit #3 latest mine");
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn compose_ctrl_x_e_ignores_dms_without_own_message() {
+        let mut app = test_app("quick-edit-dm-no-own").await;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.ui.route = Route::Dms;
+        app.snapshot.conversation_messages = vec![dm_message(1, "alice", "not mine")];
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from("draft");
+
+        app.handle_input(b"\x18e");
+
+        assert_eq!(app.ui.composer.buffer, "draft");
+        assert!(app.ui.banner.as_ref().is_some_and(
+            |banner| banner.error && banner.text == "No message by you in this DM"
+        ));
+    }
+
+    #[tokio::test]
     async fn right_click_own_comment_opens_menu_and_edit_prefills_command() {
         let mut app = test_app("comment-menu-edit").await;
         app.snapshot.comments = vec![comment(1, "alice", "not mine"), comment(2, "owner", "mine")];
         app.render().expect("render");
 
         right_click_region(&mut app, |target| {
-            matches!(target, HitTarget::ThreadComment(2))
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
+            )
         });
 
-        assert_eq!(app.ui.comment_menu.map(|menu| menu.index), Some(2));
+        assert_eq!(
+            app.ui.comment_menu.map(|menu| menu.target),
+            Some(EditableMessageTarget::Comment(2))
+        );
 
         app.render().expect("render menu");
         click_region(&mut app, |target| {
-            matches!(target, HitTarget::CommentMenuEdit(2))
+            matches!(
+                target,
+                HitTarget::CommentMenuEdit(EditableMessageTarget::Comment(2))
+            )
         });
 
         assert!(app.ui.comment_menu.is_none());
@@ -484,7 +547,10 @@ mod cases {
         app.render().expect("render");
 
         right_click_region(&mut app, |target| {
-            matches!(target, HitTarget::ThreadComment(1))
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(1))
+            )
         });
 
         assert!(app.ui.comment_menu.is_none());
@@ -497,20 +563,34 @@ mod cases {
         app.render().expect("render");
 
         right_click_region(&mut app, |target| {
-            matches!(target, HitTarget::ThreadComment(2))
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
+            )
         });
         app.render().expect("render menu");
         click_region(&mut app, |target| {
-            matches!(target, HitTarget::CommentMenuDelete(2))
+            matches!(
+                target,
+                HitTarget::CommentMenuDelete(EditableMessageTarget::Comment(2))
+            )
         });
 
         assert!(app.ui.comment_menu.is_none());
-        assert_eq!(app.ui.comment_delete, Some(CommentDeleteState { index: 2 }));
+        assert_eq!(
+            app.ui.comment_delete,
+            Some(CommentDeleteState {
+                target: EditableMessageTarget::Comment(2)
+            })
+        );
         assert!(app.actions.is_empty());
 
         app.render().expect("render confirm");
         click_region(&mut app, |target| {
-            matches!(target, HitTarget::CommentDeleteConfirm(2))
+            matches!(
+                target,
+                HitTarget::CommentDeleteConfirm(EditableMessageTarget::Comment(2))
+            )
         });
 
         assert!(app.ui.comment_delete.is_none());
@@ -518,10 +598,110 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn right_click_own_dm_opens_menu_and_edit_prefills_command() {
+        let mut app = test_app("dm-menu-edit").await;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.ui.route = Route::Dms;
+        app.snapshot.conversation_messages = vec![
+            dm_message(1, "alice", "not mine"),
+            dm_message(2, "owner", "mine"),
+        ];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Dm(2))
+            )
+        });
+
+        assert_eq!(
+            app.ui.comment_menu.map(|menu| menu.target),
+            Some(EditableMessageTarget::Dm(2))
+        );
+
+        app.render().expect("render menu");
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::CommentMenuEdit(EditableMessageTarget::Dm(2))
+            )
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/dm edit #2 mine");
+    }
+
+    #[tokio::test]
+    async fn right_click_other_users_dm_does_not_open_menu() {
+        let mut app = test_app("dm-menu-other").await;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.ui.route = Route::Dms;
+        app.snapshot.conversation_messages = vec![dm_message(1, "alice", "not mine")];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Dm(1))
+            )
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+    }
+
+    #[tokio::test]
+    async fn right_click_dm_delete_requires_confirmation() {
+        let mut app = test_app("dm-menu-delete").await;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.ui.route = Route::Dms;
+        app.snapshot.conversation_messages = vec![dm_message(2, "owner", "mine")];
+        app.render().expect("render");
+
+        right_click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Dm(2))
+            )
+        });
+        app.render().expect("render menu");
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::CommentMenuDelete(EditableMessageTarget::Dm(2))
+            )
+        });
+
+        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(
+            app.ui.comment_delete,
+            Some(CommentDeleteState {
+                target: EditableMessageTarget::Dm(2)
+            })
+        );
+        assert!(app.actions.is_empty());
+
+        app.render().expect("render confirm");
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::CommentDeleteConfirm(EditableMessageTarget::Dm(2))
+            )
+        });
+
+        assert!(app.ui.comment_delete.is_none());
+        assert_eq!(app.actions, vec![Action::DeleteDm { index: 2 }]);
+    }
+
+    #[tokio::test]
     async fn esc_closes_comment_menu_and_delete_confirmation() {
         let mut app = test_app("comment-menu-esc").await;
         app.ui.comment_menu = Some(CommentMenuState {
-            index: 1,
+            target: EditableMessageTarget::Comment(1),
             x: 10,
             y: 10,
         });
@@ -529,7 +709,9 @@ mod cases {
         app.handle_input(b"\x1b");
         assert!(app.ui.comment_menu.is_none());
 
-        app.ui.comment_delete = Some(CommentDeleteState { index: 1 });
+        app.ui.comment_delete = Some(CommentDeleteState {
+            target: EditableMessageTarget::Comment(1),
+        });
         app.handle_input(b"\x1b");
         assert!(app.ui.comment_delete.is_none());
         assert!(app.actions.is_empty());

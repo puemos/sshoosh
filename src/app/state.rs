@@ -170,6 +170,27 @@ pub struct HitRegion {
     pub target: HitTarget,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditableMessageTarget {
+    Comment(i64),
+    Dm(i64),
+}
+
+impl EditableMessageTarget {
+    pub fn index(self) -> i64 {
+        match self {
+            Self::Comment(index) | Self::Dm(index) => index,
+        }
+    }
+
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Comment(_) => "comment",
+            Self::Dm(_) => "message",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HitTarget {
     WorkspaceScroll,
@@ -177,7 +198,7 @@ pub enum HitTarget {
     WorkspaceThread(String),
     WorkspaceDm(String),
     DetailScroll,
-    ThreadComment(i64),
+    EditableMessage(EditableMessageTarget),
     MessageLink(String),
     ComposerInput { scroll_y: u16 },
     AutocompleteScroll,
@@ -195,9 +216,9 @@ pub enum HitTarget {
     ConfirmQuitNo,
     BottomBar(BottomBarAction),
     CommentMenuBackdrop,
-    CommentMenuEdit(i64),
-    CommentMenuDelete(i64),
-    CommentDeleteConfirm(i64),
+    CommentMenuEdit(EditableMessageTarget),
+    CommentMenuDelete(EditableMessageTarget),
+    CommentDeleteConfirm(EditableMessageTarget),
     CommentDeleteCancel,
 }
 
@@ -545,14 +566,14 @@ pub struct PromptState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommentMenuState {
-    pub index: i64,
+    pub target: EditableMessageTarget,
     pub x: u16,
     pub y: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommentDeleteState {
-    pub index: i64,
+    pub target: EditableMessageTarget,
 }
 
 #[derive(Clone, Debug)]

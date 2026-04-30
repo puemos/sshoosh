@@ -83,6 +83,7 @@ pub(crate) fn draw_help(
         Line::from("j/k arrows move through workspace rows · h collapse/back · l open/expand"),
         Line::from("Enter open/send · Shift-Enter newline · Tab toggles workspace/detail"),
         Line::from("/ compose command · Up/Down choose suggestion · Tab accepts"),
+        Line::from("Ctrl-X E edits your latest message/comment here"),
         Line::from("Space toggles threads"),
         Line::from("Ctrl-P palette · Esc close"),
         Line::from("q quit · Ctrl-C disconnect"),
@@ -156,8 +157,8 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
         height,
     );
     let rows = [
-        ("Edit", HitTarget::CommentMenuEdit(menu.index)),
-        ("Delete", HitTarget::CommentMenuDelete(menu.index)),
+        ("Edit", HitTarget::CommentMenuEdit(menu.target)),
+        ("Delete", HitTarget::CommentMenuDelete(menu.target)),
     ];
 
     frame.render_widget(Clear, rect);
@@ -168,7 +169,7 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
                 .collect::<Vec<_>>(),
         )
         .style(theme::panel())
-        .block(panel(" Comment ", true)),
+        .block(panel(" Message ", true)),
         rect,
     );
 
@@ -199,7 +200,9 @@ pub(crate) fn draw_comment_delete_confirm(frame: &mut Frame, area: Rect, ui: &mu
 
     ui.hit_map.push(area, HitTarget::CommentDeleteCancel);
     let modal = centered(area, 44, 7);
-    let text = format!("Delete comment #{}?  y / n", confirm.index);
+    let noun = confirm.target.noun();
+    let index = confirm.target.index();
+    let text = format!("Delete {noun} #{index}?  y / n");
     frame.render_widget(Clear, modal);
     frame.render_widget(
         Paragraph::new(vec![
@@ -209,7 +212,7 @@ pub(crate) fn draw_comment_delete_confirm(frame: &mut Frame, area: Rect, ui: &mu
         ])
         .alignment(Alignment::Center)
         .style(theme::panel())
-        .block(panel(" Delete comment ", true).padding(Padding::uniform(1))),
+        .block(panel(&format!(" Delete {noun} "), true).padding(Padding::uniform(1))),
         modal,
     );
 
@@ -218,7 +221,7 @@ pub(crate) fn draw_comment_delete_confirm(frame: &mut Frame, area: Rect, ui: &mu
     if let Some(y_pos) = text.find('y') {
         ui.hit_map.push(
             Rect::new(text_x + y_pos as u16, text_y, 1, 1),
-            HitTarget::CommentDeleteConfirm(confirm.index),
+            HitTarget::CommentDeleteConfirm(confirm.target),
         );
     }
     if let Some(n_pos) = text.rfind('n') {

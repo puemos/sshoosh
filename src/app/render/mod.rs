@@ -14,8 +14,8 @@ use crate::service::{Account, SearchKind, Snapshot};
 use super::{
     commands::CommandSpec,
     state::{
-        ActivePane, Banner, BannerPresentation, BottomBarAction, HitTarget, LinkOverlay, ListModal,
-        Route, SelectionRange, UiMode, UiState,
+        ActivePane, Banner, BannerPresentation, BottomBarAction, EditableMessageTarget, HitTarget,
+        LinkOverlay, ListModal, Route, SelectionRange, UiMode, UiState,
     },
     theme,
 };

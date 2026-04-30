@@ -92,7 +92,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &comment.body,
                 message_width,
             );
-            let card = with_message_card_hit(card, HitTarget::ThreadComment(comment.obj_index));
+            let card = with_message_card_hit(
+                card,
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(comment.obj_index)),
+            );
             append_message_card(
                 &mut items,
                 &mut link_hits,
@@ -342,6 +345,10 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 Some(&message.reactions),
                 &message.body,
                 message_width,
+            );
+            let card = with_message_card_hit(
+                card,
+                HitTarget::EditableMessage(EditableMessageTarget::Dm(message.obj_index)),
             );
             append_message_card(
                 &mut items,

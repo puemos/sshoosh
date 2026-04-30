@@ -28,8 +28,8 @@ use self::{
     input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
     state::{
         ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
-        HitRegion, HitTarget, PaletteState, PromptState, Route, SelectionAnchor, SelectionRange,
-        UiMode, UiState,
+        EditableMessageTarget, HitRegion, HitTarget, PaletteState, PromptState, Route,
+        SelectionAnchor, SelectionRange, UiMode, UiState,
     },
 };
 

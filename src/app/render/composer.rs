@@ -129,7 +129,9 @@ pub(crate) fn mode_label(ui: &UiState) -> &'static str {
 pub(crate) fn keybar_text(ui: &UiState) -> &'static str {
     match ui.mode {
         UiMode::Normal => "tab detail  / command  ? help  q quit",
-        UiMode::Compose => "enter send  shift-enter newline  tab accept  esc normal",
+        UiMode::Compose => {
+            "enter send  shift-enter newline  tab accept  ctrl-x e edit last  esc normal"
+        }
         UiMode::Palette => "type filter  enter run  esc close",
         UiMode::Prompt => "enter run  esc close",
         UiMode::Help => "esc close",
