@@ -170,6 +170,16 @@ mod cases {
     }
 
     #[test]
+    fn render_message_body_drops_leading_space_after_wrap() {
+        let lines = render_message_body("This affects leadership directly.", 24);
+
+        assert_eq!(
+            styled_lines_text(&lines),
+            "This affects leadership\ndirectly."
+        );
+    }
+
+    #[test]
     fn render_message_body_keeps_block_markdown_literal() {
         let lines = render_message_body("# heading\n- item", 80);
 

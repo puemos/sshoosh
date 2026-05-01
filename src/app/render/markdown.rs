@@ -414,6 +414,14 @@ pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<St
                 wrapped.push(std::mem::take(&mut line));
                 line_width = 0;
             }
+            if line_width == 0 && ch == ' ' {
+                continue;
+            }
+            if ch == ' ' && line_width + 1 == width {
+                wrapped.push(std::mem::take(&mut line));
+                line_width = 0;
+                continue;
+            }
             push_run(&mut line, ch.to_string(), style, run.link_url.as_deref());
             line_width += 1;
         }
