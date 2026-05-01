@@ -280,6 +280,16 @@ def delete_if_exists(conn: sqlite3.Connection, table: str) -> None:
         conn.execute(f"DELETE FROM {table}")
 
 
+def normalize_title_key(value: str) -> str:
+    out = ""
+    for char in value.strip().lower():
+        if char.isascii() and char.isalnum():
+            out += char
+        elif char in "-_. " and not out.endswith("-"):
+            out += "-"
+    return out.strip("-")
+
+
 def seed_demo_data(conn: sqlite3.Connection, anchor: Account) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=182)
@@ -376,6 +386,7 @@ def seed_demo_data(conn: sqlite3.Connection, anchor: Account) -> dict[str, int]:
     notification_counter = 0
     mention_counter = 0
     reaction_counter = 0
+    thread_title_keys_by_channel: dict[str, set[str]] = {}
 
     for week in range(26):
         for lane in range(2):
@@ -388,7 +399,13 @@ def seed_demo_data(conn: sqlite3.Connection, anchor: Account) -> dict[str, int]:
             comment_count = 4 + ((week + lane) % 4)
             last_activity = created_at + timedelta(hours=comment_count + 1)
             thread_id = f"demo-thread-{summary['threads']:03d}"
-            title = f"{topic_title} {week + 1}"
+            title = topic_title
+            title_key = normalize_title_key(title)
+            used_title_keys = thread_title_keys_by_channel.setdefault(channel_id, set())
+            if title_key in used_title_keys:
+                title = f"{topic_title} · week {week + 1}"
+                title_key = normalize_title_key(title)
+            used_title_keys.add(title_key)
             body = f"{topic_body} Week {week + 1} focus is {channel.topic.lower()}."
             pinned_at = ts(created_at + timedelta(hours=2)) if week % 9 == 0 and lane == 0 else None
 
