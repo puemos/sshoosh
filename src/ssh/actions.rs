@@ -2,12 +2,17 @@ use super::*;
 use crate::time_format::format_human_timestamp;
 
 enum ActionResult {
+    Silent,
     Message(String),
     ModalMessage(String),
     List(ListModal),
 }
 
 impl ActionResult {
+    fn silent() -> Self {
+        Self::Silent
+    }
+
     fn message(message: impl Into<String>) -> Self {
         Self::Message(message.into())
     }
@@ -132,7 +137,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                         app.lock()
                             .await
                             .select_thread_at_bottom(channel_id, thread_id);
-                        Ok(ActionResult::message("Comment added"))
+                        Ok(ActionResult::silent())
                     }
                     Err(err) => Err(err),
                 }
@@ -140,13 +145,13 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             (None, Some(thread_id)) => session
                 .add_comment(account_id, thread_id, body)
                 .await
-                .map(|_| ActionResult::message("Comment added")),
+                .map(|_| ActionResult::silent()),
             (_, None) => Err(anyhow::anyhow!("No thread selected; use /thread new title")),
         },
         Action::OpenDm { target } => match session.open_dm(account_id, target).await {
             Ok(conversation_id) => {
                 app.lock().await.select_conversation(conversation_id);
-                Ok(ActionResult::message("DM opened"))
+                Ok(ActionResult::silent())
             }
             Err(err) => Err(err),
         },
@@ -160,7 +165,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                         app.lock()
                             .await
                             .select_conversation_at_bottom(conversation_id);
-                        Ok(ActionResult::message("Message sent"))
+                        Ok(ActionResult::silent())
                     }
                     Err(err) => Err(err),
                 }
@@ -171,28 +176,28 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             Some(thread_id) => session
                 .mark_thread_read(&account_id, &thread_id)
                 .await
-                .map(|_| ActionResult::message("Marked read")),
+                .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkThreadUnread => match thread_id {
             Some(thread_id) => session
                 .mark_thread_unread(&account_id, &thread_id)
                 .await
-                .map(|_| ActionResult::message("Marked unread")),
+                .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkDmRead => match conversation_id {
             Some(conversation_id) => session
                 .mark_conversation_read(&account_id, &conversation_id)
                 .await
-                .map(|_| ActionResult::message("DM marked read")),
+                .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::MarkDmUnread => match conversation_id {
             Some(conversation_id) => session
                 .mark_conversation_unread(&account_id, &conversation_id)
                 .await
-                .map(|_| ActionResult::message("DM marked unread")),
+                .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::NextUnread => match session.next_unread(&account_id).await {
@@ -202,12 +207,12 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             })) => {
                 let mut app = app.lock().await;
                 app.select_thread(channel_id, thread_id);
-                Ok(ActionResult::message("Moved to next unread thread"))
+                Ok(ActionResult::silent())
             }
             Ok(Some(NextUnread::Conversation { conversation_id })) => {
                 let mut app = app.lock().await;
                 app.select_conversation(conversation_id);
-                Ok(ActionResult::message("Moved to next unread DM"))
+                Ok(ActionResult::silent())
             }
             Ok(None) => Ok(ActionResult::message("No unread activity")),
             Err(err) => Err(err),
@@ -406,7 +411,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
         Action::ListNotifications => match session.list_notifications(&account_id, 50).await {
             Ok(rows) => {
                 app.lock().await.set_notifications(rows);
-                Ok(ActionResult::message("Notifications loaded"))
+                Ok(ActionResult::silent())
             }
             Err(err) => Err(err),
         },
@@ -473,7 +478,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                     app.lock()
                         .await
                         .set_search_results(query, page.results, page.has_more, true);
-                    Ok(ActionResult::message("Search complete"))
+                    Ok(ActionResult::silent())
                 }
                 Err(err) => Err(err),
             }
@@ -485,7 +490,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                     app.lock()
                         .await
                         .set_saved_messages(messages, has_more, true);
-                    Ok(ActionResult::message("Saved messages loaded"))
+                    Ok(ActionResult::silent())
                 }
                 Err(err) => Err(err),
             }
@@ -505,7 +510,7 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                         app.lock()
                             .await
                             .set_saved_messages(messages, has_more, false);
-                        Ok(ActionResult::message("Loaded more saved messages"))
+                        Ok(ActionResult::silent())
                     }
                     Err(err) => Err(err),
                 }
@@ -528,30 +533,27 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                                 page.has_more,
                                 false,
                             );
-                            Ok(ActionResult::message("Loaded more results"))
+                            Ok(ActionResult::silent())
                         }
                         Err(err) => Err(err),
                     }
                 } else {
-                    let limit = app.lock().await.increase_history_limit();
+                    app.lock().await.increase_history_limit();
                     app.lock().await.force_full_repaint();
-                    Ok(ActionResult::message(format!(
-                        "Loaded latest {limit} history items"
-                    )))
+                    Ok(ActionResult::silent())
                 }
             }
         }
         Action::LoadOlder => {
-            let limit = app.lock().await.increase_history_limit();
+            app.lock().await.increase_history_limit();
             app.lock().await.force_full_repaint();
-            Ok(ActionResult::message(format!(
-                "Loaded older history up to {limit} items"
-            )))
+            Ok(ActionResult::silent())
         }
     };
 
     let mut app = app.lock().await;
     match result {
+        Ok(ActionResult::Silent) => {}
         Ok(ActionResult::Message(message)) if message.starts_with("Invite code:") => {
             app.set_banner_modal_ok(message)
         }
@@ -580,7 +582,7 @@ async fn open_source_target(
         } else {
             app.lock().await.select_conversation(conversation_id);
         }
-        return Ok(ActionResult::message("Opened source"));
+        return Ok(ActionResult::silent());
     }
 
     let Some(mut channel_id) = target.channel_id else {
@@ -612,7 +614,7 @@ async fn open_source_target(
     } else {
         app.lock().await.select_channel(channel_id);
     }
-    Ok(ActionResult::message("Opened source"))
+    Ok(ActionResult::silent())
 }
 
 async fn react_or_unreact(
@@ -642,11 +644,7 @@ async fn react_or_unreact(
     } else {
         anyhow::bail!("No thread or DM selected");
     }
-    Ok(ActionResult::message(if remove {
-        format!("Removed {emoji} reaction")
-    } else {
-        format!("Reacted {emoji}")
-    }))
+    Ok(ActionResult::silent())
 }
 
 fn accounts_modal(rows: &[AccountSummary]) -> ListModal {
