@@ -110,6 +110,17 @@ impl App {
             self.ui.composer.autocomplete.open = false;
             return false;
         };
+        if !refresh_after_insert && !item.accept_on_enter {
+            let active_token = self
+                .ui
+                .composer
+                .buffer
+                .get(item.replacement_range.clone())
+                .unwrap_or_default();
+            if active_token.starts_with(':') {
+                return false;
+            }
+        }
         if refresh_after_insert && !item.accept_on_tab {
             return false;
         }

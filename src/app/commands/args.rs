@@ -76,6 +76,9 @@ pub(crate) fn parse_reaction(input: &str) -> Result<(String, Option<i64>), Strin
     let input = require(input, "Emoji is required")?;
     let mut parts = input.split_whitespace();
     let emoji = parts.next().unwrap_or_default().to_string();
+    if emoji.starts_with(':') {
+        return Err("Choose an emoji from autocomplete".to_string());
+    }
     let index = parts
         .next()
         .map(|value| {

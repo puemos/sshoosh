@@ -670,7 +670,7 @@ impl App {
     pub(crate) fn prefill_reaction_add(&mut self, target: ReactionTarget) {
         self.close_comment_overlays();
         self.ui.mode = UiMode::Compose;
-        let prefix = "/reaction add ";
+        let prefix = "/reaction add :";
         let suffix = match target {
             ReactionTarget::ThreadRoot => "",
             ReactionTarget::Comment(index) | ReactionTarget::Dm(index) => {

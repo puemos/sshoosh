@@ -230,7 +230,11 @@ impl CommandRegistry {
         snapshot: &Snapshot,
     ) -> AutocompleteState {
         if !buffer.starts_with('/') {
-            return autocomplete_mentions(buffer, cursor, snapshot);
+            let mention = autocomplete_mentions(buffer, cursor, snapshot);
+            if mention.open {
+                return mention;
+            }
+            return autocomplete_emojis(buffer, cursor);
         }
         let cursor = cursor.min(buffer.len());
         if cursor == 0 {

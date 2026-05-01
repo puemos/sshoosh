@@ -328,6 +328,57 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn tab_accepts_inline_emoji_autocomplete() {
+        let mut app = test_app("emoji-tab").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from(":roc");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\t");
+
+        assert_eq!(app.ui.composer.buffer, "🚀");
+        assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
+    }
+
+    #[tokio::test]
+    async fn enter_accepts_inline_emoji_autocomplete_without_submitting() {
+        let mut app = test_app("emoji-enter").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from(":roc");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "🚀");
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bare_emoji_autocomplete_enter_submits() {
+        let mut app = test_app("emoji-bare-enter").await;
+        app.ui.mode = UiMode::Compose;
+        app.ui.composer = ComposerState::from(":");
+        app.update_completions();
+
+        assert!(app.ui.composer.autocomplete.open);
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(
+            app.actions,
+            vec![Action::AddComment {
+                body: ":".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn arrow_keys_navigate_inline_mention_autocomplete() {
         let mut app = test_app("mention-arrows").await;
         app.snapshot.users.push(crate::service::UserPresence {
@@ -803,9 +854,71 @@ mod cases {
         });
 
         assert_eq!(app.ui.mode, UiMode::Compose);
-        assert_eq!(app.ui.composer.buffer, "/reaction add  #2");
-        assert_eq!(app.ui.composer.cursor, "/reaction add ".len());
+        assert_eq!(app.ui.composer.buffer, "/reaction add : #2");
+        assert_eq!(app.ui.composer.cursor, "/reaction add :".len());
+        assert!(app.ui.composer.autocomplete.open);
         assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enter_accepts_preopened_reaction_emoji_picker() {
+        let mut app = test_app("reaction-enter-accepts-emoji").await;
+        app.snapshot.comments = vec![comment(2, "alice", "Needs a reaction")];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::ReactionAdd {
+                    target: ReactionTarget::Comment(2)
+                }
+            )
+        });
+        let selected = app.ui.composer.autocomplete.items[app.ui.composer.autocomplete.selected]
+            .replacement
+            .clone();
+
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(
+            app.ui.composer.buffer,
+            format!("/reaction add {selected} #2")
+        );
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn second_enter_submits_preopened_reaction_emoji() {
+        let mut app = test_app("reaction-enter-submits-emoji").await;
+        app.snapshot.comments = vec![comment(2, "alice", "Needs a reaction")];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::ReactionAdd {
+                    target: ReactionTarget::Comment(2)
+                }
+            )
+        });
+        let selected = app.ui.composer.autocomplete.items[app.ui.composer.autocomplete.selected]
+            .replacement
+            .clone();
+
+        app.handle_input(b"\r");
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(
+            app.actions,
+            vec![Action::React {
+                emoji: selected,
+                index: Some(2),
+            }]
+        );
     }
 
     #[tokio::test]
