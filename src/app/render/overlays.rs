@@ -422,7 +422,7 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
     let Some(menu) = ui.comment_menu else {
         return;
     };
-    if area.width < 10 || area.height < 6 {
+    if area.width < 10 || area.height < 3 {
         return;
     }
 
@@ -438,15 +438,13 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
         rows.push(("Edit", HitTarget::CommentMenuEdit(menu.target)));
         rows.push(("Delete", HitTarget::CommentMenuDelete(menu.target)));
     }
-    let title = "Message";
     let label_width = rows
         .iter()
         .map(|(label, _)| label.chars().count())
-        .chain(std::iter::once(title.chars().count()))
         .max()
         .unwrap_or(0) as u16;
     let width = label_width.saturating_add(4).min(area.width);
-    let height = (rows.len() as u16).saturating_add(4).min(area.height);
+    let height = (rows.len() as u16).saturating_add(2).min(area.height);
     let max_x = area
         .x
         .saturating_add(area.width.saturating_sub(width.saturating_add(1)));
@@ -460,7 +458,7 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
         height,
     );
 
-    let inner = elevated_panel(frame, rect, title);
+    let inner = elevated_panel(frame, rect, "");
     if inner.width == 0 || inner.height == 0 {
         return;
     }

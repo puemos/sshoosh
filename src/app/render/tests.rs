@@ -1941,17 +1941,17 @@ mod cases {
             .unwrap();
 
         let buffer = terminal.backend().buffer();
-        let (title_x, title_y) =
-            position_for_text(buffer, width, height, "Message").expect("menu title");
+        assert!(
+            position_for_text(buffer, width, height, "Message").is_none(),
+            "menu should not render a header"
+        );
         let (save_x, save_y) = position_for_text(buffer, width, height, "Save").expect("save row");
         let (edit_x, edit_y) = position_for_text(buffer, width, height, "Edit").expect("edit row");
         let (delete_x, delete_y) =
             position_for_text(buffer, width, height, "Delete").expect("delete row");
 
-        assert_eq!(save_x, title_x);
-        assert_eq!(edit_x, title_x);
-        assert_eq!(delete_x, title_x);
-        assert!(save_y >= title_y.saturating_add(2));
+        assert_eq!(edit_x, save_x);
+        assert_eq!(delete_x, save_x);
         assert_eq!(edit_y, save_y.saturating_add(1));
         assert_eq!(delete_y, edit_y.saturating_add(1));
 

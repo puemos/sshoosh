@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::SourceFocus;
+use crate::service::SavedMessageKind;
 use crate::time_format::{
     calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
 };
