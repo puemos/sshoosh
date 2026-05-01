@@ -8,7 +8,7 @@ use ratatui::{
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
-use crate::service::{Account, NotificationSummary, SavedMessageKind, SearchKind, Snapshot};
+use crate::service::{Account, NotificationSummary, SearchKind, Snapshot};
 
 use super::{
     commands::{CommandSpec, SubcommandSpec, subcommands_for},

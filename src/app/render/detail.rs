@@ -333,6 +333,7 @@ pub(crate) fn draw_saved_detail(
     let messages_area = pane_scroll_area(area);
     let mut items = Vec::new();
     let mut row_hits = Vec::new();
+    let mut selected_row = None;
     if snapshot.saved_messages.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
         render_empty_state(
@@ -348,43 +349,41 @@ pub(crate) fn draw_saved_detail(
         return;
     }
 
-    let row_width = messages_area.width as usize;
+    let row_width = messages_area.width.saturating_sub(2) as usize;
+    let body_width = row_width.max(1);
+    let mut content_row = 0u16;
     for (idx, item) in snapshot.saved_messages.iter().enumerate() {
         let selected = idx == ui.saved_selected;
-        let style = if selected {
-            theme::title()
-        } else {
-            theme::message_body()
-        };
-        let kind = match item.kind {
-            SavedMessageKind::Comment => "comment",
-            SavedMessageKind::Dm => "dm",
-        };
         let saved_at = format_human_timestamp(&item.saved_at);
-        let created_at = format_human_timestamp(&item.created_at);
-        let body = sanitize_terminal_visible_text(&item.body);
-        let snippet = truncate_text(body, row_width.saturating_sub(2));
-        let row = items.len() as u16;
-        let item = ListItem::new(vec![
-            Line::from(vec![
-                Span::styled(format!("{:<8}", kind), theme::muted()),
-                Span::styled(format!("@{}", item.author), style),
-                Span::styled(format!(" · {}", item.source_label), theme::muted()),
-            ]),
-            Line::from(vec![
-                Span::styled(format!("saved {saved_at} · {created_at}  "), theme::muted()),
-                Span::raw(snippet),
-            ]),
-            Line::from(""),
-        ]);
+        if selected {
+            selected_row = Some(content_row);
+        }
+        let item = message_result_list_item(MessageResultRow {
+            selected,
+            emphasized: false,
+            leading: "saved".to_string(),
+            actor: format!("@{}", item.author),
+            source: saved_source_label(item),
+            meta: saved_at,
+            body: item.body.clone(),
+            body_width,
+        });
         let height = item.height() as u16;
         items.push(item);
         for offset in 0..height {
-            row_hits.push((row.saturating_add(offset), HitTarget::SavedResult(idx)));
+            row_hits.push((
+                content_row.saturating_add(offset),
+                HitTarget::SavedResult(idx),
+            ));
         }
+        content_row = content_row.saturating_add(height);
     }
     if snapshot.saved_has_more {
         items.push(history_prompt("More saved messages available. Use /more."));
+    }
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
     }
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
@@ -408,6 +407,7 @@ pub(crate) fn draw_notifications_detail(
     let messages_area = notifications_scroll_area(area);
     let mut items = Vec::new();
     let mut row_hits = Vec::new();
+    let mut selected_row = None;
     let visible_indices = visible_notification_indices_for_filter(snapshot, ui.notification_filter);
     if visible_indices.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
@@ -441,6 +441,9 @@ pub(crate) fn draw_notifications_detail(
             continue;
         };
         let selected = visible_idx == ui.notifications_selected;
+        if selected {
+            selected_row = Some(content_row);
+        }
         let item = notification_list_item(notification, selected, body_width);
         let height = item.height() as u16;
         items.push(item);
@@ -453,6 +456,10 @@ pub(crate) fn draw_notifications_detail(
         content_row = content_row.saturating_add(height);
     }
 
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
+    }
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
         ui,
@@ -461,6 +468,10 @@ pub(crate) fn draw_notifications_detail(
         row_hits,
         ui.detail_scroll.offset().y,
     );
+}
+
+fn saved_source_label(item: &crate::service::SavedMessageItem) -> String {
+    item.source_label.replace(" · ", " / ")
 }
 
 fn visible_notification_indices_for_filter(
@@ -621,24 +632,59 @@ fn push_notification_toolbar_action(
     *cursor = cursor.saturating_add(width);
 }
 
+struct MessageResultRow {
+    selected: bool,
+    emphasized: bool,
+    leading: String,
+    actor: String,
+    source: String,
+    meta: String,
+    body: String,
+    body_width: usize,
+}
+
+fn message_result_list_item(row: MessageResultRow) -> ListItem<'static> {
+    let meta_style = if row.selected {
+        theme::title()
+    } else if row.emphasized {
+        theme::unread()
+    } else {
+        theme::muted()
+    };
+    let body_style = if row.selected || row.emphasized {
+        theme::message_body()
+    } else {
+        theme::muted()
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!("{:<8}", sanitize_terminal_visible_text(&row.leading)),
+                meta_style,
+            ),
+            Span::styled(sanitize_terminal_visible_text(&row.actor), meta_style),
+            Span::styled("  ", theme::muted()),
+            Span::styled(sanitize_terminal_visible_text(&row.source), theme::muted()),
+        ]),
+        Line::from(Span::styled(
+            sanitize_terminal_visible_text(&row.meta),
+            theme::muted(),
+        )),
+    ];
+    let body = sanitize_terminal_visible_text(&row.body);
+    for line in wrap_plain_text(&body, row.body_width) {
+        lines.push(Line::from(Span::styled(line, body_style)));
+    }
+    lines.push(Line::from(""));
+    ListItem::new(lines)
+}
+
 fn notification_list_item(
     notification: &NotificationSummary,
     selected: bool,
     body_width: usize,
 ) -> ListItem<'static> {
     let unread = notification.read_at.is_none();
-    let meta_style = if selected {
-        theme::title()
-    } else if unread {
-        theme::unread()
-    } else {
-        theme::muted()
-    };
-    let body_style = if selected || unread {
-        theme::message_body()
-    } else {
-        theme::muted()
-    };
     let actor = notification
         .actor_username
         .as_ref()
@@ -647,19 +693,16 @@ fn notification_list_item(
     let source = notification_source_label(notification);
     let created_at = format_human_timestamp(&notification.created_at);
     let state = if unread { "unread" } else { "read" };
-    let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{state:<7}"), meta_style),
-        Span::styled(sanitize_terminal_visible_text(&actor), meta_style),
-        Span::styled("  ", theme::muted()),
-        Span::styled(sanitize_terminal_visible_text(&source), theme::muted()),
-        Span::styled(format!("  {created_at}"), theme::muted()),
-    ])];
-    let body = sanitize_terminal_visible_text(&notification.body);
-    for line in wrap_plain_text(&body, body_width) {
-        lines.push(Line::from(Span::styled(line, body_style)));
-    }
-    lines.push(Line::from(""));
-    ListItem::new(lines)
+    message_result_list_item(MessageResultRow {
+        selected,
+        emphasized: unread,
+        leading: state.to_string(),
+        actor,
+        source,
+        meta: created_at,
+        body: notification.body.clone(),
+        body_width,
+    })
 }
 
 fn notification_source_label(notification: &NotificationSummary) -> String {

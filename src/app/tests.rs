@@ -11,8 +11,8 @@ mod cases {
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
-            ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind, SearchResult,
-            ServerState, Snapshot, ThreadItem,
+            NotificationSummary, ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind,
+            SearchResult, ServerState, Snapshot, ThreadItem,
         },
     };
 
@@ -114,6 +114,26 @@ mod cases {
             edited_at: None,
             saved_at: None,
             reactions: Vec::new(),
+        }
+    }
+
+    fn notification(index: i64, body: &str) -> NotificationSummary {
+        NotificationSummary {
+            id: format!("notification-{index}"),
+            kind: "reply".to_string(),
+            source_kind: Some("comment".to_string()),
+            source_id: Some(format!("comment-{index}")),
+            source_obj_index: Some(index),
+            actor_username: Some("alice".to_string()),
+            channel_id: Some("general".to_string()),
+            channel_slug: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            thread_title: Some("Deploy notes".to_string()),
+            conversation_id: None,
+            title: "Reply".to_string(),
+            body: body.to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            read_at: None,
         }
     }
 
@@ -769,6 +789,136 @@ mod cases {
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn keyboard_selecting_saved_row_scrolls_it_visible() {
+        let mut app = test_app("saved-keyboard-scroll").await;
+        app.resize(100, 8).expect("resize");
+        app.snapshot.saved_messages = (1..=8)
+            .map(|index| SavedMessageItem {
+                kind: SavedMessageKind::Comment,
+                source_id: format!("comment-{index}"),
+                source_obj_index: index,
+                author: "alice".to_string(),
+                body: format!("Saved note {index} with enough text to wrap in a compact pane"),
+                source_label: "#general · thread".to_string(),
+                saved_at: "2020-01-03T03:04:00Z".to_string(),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                channel_id: Some("general".to_string()),
+                thread_id: Some("thread".to_string()),
+                conversation_id: None,
+            })
+            .collect();
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+
+        for _ in 0..7 {
+            app.handle_input(b"\x1b[B");
+        }
+        app.render().expect("render saved screen");
+
+        assert_eq!(app.ui.saved_selected, 7);
+        assert!(app.ui.detail_scroll.offset().y > 0);
+    }
+
+    #[tokio::test]
+    async fn long_notification_body_click_opens_source() {
+        let mut app = test_app("notification-long-click").await;
+        app.resize(72, 12).expect("resize");
+        app.snapshot.comments = vec![comment(3, "alice", "Focused notification comment")];
+        app.snapshot.notifications = vec![notification(
+            3,
+            "This notification body is intentionally long enough to wrap across several rows so clicking a wrapped row still opens the source comment.",
+        )];
+        app.ui.route = Route::Notifications;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render notifications screen");
+
+        let wrapped_row = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .filter(|region| matches!(region.target, HitTarget::NotificationResult(0)))
+            .max_by_key(|region| region.rect.y)
+            .cloned()
+            .expect("wrapped notification row");
+        click_at(&mut app, wrapped_row.rect.x, wrapped_row.rect.y);
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        app.render().expect("render focused thread");
+        assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn detail_scroll_click_on_wrapped_notification_row_opens_source() {
+        let mut app = test_app("notification-detail-fallback").await;
+        app.resize(72, 12).expect("resize");
+        app.snapshot.notifications = vec![notification(
+            2,
+            "This notification wraps across multiple visual rows for fallback hit testing.",
+        )];
+        app.ui.route = Route::Notifications;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render notifications screen");
+        let scroll_region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::DetailScroll))
+            .cloned()
+            .expect("detail scroll region");
+        let wrapped_row = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .filter(|region| matches!(region.target, HitTarget::NotificationResult(0)))
+            .max_by_key(|region| region.rect.y)
+            .cloned()
+            .expect("wrapped notification row");
+
+        app.handle_mouse_click(
+            scroll_region,
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: wrapped_row.rect.x,
+                row: wrapped_row.rect.y,
+                modifiers: Default::default(),
+            },
+        );
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+    }
+
+    #[tokio::test]
+    async fn keyboard_selecting_notification_row_scrolls_it_visible() {
+        let mut app = test_app("notification-keyboard-scroll").await;
+        app.resize(100, 8).expect("resize");
+        app.snapshot.notifications = (1..=8)
+            .map(|index| {
+                notification(
+                    index,
+                    &format!(
+                        "Notification {index} with enough text to wrap in the shared result row"
+                    ),
+                )
+            })
+            .collect();
+        app.ui.route = Route::Notifications;
+        app.ui.active_pane = ActivePane::Detail;
+
+        for _ in 0..7 {
+            app.handle_input(b"\x1b[B");
+        }
+        app.render().expect("render notifications screen");
+
+        assert_eq!(app.ui.notifications_selected, 7);
+        assert!(app.ui.detail_scroll.offset().y > 0);
     }
 
     #[tokio::test]

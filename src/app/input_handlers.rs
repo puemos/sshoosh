@@ -408,36 +408,49 @@ impl App {
         }
     }
 
-    pub(crate) fn activate_result_at_mouse_position(&mut self, rect: Rect, mouse: MouseEvent) {
-        const RESULT_ROW_HEIGHT: u16 = 3;
-        if RESULT_ROW_HEIGHT == 0
-            || !matches!(
-                self.ui.route,
-                Route::Search | Route::Saved | Route::Notifications
-            )
-        {
+    pub(crate) fn activate_result_at_mouse_position(&mut self, _rect: Rect, mouse: MouseEvent) {
+        if !matches!(
+            self.ui.route,
+            Route::Search | Route::Saved | Route::Notifications
+        ) {
             return;
         }
-        let row = mouse
-            .row
-            .saturating_sub(rect.y)
-            .saturating_add(self.ui.detail_scroll.offset().y);
-        let index = (row / RESULT_ROW_HEIGHT) as usize;
-        match self.ui.route {
-            Route::Search if index < self.snapshot.search_results.len() => {
+
+        let Some(region) = self.ui_hit_row_matching_for_route(mouse.row) else {
+            return;
+        };
+        match region.target {
+            HitTarget::SearchResult(index) if index < self.snapshot.search_results.len() => {
                 self.ui.search_selected = index;
                 self.activate_search_result();
             }
-            Route::Saved if index < self.snapshot.saved_messages.len() => {
+            HitTarget::SavedResult(index) if index < self.snapshot.saved_messages.len() => {
                 self.ui.saved_selected = index;
                 self.activate_saved_result();
             }
-            Route::Notifications if index < self.visible_notification_indices().len() => {
+            HitTarget::NotificationResult(index)
+                if index < self.visible_notification_indices().len() =>
+            {
                 self.ui.notifications_selected = index;
                 self.activate_notification_result();
             }
             _ => {}
         }
+    }
+
+    fn ui_hit_target_matches_route(&self, target: &HitTarget) -> bool {
+        matches!(
+            (&self.ui.route, target),
+            (Route::Search, HitTarget::SearchResult(_))
+                | (Route::Saved, HitTarget::SavedResult(_))
+                | (Route::Notifications, HitTarget::NotificationResult(_))
+        )
+    }
+
+    fn ui_hit_row_matching_for_route(&self, row: u16) -> Option<HitRegion> {
+        self.ui
+            .hit_map
+            .hit_row_matching(row, |target| self.ui_hit_target_matches_route(target))
     }
 
     pub(crate) fn place_composer_cursor(&mut self, rect: Rect, scroll_y: u16, mouse: MouseEvent) {

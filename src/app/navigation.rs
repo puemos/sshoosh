@@ -58,7 +58,11 @@ impl App {
         if len == 0 {
             return;
         }
-        self.ui.saved_selected = clamp_index(self.ui.saved_selected, delta, len);
+        let next = clamp_index(self.ui.saved_selected, delta, len);
+        if next != self.ui.saved_selected {
+            self.ui.saved_selected = next;
+            self.ui.detail_selection_scroll_pending = true;
+        }
     }
 
     pub(crate) fn move_notifications(&mut self, delta: isize) {
@@ -66,7 +70,11 @@ impl App {
         if len == 0 {
             return;
         }
-        self.ui.notifications_selected = clamp_index(self.ui.notifications_selected, delta, len);
+        let next = clamp_index(self.ui.notifications_selected, delta, len);
+        if next != self.ui.notifications_selected {
+            self.ui.notifications_selected = next;
+            self.ui.detail_selection_scroll_pending = true;
+        }
     }
 
     pub(crate) fn reset_history_limit(&mut self) {
@@ -75,6 +83,7 @@ impl App {
 
     pub(crate) fn reset_detail_scroll(&mut self) {
         self.ui.detail_scroll.scroll_to_top();
+        self.ui.detail_selection_scroll_pending = false;
     }
 
     pub(crate) fn scroll_detail_to_bottom(&mut self) {
