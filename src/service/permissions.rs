@@ -794,13 +794,23 @@ pub(crate) async fn begin(pool: &Database) -> anyhow::Result<DbTransaction> {
 pub(crate) async fn load_active_presence_sessions(
     pool: impl DbExecutor + Copy,
 ) -> anyhow::Result<HashSet<String>> {
+    let cutoff =
+        time::OffsetDateTime::now_utc() - time::Duration::seconds(PRESENCE_SESSION_TTL_SECONDS);
+    let cutoff = crate::db::format_rfc3339(cutoff);
+    let started = std::time::Instant::now();
     let rows = query(
         "SELECT account_id, last_seen_at
          FROM presence_sessions
-         WHERE disconnected_at IS NULL",
+         WHERE disconnected_at IS NULL AND last_seen_at >= ?",
     )
+    .bind(cutoff)
     .fetch_all(pool)
     .await?;
+    tracing::trace!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        rows = rows.len(),
+        "load_active_presence_sessions query",
+    );
     let now = time::OffsetDateTime::now_utc();
     Ok(rows
         .into_iter()
@@ -815,4 +825,94 @@ pub(crate) async fn load_active_presence_sessions(
             (age <= PRESENCE_SESSION_TTL_SECONDS).then(|| row.get("account_id"))
         })
         .collect())
+}
+
+#[cfg(test)]
+mod cases {
+    use super::*;
+
+    use crate::db::format_rfc3339;
+    use time::{Duration, OffsetDateTime};
+    use uuid::Uuid;
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("sshoosh-presence-{name}-{}", Uuid::now_v7()))
+    }
+
+    async fn insert_account(
+        db: &Database,
+        id: &str,
+        username: &str,
+        now: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO accounts
+             (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at, pending_username)
+             VALUES (?, ?, ?, 'member', '{}', ?, ?, ?, ?, NULL)",
+        )
+        .bind(id)
+        .bind(username)
+        .bind(username)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_presence_session(
+        db: &Database,
+        account_id: &str,
+        started_at: &str,
+        last_seen_at: &str,
+        disconnected_at: Option<&str>,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO presence_sessions (id, account_id, started_at, last_seen_at, disconnected_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(format!("presence-{account_id}"))
+        .bind(account_id)
+        .bind(started_at)
+        .bind(last_seen_at)
+        .bind(disconnected_at)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn load_active_presence_sessions_excludes_stale_and_disconnected() -> anyhow::Result<()> {
+        let db_path = temp_path("ttl-filter");
+        let db = Database::connect(&db_path).await?;
+        db.init().await?;
+        let now = OffsetDateTime::now_utc();
+        let recent = format_rfc3339(now - Duration::seconds(30));
+        let stale = format_rfc3339(now - Duration::seconds(PRESENCE_SESSION_TTL_SECONDS + 1));
+        let disconnected = format_rfc3339(now - Duration::seconds(30));
+
+        insert_account(&db, "alice", "alice", &recent).await?;
+        insert_account(&db, "bob", "bob", &recent).await?;
+        insert_account(&db, "carol", "carol", &recent).await?;
+
+        insert_presence_session(&db, "alice", &recent, &recent, None).await?;
+        insert_presence_session(&db, "bob", &stale, &stale, None).await?;
+        insert_presence_session(
+            &db,
+            "carol",
+            &disconnected,
+            &disconnected,
+            Some(&disconnected),
+        )
+        .await?;
+
+        let active = load_active_presence_sessions(&db).await?;
+        assert_eq!(active.len(), 1);
+        assert!(active.contains("alice"));
+        assert!(!active.contains("bob"));
+        assert!(!active.contains("carol"));
+        Ok(())
+    }
 }

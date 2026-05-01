@@ -335,6 +335,7 @@ pub(crate) async fn load_dm_sidebar(
     pool: impl DbExecutor + Copy,
     account_id: &str,
 ) -> anyhow::Result<Vec<DmSidebarItem>> {
+    let started = std::time::Instant::now();
     let rows = query(
         "SELECT peer.username AS peer_username,
                 c.id AS conversation_id,
@@ -354,25 +355,18 @@ pub(crate) async fn load_dm_sidebar(
                     ORDER BY latest.obj_index DESC
                     LIMIT 1
                 ) AS last_message_preview
-         FROM accounts peer
-         LEFT JOIN conversations c
-           ON c.id = (
-             SELECT cm_other.conversation_id
-             FROM conversation_members cm_other
-             JOIN conversation_members cm_me
-               ON cm_me.conversation_id = cm_other.conversation_id
-              AND cm_me.account_id = ?
-             WHERE cm_other.account_id = peer.id
-             LIMIT 1
-           )
+        FROM conversation_members me
+        JOIN conversation_members other
+           ON other.conversation_id = me.conversation_id
+          AND other.account_id <> ?
+         JOIN accounts peer ON peer.id = other.account_id
+         JOIN conversations c
+           ON c.id = me.conversation_id
           AND c.archived_at IS NULL
-         LEFT JOIN conversation_members me
-           ON me.conversation_id = c.id AND me.account_id = ?
-         WHERE peer.id <> ?
+        WHERE me.account_id = ?
            AND peer.activated_at IS NOT NULL
            AND peer.disabled_at IS NULL
-         ORDER BY CASE WHEN c.id IS NULL THEN 1 ELSE 0 END,
-                  c.last_activity_at DESC,
+         ORDER BY c.last_activity_at DESC,
                   lower(peer.username) ASC",
     )
     .bind(now())
@@ -381,6 +375,12 @@ pub(crate) async fn load_dm_sidebar(
     .bind(account_id)
     .fetch_all(pool)
     .await?;
+    tracing::trace!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        rows = rows.len(),
+        account_id = account_id,
+        "load_dm_sidebar query",
+    );
     Ok(rows
         .into_iter()
         .map(|row| DmSidebarItem {
@@ -652,4 +652,192 @@ pub(crate) async fn ensure_can_view_channel(
     .await?;
     anyhow::ensure!(count > 0, "You do not have access to this channel");
     Ok(())
+}
+
+#[cfg(test)]
+mod cases {
+    use super::*;
+
+    use crate::db::format_rfc3339;
+    use time::{Duration, OffsetDateTime};
+    use uuid::Uuid;
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("sshoosh-loader-{name}-{}", Uuid::now_v7()))
+    }
+
+    async fn insert_account(
+        db: &Database,
+        id: &str,
+        username: &str,
+        now: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO accounts
+             (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at, pending_username)
+             VALUES (?, ?, ?, 'member', '{}', ?, ?, ?, ?, NULL)",
+        )
+        .bind(id)
+        .bind(username)
+        .bind(username)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_conversation(
+        db: &Database,
+        conversation_id: &str,
+        creator_account_id: &str,
+        last_message_index: i64,
+        last_activity_at: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO conversations (id, dm_key, creator_account_id, last_message_index, last_activity_at, created_at, archived_at)
+             VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(conversation_id)
+        .bind(format!("dm-{conversation_id}"))
+        .bind(creator_account_id)
+        .bind(last_message_index)
+        .bind(last_activity_at)
+        .bind(last_activity_at)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_conversation_member(
+        db: &Database,
+        conversation_id: &str,
+        account_id: &str,
+        joined_at: &str,
+        unread_count: i64,
+        muted_until: Option<&str>,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO conversation_members
+             (conversation_id, account_id, joined_at, last_read_index, unread_count, muted_until, saved_at)
+             VALUES (?, ?, ?, 0, ?, ?, NULL)",
+        )
+        .bind(conversation_id)
+        .bind(account_id)
+        .bind(joined_at)
+        .bind(unread_count)
+        .bind(muted_until)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_conversation_message(
+        db: &Database,
+        message_id: &str,
+        conversation_id: &str,
+        author_id: &str,
+        obj_index: i64,
+        body: &str,
+        now: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO conversation_messages
+             (id, conversation_id, author_account_id, obj_index, body, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(message_id)
+        .bind(conversation_id)
+        .bind(author_id)
+        .bind(obj_index)
+        .bind(body)
+        .bind(now)
+        .bind(now)
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn load_dm_sidebar_returns_only_dm_peers_with_latest_preview() -> anyhow::Result<()> {
+        let db_path = temp_path("joined-peers");
+        let db = Database::connect(&db_path).await?;
+        db.init().await?;
+
+        let now = OffsetDateTime::now_utc();
+        let active_now = format_rfc3339(now);
+        let stale = format_rfc3339(now - Duration::seconds(120));
+        let muted_until = format_rfc3339(now + Duration::seconds(60));
+
+        insert_account(&db, "me", "owner", &active_now).await?;
+        insert_account(&db, "alice", "alice", &active_now).await?;
+        insert_account(&db, "bob", "bob", &active_now).await?;
+        insert_account(&db, "carol", "carol", &active_now).await?;
+        for idx in 0..20 {
+            let id = format!("noise-{idx}");
+            insert_account(&db, &id, &format!("noise-user-{idx}"), &active_now).await?;
+        }
+
+        insert_conversation(&db, "conv-alice", "me", 0, &active_now).await?;
+        insert_conversation(&db, "conv-bob", "me", 0, &stale).await?;
+        insert_conversation_member(&db, "conv-alice", "me", &active_now, 4, None).await?;
+        insert_conversation_member(&db, "conv-alice", "alice", &active_now, 0, None).await?;
+        insert_conversation_member(&db, "conv-bob", "me", &active_now, 99, Some(&muted_until))
+            .await?;
+        insert_conversation_member(&db, "conv-bob", "bob", &active_now, 0, None).await?;
+
+        insert_conversation_message(
+            &db,
+            "msg-alice-1",
+            "conv-alice",
+            "alice",
+            1,
+            "old alice note",
+            &stale,
+        )
+        .await?;
+        insert_conversation_message(
+            &db,
+            "msg-alice-2",
+            "conv-alice",
+            "alice",
+            2,
+            "latest alice note",
+            &active_now,
+        )
+        .await?;
+        insert_conversation_message(&db, "msg-bob-1", "conv-bob", "bob", 1, "bob only", &stale)
+            .await?;
+
+        // Seed unrelated account-to-account relationship that should stay out of the sidebar.
+        insert_conversation(&db, "conv-noise", "carol", 0, &active_now).await?;
+        insert_conversation_member(&db, "conv-noise", "carol", &active_now, 0, None).await?;
+        insert_conversation_member(&db, "conv-noise", "noise-0", &active_now, 0, None).await?;
+
+        let sidebar = load_dm_sidebar(&db, "me").await?;
+        assert_eq!(sidebar.len(), 2);
+
+        assert_eq!(sidebar[0].peer_username, "alice");
+        assert_eq!(sidebar[1].peer_username, "bob");
+        assert_eq!(sidebar[0].unread_count, 4);
+        assert_eq!(
+            sidebar[1].unread_count, 0,
+            "muted conversations return zero unread"
+        );
+        assert_eq!(
+            sidebar[0].last_message_preview.as_deref(),
+            Some("latest alice note")
+        );
+
+        assert!(!sidebar.iter().any(|item| item.peer_username == "carol"));
+        assert!(
+            !sidebar
+                .iter()
+                .any(|item| item.peer_username.starts_with("noise-user-"))
+        );
+
+        Ok(())
+    }
 }
