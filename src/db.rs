@@ -33,6 +33,8 @@ const MIGRATION_NOTIFICATION_ARCHIVE: &str =
     include_str!("../migrations/20260501000001_notification_archive.sql");
 const MIGRATION_PERFORMANCE_COUNTERS: &str =
     include_str!("../migrations/20260501000002_performance_counters.sql");
+const MIGRATION_DM_SIDEBAR_SCALE: &str =
+    include_str!("../migrations/20260501000003_dm_sidebar_scale.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -308,6 +310,10 @@ impl Database {
             (
                 "20260501000002_performance_counters",
                 MIGRATION_PERFORMANCE_COUNTERS,
+            ),
+            (
+                "20260501000003_dm_sidebar_scale",
+                MIGRATION_DM_SIDEBAR_SCALE,
             ),
         ] {
             let exists: Option<String> =

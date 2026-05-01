@@ -149,7 +149,7 @@ async fn sqlite_services_cover_invites_threads_comments_and_dms() {
 }
 
 #[tokio::test]
-async fn sqlite_snapshot_dm_sidebar_lists_all_users_with_recent_conversations_first() {
+async fn sqlite_snapshot_dm_sidebar_lists_conversation_peers_only() {
     let (_config, state) = test_state("dm-sidebar").await;
     let owner = bootstrap_owner(&state, "SHA256:dm-owner", "ssh-ed25519 owner").await;
     let alice_invite = state.create_invite(owner.id.clone()).await.expect("invite");
@@ -225,7 +225,7 @@ async fn sqlite_snapshot_dm_sidebar_lists_all_users_with_recent_conversations_fi
         .map(|dm| dm.peer_username.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(usernames, vec!["charlie", "alice", "bob", "dave"]);
+    assert_eq!(usernames, vec!["charlie", "alice"]);
     assert!(!usernames.contains(&owner.username.as_str()));
     assert_eq!(
         snapshot.dm_sidebar[0].conversation_id.as_deref(),
@@ -235,10 +235,8 @@ async fn sqlite_snapshot_dm_sidebar_lists_all_users_with_recent_conversations_fi
         snapshot.dm_sidebar[1].conversation_id.as_deref(),
         Some(alice_dm.as_str())
     );
-    assert!(snapshot.dm_sidebar[2].conversation_id.is_none());
-    assert!(snapshot.dm_sidebar[3].conversation_id.is_none());
-    assert_eq!(snapshot.dm_sidebar[2].peer_username, bob.username);
-    assert_eq!(snapshot.dm_sidebar[3].peer_username, dave.username);
+    assert!(!usernames.contains(&bob.username.as_str()));
+    assert!(!usernames.contains(&dave.username.as_str()));
 }
 
 #[tokio::test]
