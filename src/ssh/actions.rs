@@ -543,8 +543,15 @@ async fn open_source_target(
     account_id: &str,
     target: SourceTarget,
 ) -> anyhow::Result<ActionResult> {
+    let focus = target.focus;
     if let Some(conversation_id) = target.conversation_id {
-        app.lock().await.select_conversation(conversation_id);
+        if let Some(focus) = focus {
+            app.lock()
+                .await
+                .select_conversation_with_focus(conversation_id, focus);
+        } else {
+            app.lock().await.select_conversation(conversation_id);
+        }
         return Ok(ActionResult::message("Opened source"));
     }
 
@@ -567,7 +574,13 @@ async fn open_source_target(
     }
 
     if let Some(thread_id) = target.thread_id {
-        app.lock().await.select_thread(channel_id, thread_id);
+        if let Some(focus) = focus {
+            app.lock()
+                .await
+                .select_thread_with_focus(channel_id, thread_id, focus);
+        } else {
+            app.lock().await.select_thread(channel_id, thread_id);
+        }
     } else {
         app.lock().await.select_channel(channel_id);
     }
@@ -768,6 +781,8 @@ fn notifications_modal(rows: &[NotificationSummary]) -> ListModal {
 }
 
 trait SourceRow {
+    fn source_kind(&self) -> Option<&str>;
+    fn source_obj_index(&self) -> Option<i64>;
     fn channel_id(&self) -> Option<&str>;
     fn channel_slug(&self) -> Option<&str>;
     fn thread_id(&self) -> Option<&str>;
@@ -775,6 +790,14 @@ trait SourceRow {
 }
 
 impl SourceRow for MentionSummary {
+    fn source_kind(&self) -> Option<&str> {
+        Some(self.source_kind.as_str())
+    }
+
+    fn source_obj_index(&self) -> Option<i64> {
+        self.source_obj_index
+    }
+
     fn channel_id(&self) -> Option<&str> {
         self.channel_id.as_deref()
     }
@@ -793,6 +816,14 @@ impl SourceRow for MentionSummary {
 }
 
 impl SourceRow for NotificationSummary {
+    fn source_kind(&self) -> Option<&str> {
+        self.source_kind.as_deref()
+    }
+
+    fn source_obj_index(&self) -> Option<i64> {
+        self.source_obj_index
+    }
+
     fn channel_id(&self) -> Option<&str> {
         self.channel_id.as_deref()
     }
@@ -819,7 +850,17 @@ fn source_row_action(row: &impl SourceRow) -> Option<ListModalAction> {
         channel_slug: row.channel_slug().map(ToOwned::to_owned),
         thread_id: row.thread_id().map(ToOwned::to_owned),
         conversation_id: row.conversation_id().map(ToOwned::to_owned),
+        focus: source_focus(row),
     }))
+}
+
+fn source_focus(row: &impl SourceRow) -> Option<SourceFocus> {
+    match row.source_kind()? {
+        "thread" => Some(SourceFocus::ThreadRoot),
+        "comment" => row.source_obj_index().map(SourceFocus::Comment),
+        "dm" => row.source_obj_index().map(SourceFocus::Dm),
+        _ => None,
+    }
 }
 
 fn source_label(
@@ -959,6 +1000,9 @@ mod tests {
         let rows = vec![NotificationSummary {
             id: "019ddd09abcdef".to_string(),
             kind: "mention".to_string(),
+            source_kind: Some("comment".to_string()),
+            source_id: Some("comment-1".to_string()),
+            source_obj_index: Some(7),
             actor_username: Some("alice".to_string()),
             channel_id: Some("channel".to_string()),
             channel_slug: Some("project-jojo".to_string()),
@@ -985,6 +1029,7 @@ mod tests {
                 channel_slug: Some("project-jojo".to_string()),
                 thread_id: Some("thread".to_string()),
                 conversation_id: None,
+                focus: Some(SourceFocus::Comment(7)),
             }))
         );
     }
@@ -995,6 +1040,8 @@ mod tests {
             id: "019ddd09abcdef".to_string(),
             actor_username: "alice".to_string(),
             source_kind: "dm".to_string(),
+            source_id: "dm-message-1".to_string(),
+            source_obj_index: Some(3),
             channel_id: None,
             channel_slug: None,
             thread_id: None,
@@ -1016,6 +1063,7 @@ mod tests {
                 channel_slug: None,
                 thread_id: None,
                 conversation_id: Some("dm".to_string()),
+                focus: Some(SourceFocus::Dm(3)),
             }))
         );
     }

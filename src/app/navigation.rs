@@ -300,10 +300,14 @@ impl App {
         else {
             return;
         };
+        let focus = match item.kind {
+            SavedMessageKind::Comment => SourceFocus::Comment(item.source_obj_index),
+            SavedMessageKind::Dm => SourceFocus::Dm(item.source_obj_index),
+        };
         if let (Some(channel_id), Some(thread_id)) = (item.channel_id, item.thread_id) {
-            self.select_thread(channel_id, thread_id);
+            self.select_thread_with_focus(channel_id, thread_id, focus);
         } else if let Some(conversation_id) = item.conversation_id {
-            self.select_conversation(conversation_id);
+            self.select_conversation_with_focus(conversation_id, focus);
         }
     }
 

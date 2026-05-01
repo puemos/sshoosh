@@ -8,7 +8,7 @@ use ratatui::layout::{Position, Rect};
 use tui_scrollview::ScrollViewState;
 
 use super::{
-    action::SourceTarget,
+    action::{SourceFocus, SourceTarget},
     commands::{CommandExecutor, PaletteItem},
     input::MouseModifiers,
 };
@@ -55,6 +55,7 @@ pub struct UiState {
     pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
     pub saved_selected: usize,
+    pub pending_source_focus: Option<SourceFocus>,
     pub hit_map: HitMap,
     pub link_overlays: Vec<LinkOverlay>,
     pub message_selection_regions: Vec<MessageSelectionRegion>,
@@ -79,6 +80,7 @@ impl Default for UiState {
             comment_delete: None,
             search_selected: 0,
             saved_selected: 0,
+            pending_source_focus: None,
             hit_map: HitMap::default(),
             link_overlays: Vec::new(),
             message_selection_regions: Vec::new(),

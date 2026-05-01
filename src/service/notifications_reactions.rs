@@ -81,7 +81,8 @@ impl ServerState {
     ) -> anyhow::Result<Vec<MentionSummary>> {
         let limit = limit.clamp(1, 200);
         let sql = format!(
-            "SELECT m.id, actor.username AS actor_username, m.source_kind,
+            "SELECT m.id, actor.username AS actor_username, m.source_kind, m.source_id,
+                    COALESCE(m.obj_index, cm.obj_index, dm.obj_index) AS source_obj_index,
                     m.channel_id, c.slug AS channel_slug,
                     m.thread_id, t.title AS thread_title,
                     m.conversation_id,
@@ -111,6 +112,8 @@ impl ServerState {
                 id: row.get("id"),
                 actor_username: row.get("actor_username"),
                 source_kind: row.get("source_kind"),
+                source_id: row.get("source_id"),
+                source_obj_index: row.get("source_obj_index"),
                 channel_id: row.get("channel_id"),
                 channel_slug: row.get("channel_slug"),
                 thread_id: row.get("thread_id"),

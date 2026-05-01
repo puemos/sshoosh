@@ -100,6 +100,7 @@ pub enum SavedMessageKind {
 pub struct SavedMessageItem {
     pub kind: SavedMessageKind,
     pub source_id: String,
+    pub source_obj_index: i64,
     pub author: String,
     pub body: String,
     pub source_label: String,

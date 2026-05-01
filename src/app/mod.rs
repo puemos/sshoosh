@@ -4,7 +4,7 @@ mod input;
 mod render;
 mod state;
 mod theme;
-pub use action::{Action, SourceTarget};
+pub use action::{Action, SourceFocus, SourceTarget};
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -17,7 +17,7 @@ use crate::{
     client::ClientSession,
     service::{
         Account, DEFAULT_HISTORY_LIMIT, LiveEvent, MAX_HISTORY_LIMIT, NotificationSummary,
-        SavedMessageItem, SearchResult, ServerState, Snapshot,
+        SavedMessageItem, SavedMessageKind, SearchResult, ServerState, Snapshot,
     },
     terminal::{self, SharedBuffer, SshooshTerminal},
 };

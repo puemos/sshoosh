@@ -22,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    app::{Action, App, ListModal, ListModalAction, SourceTarget},
+    app::{Action, App, ListModal, ListModalAction, SourceFocus, SourceTarget},
     client::ClientSession,
     config::Config,
     output::ssh::format_audit,

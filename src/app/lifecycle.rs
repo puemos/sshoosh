@@ -231,6 +231,7 @@ impl App {
         self.snapshot.selected_conversation_id = None;
         self.snapshot.threads.clear();
         self.snapshot.comments.clear();
+        self.ui.pending_source_focus = None;
         self.reset_detail_scroll();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::List;
@@ -243,12 +244,23 @@ impl App {
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = Some(thread_id);
         self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
         self.reset_detail_scroll();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::Detail;
         self.ui.threads_collapsed = false;
         self.actions.push(Action::MarkThreadRead);
         self.refresh_requested = true;
+    }
+
+    pub fn select_thread_with_focus(
+        &mut self,
+        channel_id: String,
+        thread_id: String,
+        focus: SourceFocus,
+    ) {
+        self.select_thread(channel_id, thread_id);
+        self.prepare_source_focus(focus);
     }
 
     pub fn select_thread_at_bottom(&mut self, channel_id: String, thread_id: String) {
@@ -259,11 +271,24 @@ impl App {
     pub fn select_conversation(&mut self, conversation_id: String) {
         self.reset_history_limit();
         self.snapshot.selected_conversation_id = Some(conversation_id);
+        self.ui.pending_source_focus = None;
         self.reset_detail_scroll();
         self.ui.route = Route::Dms;
         self.ui.active_pane = ActivePane::Detail;
         self.actions.push(Action::MarkDmRead);
         self.refresh_requested = true;
+    }
+
+    pub fn select_conversation_with_focus(&mut self, conversation_id: String, focus: SourceFocus) {
+        self.select_conversation(conversation_id);
+        self.prepare_source_focus(focus);
+    }
+
+    fn prepare_source_focus(&mut self, focus: SourceFocus) {
+        if matches!(focus, SourceFocus::Comment(_) | SourceFocus::Dm(_)) {
+            self.history_limit = MAX_HISTORY_LIMIT;
+        }
+        self.ui.pending_source_focus = Some(focus);
     }
 
     pub fn select_conversation_at_bottom(&mut self, conversation_id: String) {
@@ -282,6 +307,7 @@ impl App {
         self.snapshot.search_results = results;
         self.snapshot.search_has_more = has_more;
         self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
         self.ui.route = Route::Search;
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {
@@ -304,6 +330,7 @@ impl App {
         self.snapshot.saved_messages = messages;
         self.snapshot.saved_has_more = has_more;
         self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
         self.ui.route = Route::Saved;
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {

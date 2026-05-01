@@ -2,6 +2,9 @@
 pub struct NotificationSummary {
     pub id: String,
     pub kind: String,
+    pub source_kind: Option<String>,
+    pub source_id: Option<String>,
+    pub source_obj_index: Option<i64>,
     pub actor_username: Option<String>,
     pub channel_id: Option<String>,
     pub channel_slug: Option<String>,
@@ -19,6 +22,8 @@ pub struct MentionSummary {
     pub id: String,
     pub actor_username: String,
     pub source_kind: String,
+    pub source_id: String,
+    pub source_obj_index: Option<i64>,
     pub channel_id: Option<String>,
     pub channel_slug: Option<String>,
     pub thread_id: Option<String>,

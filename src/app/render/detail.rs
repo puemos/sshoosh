@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::SourceFocus;
 use crate::time_format::{
     calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
 };
@@ -87,6 +88,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
+    let mut focused_row = None;
     let mut content_row = 0u16;
     if let Some(thread) = selected {
         if snapshot.comments_has_more {
@@ -106,6 +108,9 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
 
         if !thread.body.trim().is_empty() {
             last_day = calendar_day_key(&thread.created_at);
+            if matches!(ui.pending_source_focus, Some(SourceFocus::ThreadRoot)) {
+                focused_row = Some(content_row);
+            }
             let card = message_card(
                 snapshot,
                 MessageKind::ThreadRoot,
@@ -164,6 +169,9 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             } else {
                 HeaderMode::Full
             };
+            if ui.pending_source_focus == Some(SourceFocus::Comment(comment.obj_index)) {
+                focused_row = Some(content_row);
+            }
             let card = message_card(
                 snapshot,
                 MessageKind::Comment,
@@ -206,6 +214,14 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         return;
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+    apply_pending_source_focus(
+        ui,
+        focused_row,
+        matches!(
+            ui.pending_source_focus,
+            Some(SourceFocus::ThreadRoot | SourceFocus::Comment(_))
+        ) && snapshot.comments_has_more,
+    );
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
@@ -554,6 +570,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
+    let mut focused_row = None;
     let mut content_row = 0u16;
     let selected = snapshot
         .selected_conversation_id
@@ -596,6 +613,9 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             } else {
                 HeaderMode::Full
             };
+            if ui.pending_source_focus == Some(SourceFocus::Dm(message.obj_index)) {
+                focused_row = Some(content_row);
+            }
             let card = message_card(
                 snapshot,
                 MessageKind::Dm,
@@ -628,6 +648,12 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         }
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+    apply_pending_source_focus(
+        ui,
+        focused_row,
+        matches!(ui.pending_source_focus, Some(SourceFocus::Dm(_)))
+            && snapshot.conversation_messages_has_more,
+    );
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
@@ -638,6 +664,16 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         selection_hits,
         ui.detail_scroll.offset().y,
     );
+}
+
+fn apply_pending_source_focus(ui: &mut UiState, focused_row: Option<u16>, capped: bool) {
+    if let Some(row) = focused_row {
+        ui.detail_scroll.set_offset(Position { x: 0, y: row });
+        ui.pending_source_focus = None;
+    } else if capped {
+        ui.pending_source_focus = None;
+        ui.banner = Some(Banner::err("Message is older than loaded history"));
+    }
 }
 
 pub(crate) fn history_prompt(text: &'static str) -> ListItem<'static> {

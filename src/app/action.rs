@@ -6,6 +6,14 @@ pub struct SourceTarget {
     pub channel_slug: Option<String>,
     pub thread_id: Option<String>,
     pub conversation_id: Option<String>,
+    pub focus: Option<SourceFocus>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceFocus {
+    ThreadRoot,
+    Comment(i64),
+    Dm(i64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

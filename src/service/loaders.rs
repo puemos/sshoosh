@@ -64,7 +64,9 @@ pub(crate) async fn load_notifications(
 ) -> anyhow::Result<Vec<NotificationSummary>> {
     let limit = limit.clamp(1, 200);
     let sql = format!(
-        "SELECT n.id, n.kind, actor.username AS actor_username,
+        "SELECT n.id, n.kind, n.source_kind, n.source_id,
+                COALESCE(cm.obj_index, dm.obj_index) AS source_obj_index,
+                actor.username AS actor_username,
                 n.channel_id, c.slug AS channel_slug,
                 n.thread_id, t.title AS thread_title,
                 n.conversation_id,
@@ -73,6 +75,8 @@ pub(crate) async fn load_notifications(
          LEFT JOIN accounts actor ON actor.id = n.actor_account_id
          LEFT JOIN channels c ON c.id = n.channel_id
          LEFT JOIN threads t ON t.id = n.thread_id
+         LEFT JOIN comments cm ON cm.id = n.source_id AND n.source_kind = 'comment'
+         LEFT JOIN conversation_messages dm ON dm.id = n.source_id AND n.source_kind = 'dm'
          WHERE n.account_id = ?
            AND {}
          ORDER BY n.created_at DESC
@@ -89,6 +93,9 @@ pub(crate) async fn load_notifications(
         .map(|row| NotificationSummary {
             id: row.get("id"),
             kind: row.get("kind"),
+            source_kind: row.get("source_kind"),
+            source_id: row.get("source_id"),
+            source_obj_index: row.get("source_obj_index"),
             actor_username: row.get("actor_username"),
             channel_id: row.get("channel_id"),
             channel_slug: row.get("channel_slug"),
@@ -482,11 +489,12 @@ pub(crate) async fn load_saved_messages(
     let limit = limit.clamp(1, 500);
     let fetch_limit = limit.saturating_add(1);
     let rows = query(
-        "SELECT kind, source_id, author, body, source_label, saved_at, created_at,
+        "SELECT kind, source_id, source_obj_index, author, body, source_label, saved_at, created_at,
                 channel_id, thread_id, conversation_id
          FROM (
            SELECT 'comment' AS kind,
                   sm.source_id,
+                  cm.obj_index AS source_obj_index,
                   a.username AS author,
                   cm.body,
                   '#' || ch.slug || ' · ' || t.title AS source_label,
@@ -511,6 +519,7 @@ pub(crate) async fn load_saved_messages(
            UNION ALL
            SELECT 'dm' AS kind,
                   sm.source_id,
+                  dm.obj_index AS source_obj_index,
                   a.username AS author,
                   dm.body,
                   'DM @' || peer.username AS source_label,
@@ -553,6 +562,7 @@ pub(crate) async fn load_saved_messages(
             SavedMessageItem {
                 kind,
                 source_id: row.get("source_id"),
+                source_obj_index: row.get("source_obj_index"),
                 author: row.get("author"),
                 body: sanitize_stored_text(&row.get::<String>("body")),
                 source_label: sanitize_single_line_text(&row.get::<String>("source_label")),

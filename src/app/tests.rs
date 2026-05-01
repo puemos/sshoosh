@@ -590,9 +590,18 @@ mod cases {
     #[tokio::test]
     async fn saved_screen_activates_selected_saved_message() {
         let mut app = test_app("saved-screen-activate").await;
+        app.resize(100, 10).expect("resize");
+        app.snapshot.threads[0].body.clear();
+        app.snapshot.comments = (1..=8)
+            .map(|index| {
+                let author = if index % 2 == 0 { "bob" } else { "alice" };
+                comment(index, author, &format!("Comment {index}"))
+            })
+            .collect();
         app.snapshot.saved_messages = vec![SavedMessageItem {
             kind: SavedMessageKind::Comment,
-            source_id: "comment-1".to_string(),
+            source_id: "comment-5".to_string(),
+            source_obj_index: 5,
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
@@ -618,6 +627,76 @@ mod cases {
 
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        app.render().expect("render focused thread");
+        assert_eq!(app.ui.detail_scroll.offset().y, 17);
+        assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn saved_dm_message_opens_and_scrolls_to_message() {
+        let mut app = test_app("saved-dm-focus").await;
+        app.resize(100, 10).expect("resize");
+        app.snapshot.conversation_messages = (1..=8)
+            .map(|index| {
+                let author = if index % 2 == 0 { "owner" } else { "alice" };
+                dm_message(index, author, &format!("DM {index}"))
+            })
+            .collect();
+        app.snapshot.saved_messages = vec![SavedMessageItem {
+            kind: SavedMessageKind::Dm,
+            source_id: "dm-message-5".to_string(),
+            source_obj_index: 5,
+            author: "owner".to_string(),
+            body: "Saved DM".to_string(),
+            source_label: "DM @alice".to_string(),
+            saved_at: "2020-01-03T03:04:00Z".to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: None,
+            thread_id: None,
+            conversation_id: Some("dm".to_string()),
+        }];
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.activate_selection();
+
+        assert_eq!(app.ui.route, Route::Dms);
+        assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        app.render().expect("render focused dm");
+        assert_eq!(app.ui.detail_scroll.offset().y, 16);
+        assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn focused_navigation_expands_history_limit() {
+        let mut app = test_app("focused-history-limit").await;
+
+        app.select_thread_with_focus(
+            "general".to_string(),
+            "thread".to_string(),
+            SourceFocus::Comment(1),
+        );
+
+        assert_eq!(app.history_limit, MAX_HISTORY_LIMIT);
+        assert_eq!(app.ui.pending_source_focus, Some(SourceFocus::Comment(1)));
+    }
+
+    #[tokio::test]
+    async fn missing_focused_message_keeps_source_open_without_panicking() {
+        let mut app = test_app("missing-focused-message").await;
+        app.snapshot.threads[0].body.clear();
+        app.snapshot.comments = vec![comment(1, "alice", "Only visible comment")];
+
+        app.select_thread_with_focus(
+            "general".to_string(),
+            "thread".to_string(),
+            SourceFocus::Comment(999),
+        );
+        app.render().expect("render missing focused message");
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.pending_source_focus, Some(SourceFocus::Comment(999)));
     }
 
     #[tokio::test]
@@ -626,6 +705,7 @@ mod cases {
         app.snapshot.saved_messages = vec![SavedMessageItem {
             kind: SavedMessageKind::Comment,
             source_id: "comment-1".to_string(),
+            source_obj_index: 1,
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
@@ -654,6 +734,7 @@ mod cases {
         app.snapshot.saved_messages = vec![SavedMessageItem {
             kind: SavedMessageKind::Comment,
             source_id: "comment-1".to_string(),
+            source_obj_index: 1,
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
@@ -809,6 +890,7 @@ mod cases {
             channel_slug: Some("general".to_string()),
             thread_id: Some("thread".to_string()),
             conversation_id: None,
+            focus: None,
         };
         app.set_banner_list(ListModal {
             title: "Notifications".to_string(),
@@ -846,6 +928,7 @@ mod cases {
                     channel_slug: Some("alerts".to_string()),
                     thread_id: None,
                     conversation_id: None,
+                    focus: None,
                 },
             },
         )
@@ -878,6 +961,7 @@ mod cases {
                     channel_slug: Some("secret".to_string()),
                     thread_id: None,
                     conversation_id: None,
+                    focus: None,
                 },
             },
         )
