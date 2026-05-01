@@ -8,8 +8,6 @@ pub const BADGE: Color = Color::Rgb(36, 39, 42); // #24272A
 pub const PANEL: Color = BG;
 pub const ELEVATED_PANEL: Color = COMPOSER;
 pub const CARD: Color = BG;
-pub const MESSAGE_CARD: Color = Color::Rgb(24, 27, 29); // #181B1D
-pub const MESSAGE_CARD_FOCUSED: Color = Color::Rgb(29, 32, 34); // #1D2022
 pub const BORDER: Color = Color::Rgb(70, 73, 73); // #464949
 pub const MESSAGE_SEPARATOR: Color = Color::Rgb(56, 60, 62); // #383C3E
 pub const MUTED: Color = Color::Rgb(133, 146, 137); // #859289
@@ -18,7 +16,6 @@ pub const SUBTLE: Color = Color::Rgb(219, 213, 188); // #DBD5BC
 pub const ACCENT: Color = Color::Rgb(120, 182, 173); // #78B6AD
 pub const ACCENT_SOFT: Color = Color::Rgb(135, 201, 229); // #87C9E5
 pub const MENTION: Color = Color::Rgb(232, 121, 211); // hot magenta — kept distinct from author palette
-pub const MESSAGE_ERROR_GUTTER: Color = Color::Rgb(230, 126, 128); // #E67E80
 
 // Stable per-author palette: 16 hues evenly spaced around the color wheel,
 // at fixed saturation/lightness tuned for the dark message surface.
@@ -195,13 +192,6 @@ pub fn message_strikethrough(style: Style) -> Style {
 
 pub fn message_card_on(bg: Color) -> Style {
     Style::default().fg(TEXT).bg(bg)
-}
-
-pub fn message_gutter(color: Color, bg: Color) -> Style {
-    Style::default()
-        .fg(color)
-        .bg(bg)
-        .add_modifier(Modifier::BOLD)
 }
 
 pub fn message_separator() -> Style {

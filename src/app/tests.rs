@@ -187,6 +187,14 @@ mod cases {
         );
     }
 
+    fn decode_osc52_copy(output: &str) -> Option<String> {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+        let payload = output.split("\x1b]52;c;").nth(1)?.split('\x07').next()?;
+        let bytes = STANDARD.decode(payload).ok()?;
+        String::from_utf8(bytes).ok()
+    }
+
     #[tokio::test]
     async fn arrow_keys_navigate_open_autocomplete() {
         let mut app = test_app("autocomplete-arrows").await;
@@ -832,6 +840,47 @@ mod cases {
         assert!(app.ui.selection.range.is_none());
         assert!(app.ui.selection.text.is_empty());
         assert!(!app.ui.selection.copy_requested);
+    }
+
+    #[tokio::test]
+    async fn mouse_drag_from_message_uses_message_scoped_selection() {
+        let mut app = test_app("drag-message-selects").await;
+        app.snapshot.comments = vec![comment(
+            2,
+            "alice",
+            "selectable message text stays in the detail pane when dragged wide",
+        )];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+        let message_region = *app
+            .ui
+            .message_selection_regions
+            .last()
+            .expect("message selection region");
+        let start = Position {
+            x: message_region.rect.x + 4,
+            y: message_region.rect.y + 1,
+        };
+        let end = Position {
+            x: message_region.rect.x + message_region.rect.width + 20,
+            y: message_region.rect.y + 1,
+        };
+
+        drag_at(&mut app, start, end);
+
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.ui.selection.range.is_some());
+        assert_eq!(app.ui.selection.message_region, Some(message_region));
+        assert!(app.ui.selection.copy_requested);
+        let output =
+            String::from_utf8_lossy(&app.render().expect("render after select")).into_owned();
+        let copied = decode_osc52_copy(&output).expect("osc52 copy");
+        assert!(copied.contains("ctable message text"));
+        assert!(!copied.contains("@alice"));
+        assert!(!copied.contains("@owner"));
+        assert!(!copied.contains("offline"));
+        assert!(app.ui.selection.range.is_none());
+        assert!(app.ui.selection.text.is_empty());
     }
 
     #[tokio::test]

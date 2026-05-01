@@ -9,6 +9,7 @@ pub fn draw(
     let area = frame.area();
     ui.hit_map.clear();
     ui.link_overlays.clear();
+    ui.message_selection_regions.clear();
     frame.render_widget(Clear, area);
     if !account.activated {
         draw_onboarding(frame, area, account, ui);

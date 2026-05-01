@@ -178,6 +178,13 @@ impl App {
         self.ui.selection.pending = Some(SelectionAnchor {
             at: mouse_position(mouse),
             region: self.ui.hit_map.hit(mouse.column, mouse.row),
+            message_region: self
+                .ui
+                .message_selection_regions
+                .iter()
+                .rev()
+                .copied()
+                .find(|region| region.contains(mouse.column, mouse.row)),
             modifiers: mouse.modifiers,
             moved: false,
         });
@@ -196,6 +203,7 @@ impl App {
             start: anchor.at,
             end,
         });
+        self.ui.selection.message_region = anchor.message_region;
     }
 
     pub(crate) fn finish_mouse_click_or_selection(&mut self, mouse: MouseEvent) {
@@ -209,6 +217,7 @@ impl App {
                 start: anchor.at,
                 end,
             });
+            self.ui.selection.message_region = anchor.message_region;
         }
         if anchor.moved || self.ui.selection.range.is_some() {
             self.ui.selection.copy_requested = true;
@@ -550,16 +559,28 @@ impl App {
 
     pub(crate) fn open_comment_menu_at(&mut self, mouse: MouseEvent) {
         self.ui.selection.clear();
-        let region = self
+        let exact_region = self
             .ui
             .hit_map
             .hit_matching(mouse.column, mouse.row, |target| {
                 matches!(target, HitTarget::EditableMessage(_))
             });
+        let row_region = exact_region.or_else(|| {
+            let hit = self.ui.hit_map.hit(mouse.column, mouse.row)?;
+            if !matches!(
+                hit.target,
+                HitTarget::DetailScroll | HitTarget::MessageLink(_)
+            ) {
+                return None;
+            }
+            self.ui.hit_map.hit_row_matching(mouse.row, |target| {
+                matches!(target, HitTarget::EditableMessage(_))
+            })
+        });
         let Some(HitRegion {
             target: HitTarget::EditableMessage(target),
             ..
-        }) = region
+        }) = row_region
         else {
             self.close_comment_overlays();
             return;

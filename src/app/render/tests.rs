@@ -208,18 +208,10 @@ mod cases {
             4,
         );
 
-        // header + 3 body rows (abcd, efgh, ij) — reactions on header,
-        // edited inline (or dropped if width too tight)
+        // header + 3 body rows (abcd, efgh, ij). Reactions are on header;
+        // edited is inline or dropped if width is too tight.
         assert_eq!(card.height(), 4);
         assert_eq!(card.link_count(), 0);
-    }
-
-    #[test]
-    fn message_error_detection_is_render_only_heuristic() {
-        assert!(is_error_message("Error from provider: bad input"));
-        assert!(is_error_message("  Error: bad input"));
-        assert!(is_error_message("failed: bad input"));
-        assert!(!is_error_message("this is not an error"));
     }
 
     #[test]
@@ -1126,7 +1118,7 @@ mod cases {
     }
 
     #[test]
-    fn render_thread_detail_uses_elevated_message_slabs_and_gutters() {
+    fn render_thread_detail_flushes_messages_to_detail_left_edge() {
         let width = 120;
         let height = 36;
         let backend = TestBackend::new(width, height);
@@ -1209,76 +1201,79 @@ mod cases {
             .unwrap();
         let buffer = terminal.backend().buffer();
 
+        let (root_author_x, root_author_y) =
+            position_for_text(buffer, width, height, "@owner").expect("root author");
         let (_root_meta_x, root_meta_y) =
             position_for_text(buffer, width, height, "thread root").expect("root metadata");
         let (root_body_x, root_body_y) =
             position_for_text(buffer, width, height, "Original post").expect("root body");
-        assert!(root_meta_y < root_body_y);
+        assert_eq!(root_author_y, root_meta_y);
+        assert_eq!(root_body_x, root_author_x);
+        assert_eq!(root_body_y, root_meta_y + 1);
+        assert!(!row_text(buffer, width, root_author_y).contains("▏"));
+        assert!(!row_text(buffer, width, root_body_y).contains("▏"));
+        assert_eq!(
+            buffer
+                .cell((root_author_x, root_author_y))
+                .expect("root author")
+                .bg,
+            theme::PANEL
+        );
         assert_eq!(
             buffer
                 .cell((root_body_x, root_body_y))
                 .expect("root body")
                 .bg,
-            theme::MESSAGE_CARD
+            theme::PANEL
         );
-        let root_gutter = buffer
-            .cell((root_body_x.saturating_sub(3), root_body_y))
-            .expect("root gutter");
-        assert_eq!(root_gutter.symbol(), "▏");
-        assert_eq!(root_gutter.fg, resolve_author_color(&snapshot, "owner"));
 
         let (alice_x, alice_y) =
             position_for_text(buffer, width, height, "Looks good").expect("alice body");
+        let (alice_author_x, alice_author_y) =
+            position_for_text(buffer, width, height, "@alice").expect("alice author");
+        assert_eq!(alice_author_x, root_author_x);
+        assert_eq!(alice_x, root_author_x);
+        assert_eq!(alice_y, alice_author_y + 1);
+        assert!(!row_text(buffer, width, alice_author_y).contains("▏"));
+        assert!(!row_text(buffer, width, alice_y).contains("▏"));
         assert_eq!(
             buffer.cell((alice_x, alice_y)).expect("alice body").bg,
-            theme::MESSAGE_CARD
-        );
-        assert_eq!(
-            buffer
-                .cell((alice_x.saturating_sub(3), alice_y))
-                .expect("alice gutter")
-                .fg,
-            resolve_author_color(&snapshot, "alice")
+            theme::PANEL
         );
         // (edited) renders inline at end of the last body line; reactions sit
-        // right-aligned in the header line one row above the body.
+        // right-aligned in the header line directly above the body.
         assert!(row_text(buffer, width, alice_y).contains("(edited)"));
         assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("ok 2"));
 
         let (owner_x, owner_y) =
             position_for_text(buffer, width, height, "I would").expect("owner body");
-        assert_eq!(
-            buffer
-                .cell((owner_x.saturating_sub(3), owner_y))
-                .expect("owner gutter")
-                .fg,
-            resolve_author_color(&snapshot, "owner")
-        );
+        assert_eq!(owner_x, root_author_x);
+        assert!(!row_text(buffer, width, owner_y).contains("▏"));
 
         let (error_x, error_y) =
             position_for_text(buffer, width, height, "Error from provider").expect("error body");
+        assert_eq!(error_x, root_author_x);
+        assert!(!row_text(buffer, width, error_y).contains("▏"));
         assert_eq!(
             buffer.cell((error_x, error_y)).expect("error body").bg,
-            theme::MESSAGE_CARD_FOCUSED
-        );
-        assert_eq!(
-            buffer
-                .cell((error_x.saturating_sub(3), error_y))
-                .expect("error gutter")
-                .fg,
-            theme::MESSAGE_ERROR_GUTTER
+            theme::PANEL
         );
 
         assert!(ui.hit_map.entries().iter().any(|region| matches!(
             region.target,
             HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
         )));
-        assert!(
-            ui.hit_map
-                .entries()
-                .iter()
-                .any(|region| matches!(region.target, HitTarget::MessageLink(ref url) if url == "https://example.com"))
-        );
+        let link_region = ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(region.target, HitTarget::MessageLink(ref url) if url == "https://example.com")
+            })
+            .expect("link hit region");
+        assert_eq!(link_region.rect.x, alice_x + "Looks good ".len() as u16);
+        assert_eq!(link_region.rect.y, alice_y);
+        assert_eq!(link_region.rect.width, "https://example.com".len() as u16);
     }
 
     #[test]
@@ -1728,6 +1723,78 @@ mod cases {
         assert_eq!(ui.selection.text, "hello");
         assert_ne!(buffer.cell((0, 0)).expect("copied cell").bg, theme::ACCENT);
         assert_ne!(buffer.cell((4, 0)).expect("copied cell").bg, theme::ACCENT);
+    }
+
+    #[test]
+    fn message_scoped_selection_extracts_only_message_bounds() {
+        let backend = TestBackend::new(42, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.selection.range = Some(SelectionRange {
+            start: Position { x: 14, y: 0 },
+            end: Position { x: 30, y: 1 },
+        });
+        ui.selection.message_region = Some(crate::app::state::MessageSelectionRegion {
+            rect: Rect::new(12, 0, 20, 2),
+        });
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Paragraph::new("workspace\nworkspace"),
+                    Rect::new(0, 0, 10, 2),
+                );
+                frame.render_widget(Paragraph::new("│\n│"), Rect::new(11, 0, 1, 2));
+                frame.render_widget(
+                    Paragraph::new("hello there\nsecond row"),
+                    Rect::new(12, 0, 20, 2),
+                );
+                apply_selection(frame, &mut ui);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(ui.selection.text, "llo there\nsecond row");
+        assert_ne!(buffer.cell((0, 0)).expect("workspace").bg, theme::ACCENT);
+        assert_ne!(buffer.cell((11, 0)).expect("divider").bg, theme::ACCENT);
+        assert_eq!(
+            buffer.cell((14, 0)).expect("message start").bg,
+            theme::ACCENT
+        );
+        assert_eq!(buffer.cell((30, 1)).expect("message end").bg, theme::ACCENT);
+    }
+
+    #[test]
+    fn message_scoped_selection_clamps_drag_outside_message() {
+        let backend = TestBackend::new(42, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut ui = UiState::default();
+        ui.selection.range = Some(SelectionRange {
+            start: Position { x: 15, y: 0 },
+            end: Position { x: 41, y: 0 },
+        });
+        ui.selection.message_region = Some(crate::app::state::MessageSelectionRegion {
+            rect: Rect::new(12, 0, 12, 1),
+        });
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Paragraph::new("left pane"), Rect::new(0, 0, 9, 1));
+                frame.render_widget(Paragraph::new("hello there"), Rect::new(12, 0, 12, 1));
+                apply_selection(frame, &mut ui);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(ui.selection.text, "lo there");
+        assert_eq!(
+            buffer.cell((23, 0)).expect("message edge").bg,
+            theme::ACCENT
+        );
+        assert_ne!(
+            buffer.cell((24, 0)).expect("outside message").bg,
+            theme::ACCENT
+        );
     }
 
     fn styled_lines_text(lines: &[Vec<StyledRun>]) -> String {

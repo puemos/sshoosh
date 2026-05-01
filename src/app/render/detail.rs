@@ -80,6 +80,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let messages_area = pane_scroll_area(area);
     let mut link_hits = Vec::new();
     let mut card_hits = Vec::new();
+    let mut selection_hits = Vec::new();
     let mut content_row = 0u16;
     if let Some(thread) = selected {
         if snapshot.comments_has_more {
@@ -114,6 +115,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &mut items,
                 &mut link_hits,
                 &mut card_hits,
+                &mut selection_hits,
                 &mut content_row,
                 card,
             );
@@ -172,6 +174,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &mut items,
                 &mut link_hits,
                 &mut card_hits,
+                &mut selection_hits,
                 &mut content_row,
                 card,
             );
@@ -194,6 +197,12 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
+    register_message_selection_regions(
+        ui,
+        messages_area,
+        selection_hits,
+        ui.detail_scroll.offset().y,
+    );
 }
 
 pub(crate) fn draw_search_detail(
@@ -437,6 +446,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
     let mut card_hits = Vec::new();
+    let mut selection_hits = Vec::new();
     let mut content_row = 0u16;
     let selected = snapshot
         .selected_conversation_id
@@ -498,6 +508,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 &mut items,
                 &mut link_hits,
                 &mut card_hits,
+                &mut selection_hits,
                 &mut content_row,
                 card,
             );
@@ -510,6 +521,12 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
+    register_message_selection_regions(
+        ui,
+        messages_area,
+        selection_hits,
+        ui.detail_scroll.offset().y,
+    );
 }
 
 pub(crate) fn history_prompt(text: &'static str) -> ListItem<'static> {

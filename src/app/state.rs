@@ -55,6 +55,7 @@ pub struct UiState {
     pub search_selected: usize,
     pub hit_map: HitMap,
     pub link_overlays: Vec<LinkOverlay>,
+    pub message_selection_regions: Vec<MessageSelectionRegion>,
     pub selection: SelectionState,
 }
 
@@ -77,6 +78,7 @@ impl Default for UiState {
             search_selected: 0,
             hit_map: HitMap::default(),
             link_overlays: Vec::new(),
+            message_selection_regions: Vec::new(),
             selection: SelectionState::default(),
         }
     }
@@ -114,6 +116,7 @@ pub struct LinkOverlay {
 pub struct SelectionState {
     pub pending: Option<SelectionAnchor>,
     pub range: Option<SelectionRange>,
+    pub message_region: Option<MessageSelectionRegion>,
     pub text: String,
     pub copy_requested: bool,
 }
@@ -122,6 +125,7 @@ impl SelectionState {
     pub fn clear(&mut self) {
         self.pending = None;
         self.range = None;
+        self.message_region = None;
         self.text.clear();
         self.copy_requested = false;
     }
@@ -135,6 +139,7 @@ impl SelectionState {
 pub struct SelectionAnchor {
     pub at: Position,
     pub region: Option<HitRegion>,
+    pub message_region: Option<MessageSelectionRegion>,
     pub modifiers: MouseModifiers,
     pub moved: bool,
 }
@@ -143,6 +148,17 @@ pub struct SelectionAnchor {
 pub struct SelectionRange {
     pub start: Position,
     pub end: Position,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MessageSelectionRegion {
+    pub rect: Rect,
+}
+
+impl MessageSelectionRegion {
+    pub fn contains(self, column: u16, row: u16) -> bool {
+        contains(self.rect, column, row)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -180,6 +196,22 @@ impl HitMap {
             .iter()
             .rev()
             .find(|entry| contains(entry.rect, column, row) && predicate(&entry.target))
+            .cloned()
+    }
+
+    pub fn hit_row_matching(
+        &self,
+        row: u16,
+        predicate: impl Fn(&HitTarget) -> bool,
+    ) -> Option<HitRegion> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.rect.y <= row
+                    && row < entry.rect.y.saturating_add(entry.rect.height)
+                    && predicate(&entry.target)
+            })
             .cloned()
     }
 

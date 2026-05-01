@@ -1,9 +1,10 @@
 use super::*;
+use crate::app::state::MessageSelectionRegion;
 use crate::time_format::format_human_timestamp;
 use ratatui::style::Color;
 
-const MESSAGE_PREFIX: &str = "▏  ";
-const MESSAGE_PREFIX_WIDTH: u16 = 3;
+const MESSAGE_PREFIX: &str = "";
+const MESSAGE_PREFIX_WIDTH: u16 = 0;
 
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
@@ -35,6 +36,11 @@ pub(crate) struct MessageCardHit {
     row: u16,
     height: u16,
     target: HitTarget,
+}
+
+pub(crate) struct MessageSelectionHit {
+    row: u16,
+    height: u16,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,12 +84,7 @@ pub(crate) fn message_card<'a>(
     let _ = snapshot.current_username.as_deref();
     let surface = message_surface(body);
     let author_color = resolve_author_color(snapshot, author);
-    let gutter_color = if is_error_message(body) {
-        theme::MESSAGE_ERROR_GUTTER
-    } else {
-        author_color
-    };
-    let gutter = theme::message_gutter(gutter_color, surface);
+    let gutter = theme::message_card_on(surface);
     let valid_mentions: Vec<String> = snapshot
         .users
         .iter()
@@ -211,21 +212,8 @@ fn header_spans<'a>(
     spans
 }
 
-fn message_surface(body: &str) -> Color {
-    if is_error_message(body) {
-        theme::MESSAGE_CARD_FOCUSED
-    } else {
-        theme::MESSAGE_CARD
-    }
-}
-
-pub(crate) fn is_error_message(body: &str) -> bool {
-    let body = body.trim_start();
-    body.starts_with("Error from provider:")
-        || body.starts_with("Error:")
-        || body.starts_with("error:")
-        || body.starts_with("Failed:")
-        || body.starts_with("failed:")
+fn message_surface(_body: &str) -> Color {
+    theme::PANEL
 }
 
 pub(crate) fn with_message_card_hit<'a>(
@@ -253,9 +241,11 @@ pub(crate) fn append_message_card<'a>(
     items: &mut Vec<ListItem<'a>>,
     link_hits: &mut Vec<MessageLinkHit>,
     card_hits: &mut Vec<MessageCardHit>,
+    selection_hits: &mut Vec<MessageSelectionHit>,
     content_row: &mut u16,
     card: MessageCard<'a>,
 ) {
+    let height = card.item.height().min(u16::MAX as usize) as u16;
     for mut link in card.links {
         link.row = link.row.saturating_add(*content_row);
         link_hits.push(link);
@@ -264,7 +254,11 @@ pub(crate) fn append_message_card<'a>(
         hit.row = hit.row.saturating_add(*content_row);
         card_hits.push(hit);
     }
-    *content_row = content_row.saturating_add(card.item.height().min(u16::MAX as usize) as u16);
+    selection_hits.push(MessageSelectionHit {
+        row: *content_row,
+        height,
+    });
+    *content_row = content_row.saturating_add(height);
     items.push(card.item);
 }
 
@@ -319,6 +313,27 @@ pub(crate) fn register_link_hits(
     }
 }
 
+pub(crate) fn register_message_selection_regions(
+    ui: &mut UiState,
+    area: Rect,
+    selection_hits: Vec<MessageSelectionHit>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for hit in selection_hits {
+        let hit_bottom = hit.row.saturating_add(hit.height);
+        if hit_bottom <= offset_y || hit.row >= bottom {
+            continue;
+        }
+        let y = area.y + hit.row.saturating_sub(offset_y);
+        let clipped_bottom = hit_bottom.min(bottom);
+        let height = clipped_bottom.saturating_sub(offset_y.max(hit.row));
+        ui.message_selection_regions.push(MessageSelectionRegion {
+            rect: Rect::new(area.x, y, area.width, height),
+        });
+    }
+}
+
 pub(crate) fn date_divider<'a>(label: &str, width: usize) -> ListItem<'a> {
     let label_text = format!(" {label} ");
     let label_width = label_text.chars().count();
@@ -345,5 +360,5 @@ pub(crate) fn message_card_line<'a>(gutter: Style, content: Vec<Span<'a>>) -> Li
 }
 
 pub(crate) fn message_content_width(area: Rect) -> usize {
-    area.width.saturating_sub(MESSAGE_PREFIX_WIDTH + 2).max(8) as usize
+    area.width.max(8) as usize
 }
