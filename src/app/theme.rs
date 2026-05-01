@@ -16,6 +16,7 @@ pub const SUBTLE: Color = Color::Rgb(219, 213, 188); // #DBD5BC
 pub const ACCENT: Color = Color::Rgb(120, 182, 173); // #78B6AD
 pub const ACCENT_SOFT: Color = Color::Rgb(135, 201, 229); // #87C9E5
 pub const MENTION: Color = Color::Rgb(232, 121, 211); // hot magenta — kept distinct from author palette
+pub const PIN: Color = Color::Rgb(231, 224, 154); // #E7E09A
 
 // Stable per-author palette: 16 hues evenly spaced around the color wheel,
 // at fixed saturation/lightness tuned for the dark message surface.
@@ -117,6 +118,10 @@ pub fn unread() -> Style {
         .fg(WARN)
         .bg(PANEL)
         .add_modifier(Modifier::BOLD)
+}
+
+pub fn pin() -> Style {
+    Style::default().fg(PIN).bg(PANEL)
 }
 
 pub fn elevated_title() -> Style {

@@ -142,15 +142,22 @@ pub(crate) fn thread_item<'a>(
     let selected = snapshot.selected_thread_id.as_deref() == Some(thread.id.as_str());
     let unread_badge = unread_badge(thread.unread_count);
     let state_badge = thread_state_badge(thread);
+    let pinned_badge = thread.pinned_at.as_ref().map(|_| " ●").unwrap_or("");
     let prefix_len = 2 + connector.chars().count();
     let title = truncate_text(
         &thread.title,
-        row_width.saturating_sub(prefix_len + unread_badge.len() + state_badge.len()),
+        row_width.saturating_sub(
+            prefix_len
+                + pinned_badge.chars().count()
+                + unread_badge.chars().count()
+                + state_badge.chars().count(),
+        ),
     );
     ListItem::new(Line::from(vec![
         Span::raw("  "),
         Span::styled(connector, theme::muted()),
         Span::styled(title, workspace_label_style(selected, thread.unread_count)),
+        Span::styled(pinned_badge, theme::pin()),
         Span::styled(state_badge, theme::muted()),
         Span::styled(unread_badge, theme::unread()),
     ]))
@@ -158,9 +165,6 @@ pub(crate) fn thread_item<'a>(
 
 pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String {
     let mut out = String::new();
-    if thread.pinned_at.is_some() {
-        out.push_str(" pin");
-    }
     if thread.archived_at.is_some() {
         out.push_str(" archived");
     }

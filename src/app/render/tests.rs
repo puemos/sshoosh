@@ -1008,6 +1008,64 @@ mod cases {
     }
 
     #[test]
+    fn workspace_thread_rows_render_pinned_marker_as_yellow_symbol() {
+        let width = 80;
+        let height = 16;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Release checklist 1".to_string(),
+                body: "Body".to_string(),
+                author: "owner".to_string(),
+                comment_count: 3,
+                last_comment_index: 3,
+                unread_count: 0,
+                last_activity_at: Some("2026-04-30T00:00:00Z".to_string()),
+                created_at: "2026-04-30T00:00:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: Some("2026-04-30T00:00:00Z".to_string()),
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: None,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::List;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (marker_x, marker_y) =
+            position_for_text(buffer, width, height, "●").expect("pin marker");
+        let thread_row = row_text(buffer, width, marker_y);
+
+        assert!(thread_row.contains("Release checklist 1 ●"));
+        assert!(!thread_row.contains(" pin"));
+        assert_eq!(
+            buffer.cell((marker_x, marker_y)).expect("pin marker").fg,
+            theme::PIN
+        );
+    }
+
+    #[test]
     fn render_dm_messages_with_scannable_rows() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
