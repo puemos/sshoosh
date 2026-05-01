@@ -501,6 +501,16 @@ impl ClientSession {
         self.state.list_notifications(account_id, limit).await
     }
 
+    pub async fn list_notifications_page(
+        &self,
+        account_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<NotificationSummary>> {
+        self.state
+            .list_notifications_page(account_id, request)
+            .await
+    }
+
     pub async fn terminal_notifications_enabled(&self, account_id: &str) -> anyhow::Result<bool> {
         self.state.terminal_notifications_enabled(account_id).await
     }
@@ -542,11 +552,32 @@ impl ClientSession {
         self.state.search_page(account_id, query, limit).await
     }
 
+    pub async fn search_page_after(
+        &self,
+        account_id: &str,
+        query: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<SearchPage> {
+        self.state
+            .search_page_after(account_id, query, request)
+            .await
+    }
+
     pub async fn saved_messages_page(
         &self,
         account_id: &str,
         limit: i64,
     ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
         self.state.saved_messages_page(account_id, limit).await
+    }
+
+    pub async fn saved_messages_page_after(
+        &self,
+        account_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<SavedMessageItem>> {
+        self.state
+            .saved_messages_page_after(account_id, request)
+            .await
     }
 }

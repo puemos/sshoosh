@@ -155,4 +155,56 @@ mod cases {
             })
         ));
     }
+
+    #[test]
+    fn list_commands_accept_pagination_flags() {
+        let cli = Cli::try_parse_from([
+            "sshoosh", "users", "list", "--limit", "7", "--cursor", "abc",
+        ])
+        .expect("parse users list pagination");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Users {
+                command: UsersCommand::List {
+                    limit: 7,
+                    cursor: Some(cursor),
+                }
+            }) if cursor == "abc"
+        ));
+
+        let cli = Cli::try_parse_from([
+            "sshoosh", "channels", "members", "ops", "--limit", "5", "--cursor", "next",
+        ])
+        .expect("parse members pagination");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Channels {
+                command: ChannelsCommand::Members {
+                    slug,
+                    limit: 5,
+                    cursor: Some(cursor),
+                }
+            }) if slug == "ops" && cursor == "next"
+        ));
+
+        let cli = Cli::try_parse_from([
+            "sshoosh",
+            "notifications",
+            "list",
+            "--limit",
+            "3",
+            "--cursor",
+            "later",
+        ])
+        .expect("parse notifications pagination");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Notifications {
+                command: NotificationsCommand::List {
+                    limit: 3,
+                    cursor: Some(cursor),
+                }
+            }) if cursor == "later"
+        ));
+    }
 }

@@ -400,12 +400,29 @@ impl ServerState {
         search_visible(self.db.read_pool(), actor_id, query, limit).await
     }
 
+    pub async fn search_page_after(
+        &self,
+        actor_id: &str,
+        query: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<SearchPage> {
+        search_visible_page(self.db.read_pool(), actor_id, query, request).await
+    }
+
     pub async fn saved_messages_page(
         &self,
         actor_id: &str,
         limit: i64,
     ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
         load_saved_messages(self.db.read_pool(), actor_id, limit).await
+    }
+
+    pub async fn saved_messages_page_after(
+        &self,
+        actor_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<SavedMessageItem>> {
+        load_saved_messages_page(self.db.read_pool(), actor_id, request).await
     }
 }
 

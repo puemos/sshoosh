@@ -408,9 +408,14 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             .list_mentions(&account_id, 50)
             .await
             .map(|rows| ActionResult::List(mentions_modal(&rows))),
-        Action::ListNotifications => match session.list_notifications(&account_id, 50).await {
-            Ok(rows) => {
-                app.lock().await.set_notifications(rows);
+        Action::ListNotifications => match session
+            .list_notifications_page(&account_id, PageRequest::first(50))
+            .await
+        {
+            Ok(page) => {
+                app.lock()
+                    .await
+                    .set_notifications_page(page.items, page.next_cursor, true);
                 Ok(ActionResult::silent())
             }
             Err(err) => Err(err),
@@ -425,8 +430,15 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             {
                 Ok(()) => {
                     if app.lock().await.notifications_active() {
-                        match session.list_notifications(&account_id, 50).await {
-                            Ok(rows) => app.lock().await.set_notifications(rows),
+                        match session
+                            .list_notifications_page(&account_id, PageRequest::first(50))
+                            .await
+                        {
+                            Ok(page) => app.lock().await.set_notifications_page(
+                                page.items,
+                                page.next_cursor,
+                                true,
+                            ),
                             Err(err) => return app.lock().await.set_banner_err(err.to_string()),
                         }
                     }
@@ -438,8 +450,15 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
         Action::ArchiveNotifications => match session.archive_notifications(&account_id).await {
             Ok(()) => {
                 if app.lock().await.notifications_active() {
-                    match session.list_notifications(&account_id, 50).await {
-                        Ok(rows) => app.lock().await.set_notifications(rows),
+                    match session
+                        .list_notifications_page(&account_id, PageRequest::first(50))
+                        .await
+                    {
+                        Ok(page) => app.lock().await.set_notifications_page(
+                            page.items,
+                            page.next_cursor,
+                            true,
+                        ),
                         Err(err) => return app.lock().await.set_banner_err(err.to_string()),
                     }
                 }
@@ -473,11 +492,17 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             .map(|rows| ActionResult::modal_message(format_audit(&rows))),
         Action::Search { query } => {
             let limit = app.lock().await.reset_search_limit();
-            match session.search_page(&account_id, &query, limit).await {
+            match session
+                .search_page_after(&account_id, &query, PageRequest::first(limit))
+                .await
+            {
                 Ok(page) => {
-                    app.lock()
-                        .await
-                        .set_search_results(query, page.results, page.has_more, true);
+                    app.lock().await.set_search_results_page(
+                        query,
+                        page.results,
+                        page.next_cursor,
+                        true,
+                    );
                     Ok(ActionResult::silent())
                 }
                 Err(err) => Err(err),
@@ -485,11 +510,14 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
         }
         Action::ListSaved => {
             let limit = app.lock().await.reset_saved_limit();
-            match session.saved_messages_page(&account_id, limit).await {
-                Ok((messages, has_more)) => {
+            match session
+                .saved_messages_page_after(&account_id, PageRequest::first(limit))
+                .await
+            {
+                Ok(page) => {
                     app.lock()
                         .await
-                        .set_saved_messages(messages, has_more, true);
+                        .set_saved_messages_page(page.items, page.next_cursor, true);
                     Ok(ActionResult::silent())
                 }
                 Err(err) => Err(err),
@@ -497,42 +525,70 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
         }
         Action::LoadMore => {
             let saved_request = {
-                let mut app = app.lock().await;
-                if app.saved_active() {
-                    Some(app.increase_saved_limit())
-                } else {
-                    None
-                }
+                let app = app.lock().await;
+                app.saved_next_cursor()
             };
-            if let Some(limit) = saved_request {
-                match session.saved_messages_page(&account_id, limit).await {
-                    Ok((messages, has_more)) => {
+            if let Some(cursor) = saved_request {
+                match session
+                    .saved_messages_page_after(
+                        &account_id,
+                        PageRequest {
+                            limit: 50,
+                            cursor: Some(cursor),
+                        },
+                    )
+                    .await
+                {
+                    Ok(page) => {
                         app.lock()
                             .await
-                            .set_saved_messages(messages, has_more, false);
+                            .append_saved_messages(page.items, page.next_cursor);
                         Ok(ActionResult::silent())
                     }
                     Err(err) => Err(err),
                 }
             } else {
                 let search_request = {
-                    let mut app = app.lock().await;
-                    if let Some(query) = app.search_query() {
-                        let limit = app.increase_search_limit();
-                        Some((query, limit))
-                    } else {
-                        None
-                    }
+                    let app = app.lock().await;
+                    app.search_page_request()
                 };
-                if let Some((query, limit)) = search_request {
-                    match session.search_page(&account_id, &query, limit).await {
+                if let Some((query, Some(cursor))) = search_request {
+                    match session
+                        .search_page_after(
+                            &account_id,
+                            &query,
+                            PageRequest {
+                                limit: 50,
+                                cursor: Some(cursor),
+                            },
+                        )
+                        .await
+                    {
                         Ok(page) => {
-                            app.lock().await.set_search_results(
+                            app.lock().await.append_search_results(
                                 query,
                                 page.results,
-                                page.has_more,
-                                false,
+                                page.next_cursor,
                             );
+                            Ok(ActionResult::silent())
+                        }
+                        Err(err) => Err(err),
+                    }
+                } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
+                    match session
+                        .list_notifications_page(
+                            &account_id,
+                            PageRequest {
+                                limit: 50,
+                                cursor: Some(cursor),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(page) => {
+                            app.lock()
+                                .await
+                                .append_notifications(page.items, page.next_cursor);
                             Ok(ActionResult::silent())
                         }
                         Err(err) => Err(err),

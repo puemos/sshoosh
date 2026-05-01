@@ -35,7 +35,18 @@ impl ServerState {
         account_id: &str,
         limit: i64,
     ) -> anyhow::Result<Vec<NotificationSummary>> {
-        load_notifications(self.db.read_pool(), account_id, limit).await
+        Ok(self
+            .list_notifications_page(account_id, PageRequest::first(limit))
+            .await?
+            .items)
+    }
+
+    pub async fn list_notifications_page(
+        &self,
+        account_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<NotificationSummary>> {
+        load_notifications_page(self.db.read_pool(), account_id, request).await
     }
 
     pub async fn mark_notification_read(

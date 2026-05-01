@@ -47,6 +47,22 @@ pub(crate) struct Cli {
 
     #[arg(
         long,
+        env = "SSHOOSH_MAX_CONNECTIONS",
+        default_value_t = 256,
+        global = true
+    )]
+    pub(crate) max_connections: usize,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MAX_CONNECTIONS_PER_IP",
+        default_value_t = 32,
+        global = true
+    )]
+    pub(crate) max_connections_per_ip: usize,
+
+    #[arg(
+        long,
         env = "SSHOOSH_SERVER_KEY",
         default_value = "./sshoosh_server_ed25519",
         global = true
@@ -168,7 +184,12 @@ pub(crate) enum MasterCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum UsersCommand {
-    List,
+    List {
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     Disable {
         username: String,
     },
@@ -191,7 +212,12 @@ pub(crate) enum UsersCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum KeysCommand {
-    List,
+    List {
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     Add {
         public_key: String,
         #[arg(long)]
@@ -216,7 +242,12 @@ pub(crate) enum InvitesCommand {
         #[arg(long)]
         ttl_hours: Option<i64>,
     },
-    List,
+    List {
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     Revoke {
         invite_id: String,
     },
@@ -227,6 +258,10 @@ pub(crate) enum ChannelsCommand {
     List {
         #[arg(long)]
         archived: bool,
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
     },
     Create {
         name: String,
@@ -255,6 +290,10 @@ pub(crate) enum ChannelsCommand {
     },
     Members {
         slug: String,
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
     },
     AddMember {
         slug: String,
@@ -271,6 +310,8 @@ pub(crate) enum NotificationsCommand {
     List {
         #[arg(long, default_value_t = 50)]
         limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
     },
     MarkRead {
         notification_id: Option<String>,
@@ -282,5 +323,7 @@ pub(crate) enum AuditCommand {
     List {
         #[arg(long, default_value_t = 100)]
         limit: i64,
+        #[arg(long)]
+        cursor: Option<String>,
     },
 }

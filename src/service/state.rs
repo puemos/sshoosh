@@ -353,7 +353,8 @@ impl ServerState {
         } else {
             (Vec::new(), false)
         };
-        let notifications = load_notifications(&read_session, account_id, 20).await?;
+        let notifications_page =
+            load_notifications_page(&read_session, account_id, PageRequest::first(20)).await?;
         let unread_count_sql = format!(
             "SELECT
                (SELECT COUNT(*)
@@ -386,11 +387,14 @@ impl ServerState {
             conversation_messages_has_more,
             search_query: None,
             search_results: Vec::new(),
+            search_next_cursor: None,
             search_has_more: false,
             saved_messages: Vec::new(),
+            saved_next_cursor: None,
             saved_count,
             saved_has_more: false,
-            notifications,
+            notifications: notifications_page.items,
+            notifications_next_cursor: notifications_page.next_cursor,
             notification_unread_count,
             mention_unread_count,
             selected_channel_id,

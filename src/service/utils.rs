@@ -1,4 +1,38 @@
 use super::*;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CursorParts(Vec<String>);
+
+pub(crate) fn encode_cursor(
+    parts: impl IntoIterator<Item = impl Into<String>>,
+) -> anyhow::Result<String> {
+    let payload = serde_json::to_vec(&CursorParts(parts.into_iter().map(Into::into).collect()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+pub(crate) fn decode_cursor(
+    cursor: Option<&str>,
+    expected: usize,
+) -> anyhow::Result<Option<Vec<String>>> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    let payload = URL_SAFE_NO_PAD
+        .decode(cursor.trim())
+        .context("invalid pagination cursor")?;
+    let CursorParts(parts): CursorParts =
+        serde_json::from_slice(&payload).context("invalid pagination cursor")?;
+    anyhow::ensure!(
+        parts.len() == expected,
+        "invalid pagination cursor for this list"
+    );
+    Ok(Some(parts))
+}
+
+pub(crate) fn page_limit(limit: i64, max: i64) -> i64 {
+    limit.clamp(1, max)
+}
+
 pub fn parse_mentions(body: &str) -> Vec<String> {
     let mut mentions = Vec::new();
     let mut chars = body.char_indices().peekable();
@@ -38,15 +72,34 @@ pub(crate) async fn search_visible(
     search: &str,
     limit: i64,
 ) -> anyhow::Result<SearchPage> {
+    search_visible_page(pool, account_id, search, PageRequest::first(limit)).await
+}
+
+pub(crate) async fn search_visible_page(
+    pool: impl DbExecutor + Copy,
+    account_id: &str,
+    search: &str,
+    request: PageRequest,
+) -> anyhow::Result<SearchPage> {
     let search = search.trim();
     anyhow::ensure!(!search.is_empty(), "Search query is required");
-    let limit = limit.clamp(1, 500);
+    let limit = page_limit(request.limit, 500);
     let fetch_limit = limit.saturating_add(1);
-    let rows = query(
-        "SELECT search_index.kind, search_index.object_id, search_index.channel_id,
+    let cursor = decode_cursor(request.cursor.as_deref(), 2)?;
+    let cursor_filter = if cursor.is_some() {
+        "AND (rank_score > CAST(? AS REAL) OR (rank_score = CAST(? AS REAL) AND object_id > ?))"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT *
+         FROM (
+           SELECT search_index.kind, search_index.object_id, search_index.channel_id,
                 search_index.thread_id, search_index.conversation_id,
-                search_index.title, search_index.body, search_index.context
-         FROM search_index
+                search_index.title, search_index.body, search_index.context,
+                rank AS rank_score,
+                printf('%.17g', rank) AS rank_cursor
+           FROM search_index
          LEFT JOIN channels c ON c.id = search_index.channel_id
          LEFT JOIN threads t ON t.id = search_index.thread_id
          LEFT JOIN comments cm ON cm.id = search_index.object_id AND search_index.kind = 'comment'
@@ -68,17 +121,31 @@ pub(crate) async fn search_visible(
                  WHERE m.conversation_id = search_index.conversation_id AND m.account_id = ?
                ))
            )
-         ORDER BY rank
+         )
+         WHERE 1 = 1 {cursor_filter}
+         ORDER BY rank_score ASC, object_id ASC
          LIMIT ?",
-    )
-    .bind(fts_query(search))
-    .bind(account_id)
-    .bind(account_id)
-    .bind(fetch_limit)
-    .fetch_all(pool)
-    .await?;
+    );
+    let mut query = query(&sql)
+        .bind(fts_query(search))
+        .bind(account_id)
+        .bind(account_id);
+    if let Some(cursor) = cursor {
+        query = query.bind(&cursor[0]).bind(&cursor[0]).bind(&cursor[1]);
+    }
+    let rows = query.bind(fetch_limit).fetch_all(pool).await?;
     let mut results = Vec::new();
-    for row in rows {
+    let mut next_cursor = None;
+    let mut last_cursor = None;
+    for (idx, row) in rows.into_iter().enumerate() {
+        if idx == limit as usize {
+            next_cursor = last_cursor;
+            break;
+        }
+        last_cursor = Some(encode_cursor([
+            row.get::<String>("rank_cursor"),
+            row.get::<String>("object_id"),
+        ])?);
         let kind = match row.get::<String>("kind").as_str() {
             "thread" => SearchKind::Thread,
             "comment" => SearchKind::Comment,
@@ -102,9 +169,10 @@ pub(crate) async fn search_visible(
             conversation_id: row.get("conversation_id"),
         });
     }
-    let has_more = results.len() > limit as usize;
-    results.truncate(limit as usize);
-    Ok(SearchPage { results, has_more })
+    Ok(SearchPage {
+        results,
+        next_cursor,
+    })
 }
 
 pub(crate) fn account_from_row(row: DbRow) -> anyhow::Result<Account> {

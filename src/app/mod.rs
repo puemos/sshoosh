@@ -23,8 +23,6 @@ use crate::{
 };
 
 const DEFAULT_SEARCH_LIMIT: i64 = 50;
-const SEARCH_PAGE_SIZE: i64 = 50;
-const MAX_SEARCH_LIMIT: i64 = 500;
 
 use self::{
     commands::{CommandExecutor, CommandRegistry},

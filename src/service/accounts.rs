@@ -10,30 +10,66 @@ impl ServerState {
     }
 
     pub async fn list_accounts(&self, actor_id: &str) -> anyhow::Result<Vec<AccountSummary>> {
+        Ok(self
+            .list_accounts_page(actor_id, PageRequest::first(500))
+            .await?
+            .items)
+    }
+
+    pub async fn list_accounts_page(
+        &self,
+        actor_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<AccountSummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = query(
-            "SELECT id, username, display_name, role, activated_at, disabled_at, created_at, last_seen_at
+        let limit = page_limit(request.limit, 500);
+        let cursor = decode_cursor(request.cursor.as_deref(), 2)?;
+        let cursor_filter = if cursor.is_some() {
+            "WHERE lower(username) > ? OR (lower(username) = ? AND id > ?)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT id, username, lower(username) AS lower_username, display_name, role,
+                    activated_at, disabled_at, created_at, last_seen_at
              FROM accounts
-             ORDER BY username",
-        )
-        .fetch_all(&mut tx)
-        .await?;
+             {cursor_filter}
+             ORDER BY lower(username), id
+             LIMIT ?"
+        );
+        let mut query = query(&sql);
+        if let Some(cursor) = cursor {
+            query = query.bind(&cursor[0]).bind(&cursor[0]).bind(&cursor[1]);
+        }
+        let rows = query
+            .bind(limit.saturating_add(1))
+            .fetch_all(&mut tx)
+            .await?;
         tx.commit().await?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(AccountSummary {
-                    id: row.get("id"),
-                    username: row.get("username"),
-                    display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
-                    role: Role::from_db(row.get::<String>("role").as_str())?,
-                    activated: row.get::<Option<String>>("activated_at").is_some(),
-                    disabled: row.get::<Option<String>>("disabled_at").is_some(),
-                    created_at: row.get("created_at"),
-                    last_seen_at: row.get("last_seen_at"),
-                })
-            })
-            .collect()
+        let mut items: Vec<AccountSummary> = Vec::new();
+        let mut next_cursor = None;
+        for (idx, row) in rows.into_iter().enumerate() {
+            if idx == limit as usize {
+                let last = items.last().expect("last account row");
+                next_cursor = Some(encode_cursor([
+                    last.username.to_lowercase(),
+                    last.id.clone(),
+                ])?);
+                break;
+            }
+            items.push(AccountSummary {
+                id: row.get("id"),
+                username: row.get("username"),
+                display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
+                role: Role::from_db(row.get::<String>("role").as_str())?,
+                activated: row.get::<Option<String>>("activated_at").is_some(),
+                disabled: row.get::<Option<String>>("disabled_at").is_some(),
+                created_at: row.get("created_at"),
+                last_seen_at: row.get("last_seen_at"),
+            });
+        }
+        Ok(Page { items, next_cursor })
     }
 
     pub async fn set_user_disabled(
@@ -95,8 +131,8 @@ impl ServerState {
         let actor = require_admin_tx(&mut tx, actor_id).await?;
         let target = load_account_by_username_tx(&mut tx, username).await?;
         ensure_can_manage_account(&actor, &target)?;
-        if actor.role != Role::Owner && role == Role::Owner {
-            bail!("Only owners can promote another owner");
+        if actor.role != Role::Owner && matches!(role, Role::Owner | Role::Admin) {
+            bail!("Only owners can grant owner/admin roles");
         }
         if target.role == Role::Owner && role != Role::Owner {
             ensure_not_last_active_owner(&mut tx, &target.id).await?;
@@ -366,18 +402,67 @@ impl ServerState {
     }
 
     pub async fn list_ssh_keys(&self, actor_id: &str) -> anyhow::Result<Vec<SshKeySummary>> {
+        Ok(self
+            .list_ssh_keys_page(actor_id, PageRequest::first(500))
+            .await?
+            .items)
+    }
+
+    pub async fn list_ssh_keys_page(
+        &self,
+        actor_id: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<SshKeySummary>> {
         let mut tx = begin(self.db.write_pool()).await?;
         require_admin_tx(&mut tx, actor_id).await?;
-        let rows = query(
-            "SELECT k.id, a.username, k.fingerprint, k.label, k.created_at, k.last_used_at, k.revoked_at
+        let limit = page_limit(request.limit, 500);
+        let cursor = decode_cursor(request.cursor.as_deref(), 3)?;
+        let cursor_filter = if cursor.is_some() {
+            "WHERE lower(a.username) > ?
+                OR (lower(a.username) = ? AND k.created_at > ?)
+                OR (lower(a.username) = ? AND k.created_at = ? AND k.id > ?)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT k.id, a.username, lower(a.username) AS lower_username, k.fingerprint,
+                    k.label, k.created_at, k.last_used_at, k.revoked_at
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
-             ORDER BY a.username, k.created_at",
-        )
-        .fetch_all(&mut tx)
-        .await?;
+             {cursor_filter}
+             ORDER BY lower(a.username), k.created_at, k.id
+             LIMIT ?"
+        );
+        let mut query = query(&sql);
+        if let Some(cursor) = cursor {
+            query = query
+                .bind(&cursor[0])
+                .bind(&cursor[0])
+                .bind(&cursor[1])
+                .bind(&cursor[0])
+                .bind(&cursor[1])
+                .bind(&cursor[2]);
+        }
+        let rows = query
+            .bind(limit.saturating_add(1))
+            .fetch_all(&mut tx)
+            .await?;
         tx.commit().await?;
-        Ok(rows.into_iter().map(ssh_key_summary_from_row).collect())
+        let mut items: Vec<SshKeySummary> = Vec::new();
+        let mut next_cursor = None;
+        for (idx, row) in rows.into_iter().enumerate() {
+            if idx == limit as usize {
+                let last = items.last().expect("last SSH key row");
+                next_cursor = Some(encode_cursor([
+                    last.username.to_lowercase(),
+                    last.created_at.clone(),
+                    last.id.clone(),
+                ])?);
+                break;
+            }
+            items.push(ssh_key_summary_from_row(row));
+        }
+        Ok(Page { items, next_cursor })
     }
 
     pub async fn revoke_ssh_key(&self, actor_id: &str, key: &str) -> anyhow::Result<()> {

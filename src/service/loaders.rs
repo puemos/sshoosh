@@ -57,12 +57,18 @@ pub(crate) async fn load_user_presence(
         .collect())
 }
 
-pub(crate) async fn load_notifications(
+pub(crate) async fn load_notifications_page(
     pool: impl DbExecutor + Copy,
     account_id: &str,
-    limit: i64,
-) -> anyhow::Result<Vec<NotificationSummary>> {
-    let limit = limit.clamp(1, 200);
+    request: PageRequest,
+) -> anyhow::Result<Page<NotificationSummary>> {
+    let limit = page_limit(request.limit, 200);
+    let cursor = decode_cursor(request.cursor.as_deref(), 2)?;
+    let cursor_filter = if cursor.is_some() {
+        "AND (n.created_at < ? OR (n.created_at = ? AND n.id < ?))"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT n.id, n.kind, n.source_kind, n.source_id,
                 COALESCE(cm.obj_index, dm.obj_index) AS source_obj_index,
@@ -80,18 +86,25 @@ pub(crate) async fn load_notifications(
          WHERE n.account_id = ?
            AND n.archived_at IS NULL
            AND {}
-         ORDER BY n.created_at DESC
+           {cursor_filter}
+         ORDER BY n.created_at DESC, n.id DESC
          LIMIT ?",
         notification_visible_source_sql("n")
     );
-    let rows = query(&sql)
-        .bind(account_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| NotificationSummary {
+    let mut query = query(&sql).bind(account_id);
+    if let Some(cursor) = cursor {
+        query = query.bind(&cursor[0]).bind(&cursor[0]).bind(&cursor[1]);
+    }
+    let rows = query.bind(limit.saturating_add(1)).fetch_all(pool).await?;
+    let mut items: Vec<NotificationSummary> = Vec::new();
+    let mut next_cursor = None;
+    for (idx, row) in rows.into_iter().enumerate() {
+        if idx == limit as usize {
+            let last = items.last().expect("last notification row");
+            next_cursor = Some(encode_cursor([last.created_at.clone(), last.id.clone()])?);
+            break;
+        }
+        items.push(NotificationSummary {
             id: row.get("id"),
             kind: row.get("kind"),
             source_kind: row.get("source_kind"),
@@ -109,8 +122,9 @@ pub(crate) async fn load_notifications(
             body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             read_at: row.get("read_at"),
-        })
-        .collect())
+        });
+    }
+    Ok(Page { items, next_cursor })
 }
 
 pub(crate) async fn load_channels(
@@ -463,9 +477,25 @@ pub(crate) async fn load_saved_messages(
     account_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
-    let limit = limit.clamp(1, 500);
+    let page = load_saved_messages_page(pool, account_id, PageRequest::first(limit)).await?;
+    let has_more = page.has_more();
+    Ok((page.items, has_more))
+}
+
+pub(crate) async fn load_saved_messages_page(
+    pool: impl DbExecutor + Copy,
+    account_id: &str,
+    request: PageRequest,
+) -> anyhow::Result<Page<SavedMessageItem>> {
+    let limit = page_limit(request.limit, 500);
     let fetch_limit = limit.saturating_add(1);
-    let rows = query(
+    let cursor = decode_cursor(request.cursor.as_deref(), 2)?;
+    let cursor_filter = if cursor.is_some() {
+        "WHERE saved_at < ? OR (saved_at = ? AND source_id < ?)"
+    } else {
+        ""
+    };
+    let sql = format!(
         "SELECT kind, source_id, source_obj_index, author, body, source_label,
                 channel_slug, thread_title, dm_peer_username, saved_at, created_at,
                 channel_id, thread_id, conversation_id
@@ -525,17 +555,20 @@ pub(crate) async fn load_saved_messages(
              AND sm.source_kind = 'dm'
              AND dm.deleted_at IS NULL
          )
+         {cursor_filter}
          ORDER BY saved_at DESC, source_id DESC
-         LIMIT ?",
-    )
-    .bind(account_id)
-    .bind(account_id)
-    .bind(account_id)
-    .bind(account_id)
-    .bind(account_id)
-    .bind(fetch_limit)
-    .fetch_all(pool)
-    .await?;
+         LIMIT ?"
+    );
+    let mut query = query(&sql)
+        .bind(account_id)
+        .bind(account_id)
+        .bind(account_id)
+        .bind(account_id)
+        .bind(account_id);
+    if let Some(cursor) = cursor {
+        query = query.bind(&cursor[0]).bind(&cursor[0]).bind(&cursor[1]);
+    }
+    let rows = query.bind(fetch_limit).fetch_all(pool).await?;
     let mut items: Vec<_> = rows
         .into_iter()
         .map(|row| {
@@ -568,8 +601,17 @@ pub(crate) async fn load_saved_messages(
         })
         .collect();
     let has_more = items.len() > limit as usize;
-    items.truncate(limit as usize);
-    Ok((items, has_more))
+    let next_cursor = if has_more {
+        items.pop().expect("extra row");
+        let last = items.last().expect("last saved message row");
+        Some(encode_cursor([
+            last.saved_at.clone(),
+            last.source_id.clone(),
+        ])?)
+    } else {
+        None
+    };
+    Ok(Page { items, next_cursor })
 }
 
 pub(crate) async fn load_saved_message_count(

@@ -49,6 +49,8 @@ async fn test_state(name: &str) -> (Config, ServerState) {
         master_heartbeat: Duration::from_secs(5),
         host: "127.0.0.1".to_string(),
         port: 0,
+        max_connections: 256,
+        max_connections_per_ip: 32,
         server_key_path: key_path,
         mouse_enabled: true,
     };
@@ -422,6 +424,28 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .set_user_role(&owner.id, "alice", sshoosh::service::Role::Admin)
         .await
         .expect("promote alice");
+    let bob_invite = state
+        .create_invite_with_options(&owner.id, sshoosh::service::Role::Member, Some(1))
+        .await
+        .expect("bob invite");
+    let _bob = accept_invite_key(
+        &state,
+        "bob",
+        "SHA256:admin-bob",
+        "ssh-ed25519 bob",
+        bob_invite,
+    )
+    .await;
+    let admin_promote_admin = state
+        .set_user_role(&alice.id, "bob", sshoosh::service::Role::Admin)
+        .await
+        .expect_err("admins cannot mint admins");
+    assert!(
+        admin_promote_admin
+            .to_string()
+            .contains("Only owners can grant owner/admin roles"),
+        "{admin_promote_admin:?}"
+    );
     let demote_owner = state
         .set_user_role(&owner.id, "owner", sshoosh::service::Role::Member)
         .await
@@ -429,6 +453,24 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     assert!(demote_owner.to_string().contains("last active owner"));
 
     let keys = state.list_ssh_keys(&owner.id).await.expect("keys");
+    let key_page = state
+        .list_ssh_keys_page(&owner.id, sshoosh::service::PageRequest::first(1))
+        .await
+        .expect("first key page");
+    assert_eq!(key_page.items.len(), 1);
+    let key_next = key_page.next_cursor.clone().expect("key cursor");
+    let second_key_page = state
+        .list_ssh_keys_page(
+            &owner.id,
+            sshoosh::service::PageRequest {
+                limit: 1,
+                cursor: Some(key_next),
+            },
+        )
+        .await
+        .expect("second key page");
+    assert_eq!(second_key_page.items.len(), 1);
+    assert_ne!(key_page.items[0].id, second_key_page.items[0].id);
     let alice_key = keys
         .iter()
         .find(|key| key.username == "alice")
@@ -449,6 +491,12 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .into_iter()
         .find(|invite| invite.accepted_at.is_none() && invite.revoked_at.is_none())
         .expect("open invite");
+    let invite_page = state
+        .list_invites_page(&owner.id, sshoosh::service::PageRequest::first(1))
+        .await
+        .expect("first invite page");
+    assert_eq!(invite_page.items.len(), 1);
+    assert!(invite_page.next_cursor.is_some());
     let _ = spare_invite;
     state
         .revoke_invite(&owner.id, &open_invite.id)
@@ -468,6 +516,16 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .await
         .expect("members");
     assert!(members.iter().any(|member| member.username == "alice"));
+    let member_page = state
+        .list_channel_members_page(
+            &owner.id,
+            "ops-secret",
+            sshoosh::service::PageRequest::first(1),
+        )
+        .await
+        .expect("first member page");
+    assert_eq!(member_page.items.len(), 1);
+    assert!(member_page.next_cursor.is_some());
 
     let thread_id = state
         .create_thread(
@@ -557,12 +615,43 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
             .iter()
             .any(|result| result.conversation_id.as_deref() == Some(&dm_id))
     );
+    let searchable_page = state
+        .search_page_after(
+            &owner.id,
+            "searchable",
+            sshoosh::service::PageRequest::first(1),
+        )
+        .await
+        .expect("first search page");
+    assert_eq!(searchable_page.results.len(), 1);
+    assert!(searchable_page.next_cursor.is_some());
     let saved_messages = state
         .saved_messages_page(&owner.id, 20)
         .await
         .expect("saved messages")
         .0;
     assert_eq!(saved_messages.len(), 2);
+    let saved_page = state
+        .saved_messages_page_after(&owner.id, sshoosh::service::PageRequest::first(1))
+        .await
+        .expect("first saved page");
+    assert_eq!(saved_page.items.len(), 1);
+    let saved_next = saved_page.next_cursor.clone().expect("saved cursor");
+    let second_saved_page = state
+        .saved_messages_page_after(
+            &owner.id,
+            sshoosh::service::PageRequest {
+                limit: 1,
+                cursor: Some(saved_next),
+            },
+        )
+        .await
+        .expect("second saved page");
+    assert_eq!(second_saved_page.items.len(), 1);
+    assert_ne!(
+        saved_page.items[0].source_id,
+        second_saved_page.items[0].source_id
+    );
     let snapshot = state
         .snapshot(&owner.id, None, None, None)
         .await
@@ -840,6 +929,16 @@ async fn sqlite_backup_creates_owner_only_file_and_refuses_overwrite() {
     let out = temp_path("backup-permissions").with_extension("sqlite");
     let out_str = out.to_string_lossy().to_string();
 
+    struct UmaskRestore(libc::mode_t);
+    impl Drop for UmaskRestore {
+        fn drop(&mut self) {
+            unsafe {
+                libc::umask(self.0);
+            }
+        }
+    }
+
+    let _umask = UmaskRestore(unsafe { libc::umask(0) });
     state.db.backup_to(&out_str).await.expect("backup");
     let mode = fs::metadata(&out).expect("metadata").permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
@@ -1918,7 +2017,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(!first.contains("\x1b[?1003h"), "{first:?}");
 
     session
-        .data(channel.id(), sgr_drag((2, 4), (9, 4)))
+        .data(channel.id(), sgr_drag((2, 5), (9, 5)))
         .await
         .expect("drag selection");
     let copied = read_until(&mut channel, "\x1b]52;c;").await;

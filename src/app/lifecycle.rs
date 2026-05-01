@@ -60,9 +60,12 @@ impl App {
         let search_query = self.snapshot.search_query.clone();
         let search_results = self.snapshot.search_results.clone();
         let search_has_more = self.snapshot.search_has_more;
+        let search_next_cursor = self.snapshot.search_next_cursor.clone();
         let saved_messages = self.snapshot.saved_messages.clone();
         let saved_has_more = self.snapshot.saved_has_more;
+        let saved_next_cursor = self.snapshot.saved_next_cursor.clone();
         let notifications = self.snapshot.notifications.clone();
+        let notifications_next_cursor = self.snapshot.notifications_next_cursor.clone();
         self.snapshot = self
             .client
             .snapshot(
@@ -81,6 +84,7 @@ impl App {
             self.snapshot.search_query = search_query;
             self.snapshot.search_results = search_results;
             self.snapshot.search_has_more = search_has_more;
+            self.snapshot.search_next_cursor = search_next_cursor;
             self.ui.search_selected = self
                 .ui
                 .search_selected
@@ -88,12 +92,14 @@ impl App {
         } else if self.ui.route == Route::Saved {
             self.snapshot.saved_messages = saved_messages;
             self.snapshot.saved_has_more = saved_has_more;
+            self.snapshot.saved_next_cursor = saved_next_cursor;
             self.ui.saved_selected = self
                 .ui
                 .saved_selected
                 .min(self.snapshot.saved_messages.len().saturating_sub(1));
         } else if self.ui.route == Route::Notifications {
             self.snapshot.notifications = notifications;
+            self.snapshot.notifications_next_cursor = notifications_next_cursor;
             let visible_len = self.visible_notification_indices().len();
             self.ui.notifications_selected = self
                 .ui
@@ -206,29 +212,30 @@ impl App {
         self.ui.route == Route::Notifications
     }
 
+    pub fn search_page_request(&self) -> Option<(String, Option<String>)> {
+        self.search_query()
+            .map(|query| (query, self.snapshot.search_next_cursor.clone()))
+    }
+
+    pub fn saved_next_cursor(&self) -> Option<String> {
+        self.saved_active()
+            .then(|| self.snapshot.saved_next_cursor.clone())
+            .flatten()
+    }
+
+    pub fn notifications_next_cursor(&self) -> Option<String> {
+        self.notifications_active()
+            .then(|| self.snapshot.notifications_next_cursor.clone())
+            .flatten()
+    }
+
     pub fn reset_search_limit(&mut self) -> i64 {
         self.search_limit = DEFAULT_SEARCH_LIMIT;
         self.search_limit
     }
 
-    pub fn increase_search_limit(&mut self) -> i64 {
-        self.search_limit = self
-            .search_limit
-            .saturating_add(SEARCH_PAGE_SIZE)
-            .min(MAX_SEARCH_LIMIT);
-        self.search_limit
-    }
-
     pub fn reset_saved_limit(&mut self) -> i64 {
         self.saved_limit = DEFAULT_SEARCH_LIMIT;
-        self.saved_limit
-    }
-
-    pub fn increase_saved_limit(&mut self) -> i64 {
-        self.saved_limit = self
-            .saved_limit
-            .saturating_add(SEARCH_PAGE_SIZE)
-            .min(MAX_SEARCH_LIMIT);
         self.saved_limit
     }
 
@@ -322,6 +329,9 @@ impl App {
         self.snapshot.search_query = Some(query);
         self.snapshot.search_results = results;
         self.snapshot.search_has_more = has_more;
+        if !has_more {
+            self.snapshot.search_next_cursor = None;
+        }
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Search;
@@ -345,6 +355,9 @@ impl App {
     ) {
         self.snapshot.saved_messages = messages;
         self.snapshot.saved_has_more = has_more;
+        if !has_more {
+            self.snapshot.saved_next_cursor = None;
+        }
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Saved;
@@ -360,15 +373,98 @@ impl App {
         }
     }
 
-    pub fn set_notifications(&mut self, notifications: Vec<NotificationSummary>) {
+    pub fn set_search_results_page(
+        &mut self,
+        query: String,
+        results: Vec<SearchResult>,
+        next_cursor: Option<String>,
+        reset_selection: bool,
+    ) {
+        let has_more = next_cursor.is_some();
+        self.set_search_results(query, results, has_more, reset_selection);
+        self.snapshot.search_next_cursor = next_cursor;
+    }
+
+    pub fn append_search_results(
+        &mut self,
+        query: String,
+        mut results: Vec<SearchResult>,
+        next_cursor: Option<String>,
+    ) {
+        if self.snapshot.search_query.as_deref() == Some(query.as_str()) {
+            self.snapshot.search_results.append(&mut results);
+        } else {
+            self.snapshot.search_query = Some(query);
+            self.snapshot.search_results = results;
+            self.ui.search_selected = 0;
+        }
+        self.snapshot.search_has_more = next_cursor.is_some();
+        self.snapshot.search_next_cursor = next_cursor;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
+        self.ui.route = Route::Search;
+        self.ui.active_pane = ActivePane::Detail;
+    }
+
+    pub fn set_saved_messages_page(
+        &mut self,
+        messages: Vec<SavedMessageItem>,
+        next_cursor: Option<String>,
+        reset_selection: bool,
+    ) {
+        let has_more = next_cursor.is_some();
+        self.set_saved_messages(messages, has_more, reset_selection);
+        self.snapshot.saved_next_cursor = next_cursor;
+    }
+
+    pub fn append_saved_messages(
+        &mut self,
+        mut messages: Vec<SavedMessageItem>,
+        next_cursor: Option<String>,
+    ) {
+        self.snapshot.saved_messages.append(&mut messages);
+        self.snapshot.saved_has_more = next_cursor.is_some();
+        self.snapshot.saved_next_cursor = next_cursor;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
+        self.ui.route = Route::Saved;
+        self.ui.active_pane = ActivePane::Detail;
+    }
+
+    pub fn set_notifications_page(
+        &mut self,
+        notifications: Vec<NotificationSummary>,
+        next_cursor: Option<String>,
+        reset_selection: bool,
+    ) {
         self.snapshot.notifications = notifications;
+        self.snapshot.notifications_next_cursor = next_cursor;
         self.snapshot.selected_thread_id = None;
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Notifications;
         self.ui.active_pane = ActivePane::Detail;
-        self.ui.notifications_selected = 0;
-        self.reset_detail_scroll();
+        if reset_selection {
+            self.ui.notifications_selected = 0;
+            self.reset_detail_scroll();
+        } else {
+            let visible_len = self.visible_notification_indices().len();
+            self.ui.notifications_selected = self
+                .ui
+                .notifications_selected
+                .min(visible_len.saturating_sub(1));
+        }
+    }
+
+    pub fn append_notifications(
+        &mut self,
+        mut notifications: Vec<NotificationSummary>,
+        next_cursor: Option<String>,
+    ) {
+        self.snapshot.notifications.append(&mut notifications);
+        self.snapshot.notifications_next_cursor = next_cursor;
+        self.ui.route = Route::Notifications;
+        self.ui.active_pane = ActivePane::Detail;
     }
 
     fn queue_new_terminal_notifications(&mut self, enabled: bool) {

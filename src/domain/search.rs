@@ -17,7 +17,40 @@ pub struct SearchResult {
 }
 
 #[derive(Clone, Debug)]
+pub struct PageRequest {
+    pub limit: i64,
+    pub cursor: Option<String>,
+}
+
+impl PageRequest {
+    pub fn first(limit: i64) -> Self {
+        Self {
+            limit,
+            cursor: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next_cursor: Option<String>,
+}
+
+impl<T> Page<T> {
+    pub fn has_more(&self) -> bool {
+        self.next_cursor.is_some()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SearchPage {
     pub results: Vec<SearchResult>,
-    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+impl SearchPage {
+    pub fn has_more(&self) -> bool {
+        self.next_cursor.is_some()
+    }
 }

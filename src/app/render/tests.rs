@@ -387,7 +387,7 @@ mod cases {
                 .symbol(),
             "N"
         );
-        assert_eq!(buffer.cell((1, 3)).expect("workspace header").symbol(), "C");
+        assert_eq!(buffer.cell((1, 4)).expect("workspace header").symbol(), "C");
         assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "#");
     }
 
@@ -1703,11 +1703,11 @@ mod cases {
             .unwrap();
 
         assert!(matches!(
-            ui.hit_map.hit(1, 4).map(|region| region.target),
+            ui.hit_map.hit(1, 5).map(|region| region.target),
             Some(HitTarget::WorkspaceChannel(id)) if id == "general"
         ));
         assert!(matches!(
-            ui.hit_map.hit(1, 5).map(|region| region.target),
+            ui.hit_map.hit(1, 6).map(|region| region.target),
             Some(HitTarget::WorkspaceThread(id)) if id == "thread"
         ));
         assert!(matches!(

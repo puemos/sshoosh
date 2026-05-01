@@ -24,6 +24,8 @@ pub async fn run() -> anyhow::Result<()> {
         master_heartbeat: Duration::from_secs(cli.master_heartbeat_secs),
         host: cli.host.clone(),
         port: cli.port,
+        max_connections: cli.max_connections,
+        max_connections_per_ip: cli.max_connections_per_ip,
         server_key_path: cli.server_key.clone().into(),
         mouse_enabled: !cli.no_mouse,
     };
@@ -102,11 +104,12 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
-                UsersCommand::List => {
-                    print!(
-                        "{}",
-                        format_accounts(&state.list_accounts(&actor_id).await?)
-                    );
+                UsersCommand::List { limit, cursor } => {
+                    let page = state
+                        .list_accounts_page(&actor_id, service::PageRequest { limit, cursor })
+                        .await?;
+                    print!("{}", format_accounts(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 UsersCommand::Disable { username } => {
                     state.set_user_disabled(&actor_id, &username, true).await?;
@@ -146,8 +149,12 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
-                KeysCommand::List => {
-                    print!("{}", format_keys(&state.list_ssh_keys(&actor_id).await?));
+                KeysCommand::List { limit, cursor } => {
+                    let page = state
+                        .list_ssh_keys_page(&actor_id, service::PageRequest { limit, cursor })
+                        .await?;
+                    print!("{}", format_keys(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 KeysCommand::Add {
                     public_key,
@@ -185,8 +192,12 @@ pub async fn run() -> anyhow::Result<()> {
                         .await?;
                     println!("{code}");
                 }
-                InvitesCommand::List => {
-                    print!("{}", format_invites(&state.list_invites(&actor_id).await?));
+                InvitesCommand::List { limit, cursor } => {
+                    let page = state
+                        .list_invites_page(&actor_id, service::PageRequest { limit, cursor })
+                        .await?;
+                    print!("{}", format_invites(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 InvitesCommand::Revoke { invite_id } => {
                     state.revoke_invite(&actor_id, &invite_id).await?;
@@ -199,11 +210,20 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             let actor_id = user_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
-                ChannelsCommand::List { archived } => {
-                    print!(
-                        "{}",
-                        format_channels(&state.list_channels(&actor_id, archived).await?)
-                    );
+                ChannelsCommand::List {
+                    archived,
+                    limit,
+                    cursor,
+                } => {
+                    let page = state
+                        .list_channels_page(
+                            &actor_id,
+                            archived,
+                            service::PageRequest { limit, cursor },
+                        )
+                        .await?;
+                    print!("{}", format_channels(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 ChannelsCommand::Create { name, private } => {
                     let id = state
@@ -235,13 +255,20 @@ pub async fn run() -> anyhow::Result<()> {
                     state.leave_channel(&actor_id, &slug).await?;
                     println!("left #{slug}");
                 }
-                ChannelsCommand::Members { slug } => {
-                    print!(
-                        "{}",
-                        format_channel_members(
-                            &state.list_channel_members(&actor_id, &slug).await?
+                ChannelsCommand::Members {
+                    slug,
+                    limit,
+                    cursor,
+                } => {
+                    let page = state
+                        .list_channel_members_page(
+                            &actor_id,
+                            &slug,
+                            service::PageRequest { limit, cursor },
                         )
-                    );
+                        .await?;
+                    print!("{}", format_channel_members(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 ChannelsCommand::AddMember { slug, username } => {
                     state
@@ -262,11 +289,12 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             let actor_id = user_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
-                NotificationsCommand::List { limit } => {
-                    print!(
-                        "{}",
-                        format_notifications(&state.list_notifications(&actor_id, limit).await?)
-                    );
+                NotificationsCommand::List { limit, cursor } => {
+                    let page = state
+                        .list_notifications_page(&actor_id, service::PageRequest { limit, cursor })
+                        .await?;
+                    print!("{}", format_notifications(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
                 NotificationsCommand::MarkRead { notification_id } => {
                     state
@@ -281,11 +309,12 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
-                AuditCommand::List { limit } => {
-                    print!(
-                        "{}",
-                        format_audit(&state.list_audit(&actor_id, limit).await?)
-                    );
+                AuditCommand::List { limit, cursor } => {
+                    let page = state
+                        .list_audit_page(&actor_id, service::PageRequest { limit, cursor })
+                        .await?;
+                    print!("{}", format_audit(&page.items));
+                    print_next_cursor(page.next_cursor);
                 }
             }
             Ok(())
@@ -451,6 +480,12 @@ fn write_sensitive_file(path: &str, content: String) -> anyhow::Result<()> {
             .with_context(|| format!("securing export permissions {path}"))?;
     }
     Ok(())
+}
+
+fn print_next_cursor(cursor: Option<String>) {
+    if let Some(cursor) = cursor {
+        println!("next_cursor: {cursor}");
+    }
 }
 
 #[cfg(all(test, unix))]
