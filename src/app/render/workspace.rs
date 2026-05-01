@@ -66,10 +66,12 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     if saved_selected {
         selected_y = Some(saved_row);
     }
-    items.push(ListItem::new(Line::from(Span::styled(
-        "★ Saved",
-        workspace_label_style(saved_selected, 0),
-    ))));
+    let saved_badge = format!(" {}", snapshot.saved_count);
+    let saved_label = truncate_text("Saved", row_width.saturating_sub(saved_badge.len()));
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(saved_label, workspace_label_style(saved_selected, 0)),
+        Span::styled(saved_badge, theme::muted()),
+    ])));
     row_hits.push((saved_row, HitTarget::WorkspaceSaved));
     items.push(ListItem::new(""));
     items.push(ListItem::new(Line::from(Span::styled(

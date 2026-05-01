@@ -569,6 +569,49 @@ pub(crate) async fn load_saved_messages(
     Ok((items, has_more))
 }
 
+pub(crate) async fn load_saved_message_count(
+    pool: &Database,
+    account_id: &str,
+) -> anyhow::Result<i64> {
+    query_scalar(
+        "SELECT COUNT(*)
+         FROM (
+           SELECT sm.source_id
+           FROM saved_messages sm
+           JOIN comments cm ON cm.id = sm.source_id
+           JOIN threads t ON t.id = cm.thread_id
+           WHERE sm.account_id = ?
+             AND sm.source_kind = 'comment'
+             AND cm.deleted_at IS NULL
+             AND t.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM channel_members m
+               WHERE m.channel_id = cm.channel_id AND m.account_id = ?
+             )
+           UNION ALL
+           SELECT sm.source_id
+           FROM saved_messages sm
+           JOIN conversation_messages dm ON dm.id = sm.source_id
+           JOIN conversations conv ON conv.id = dm.conversation_id
+           JOIN conversation_members me
+             ON me.conversation_id = conv.id AND me.account_id = ?
+           JOIN conversation_members other
+             ON other.conversation_id = conv.id AND other.account_id <> ?
+           JOIN accounts peer ON peer.id = other.account_id
+           WHERE sm.account_id = ?
+             AND sm.source_kind = 'dm'
+             AND dm.deleted_at IS NULL
+         )",
+    )
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .fetch_one(pool)
+    .await
+}
+
 pub(crate) async fn load_account_tx(
     mut tx: &mut DbTransaction,
     account_id: &str,

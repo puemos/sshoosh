@@ -838,6 +838,36 @@ mod cases {
     }
 
     #[test]
+    fn workspace_saved_row_shows_count_without_symbol() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            saved_count: 7,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (x, y) = position_for_text(buffer, width, height, "Saved 7").unwrap();
+
+        assert_eq!(buffer.cell((x, y)).expect("saved label").symbol(), "S");
+        assert!(!row_text(buffer, width, y).contains('★'));
+    }
+
+    #[test]
     fn workspace_renders_dm_users_without_conversations() {
         let width = 80;
         let height = 24;

@@ -126,6 +126,7 @@ pub struct Snapshot {
     pub search_results: Vec<SearchResult>,
     pub search_has_more: bool,
     pub saved_messages: Vec<SavedMessageItem>,
+    pub saved_count: i64,
     pub saved_has_more: bool,
     pub notifications: Vec<NotificationSummary>,
     pub notification_unread_count: i64,

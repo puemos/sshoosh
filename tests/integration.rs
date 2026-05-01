@@ -563,6 +563,11 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .expect("saved messages")
         .0;
     assert_eq!(saved_messages.len(), 2);
+    let snapshot = state
+        .snapshot(&owner.id, None, None, None)
+        .await
+        .expect("snapshot with saved count");
+    assert_eq!(snapshot.saved_count, 2);
     assert!(saved_messages.iter().any(|item| {
         item.thread_id.as_deref() == Some(&thread_id) && item.body == "Edited searchable reply"
     }));

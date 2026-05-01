@@ -326,6 +326,7 @@ impl ServerState {
 
         let conversations = load_conversations(self.db.read_pool(), account_id).await?;
         let dm_sidebar = load_dm_sidebar(self.db.read_pool(), account_id).await?;
+        let saved_count = load_saved_message_count(self.db.read_pool(), account_id).await?;
         let selected_conversation_id = selected_conversation_id
             .filter(|id| {
                 conversations
@@ -382,6 +383,7 @@ impl ServerState {
             search_results: Vec::new(),
             search_has_more: false,
             saved_messages: Vec::new(),
+            saved_count,
             saved_has_more: false,
             notifications,
             notification_unread_count,
