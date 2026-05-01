@@ -3673,6 +3673,7 @@ dependencies = [
  "emojis",
  "getrandom 0.4.2",
  "hostname",
+ "libc",
  "libsql",
  "pkcs5",
  "pulldown-cmark",
