@@ -6,8 +6,45 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut items = Vec::new();
     let mut row_hits = Vec::new();
     let mut selected_y = None;
-    draw_workspace_header(frame, area, "Channels", ui);
-    let scroll_area = pane_scroll_area(area);
+    let notifications_selected = matches!(&ui.route, Route::Notifications);
+    let notifications_badge = unread_badge(snapshot.notification_unread_count);
+    let notifications_label = truncate_text(
+        "Notifications",
+        row_width.saturating_sub(notifications_badge.len()),
+    );
+    let notifications_area = Rect::new(area.x, area.y, area.width, area.height.min(1));
+    if !notifications_area.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    notifications_label,
+                    workspace_label_style(
+                        notifications_selected,
+                        snapshot.notification_unread_count,
+                    ),
+                ),
+                Span::styled(notifications_badge, theme::unread()),
+            ]))
+            .style(theme::panel()),
+            notifications_area,
+        );
+        ui.hit_map
+            .push(notifications_area, HitTarget::WorkspaceNotifications);
+    }
+
+    let channel_header_area = Rect::new(
+        area.x,
+        area.y.saturating_add(2),
+        area.width,
+        area.height.saturating_sub(2),
+    );
+    draw_workspace_header(frame, channel_header_area, "Channels", ui);
+    let scroll_area = Rect::new(
+        area.x,
+        area.y.saturating_add(3),
+        area.width,
+        area.height.saturating_sub(3),
+    );
     for channel in &snapshot.channels {
         let row = items.len() as u16;
         let selected = matches!(&ui.route, Route::Channel(id) if id == &channel.id);

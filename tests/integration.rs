@@ -1784,7 +1784,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(!first.contains("\x1b[?1003h"), "{first:?}");
 
     session
-        .data(channel.id(), sgr_drag((2, 2), (9, 2)))
+        .data(channel.id(), sgr_drag((2, 4), (9, 4)))
         .await
         .expect("drag selection");
     let copied = read_until(&mut channel, "\x1b]52;c;").await;

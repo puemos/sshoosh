@@ -350,7 +350,7 @@ impl ServerState {
         let notification_unread_sql = format!(
             "SELECT COUNT(*)
              FROM notifications n
-             WHERE n.account_id = ? AND n.read_at IS NULL AND {}",
+             WHERE n.account_id = ? AND n.read_at IS NULL AND n.archived_at IS NULL AND {}",
             notification_visible_source_sql("n")
         );
         let notification_unread_count: i64 = query_scalar(&notification_unread_sql)

@@ -49,6 +49,7 @@ impl ServerState {
                 "UPDATE notifications SET read_at = ?
                  WHERE account_id = ?
                    AND (id = ? OR id LIKE ?)
+                   AND archived_at IS NULL
                    AND {}",
                 notification_visible_source_sql("notifications")
             );
@@ -62,7 +63,7 @@ impl ServerState {
         } else {
             let sql = format!(
                 "UPDATE notifications SET read_at = ?
-                 WHERE account_id = ? AND read_at IS NULL AND {}",
+                 WHERE account_id = ? AND read_at IS NULL AND archived_at IS NULL AND {}",
                 notification_visible_source_sql("notifications")
             );
             query(&sql)
@@ -71,6 +72,21 @@ impl ServerState {
                 .execute(self.db.write_pool())
                 .await?;
         }
+        Ok(())
+    }
+
+    pub async fn archive_notifications(&self, account_id: &str) -> anyhow::Result<()> {
+        let now = now();
+        let sql = format!(
+            "UPDATE notifications SET archived_at = ?
+             WHERE account_id = ? AND archived_at IS NULL AND {}",
+            notification_visible_source_sql("notifications")
+        );
+        query(&sql)
+            .bind(&now)
+            .bind(account_id)
+            .execute(self.db.write_pool())
+            .await?;
         Ok(())
     }
 

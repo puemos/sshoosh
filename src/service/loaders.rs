@@ -78,6 +78,7 @@ pub(crate) async fn load_notifications(
          LEFT JOIN comments cm ON cm.id = n.source_id AND n.source_kind = 'comment'
          LEFT JOIN conversation_messages dm ON dm.id = n.source_id AND n.source_kind = 'dm'
          WHERE n.account_id = ?
+           AND n.archived_at IS NULL
            AND {}
          ORDER BY n.created_at DESC
          LIMIT ?",

@@ -9,6 +9,10 @@ impl App {
             self.move_saved(delta);
             return;
         }
+        if self.ui.route == Route::Notifications && self.ui.active_pane == ActivePane::Detail {
+            self.move_notifications(delta);
+            return;
+        }
         if self.ui.active_pane == ActivePane::Detail {
             self.move_detail(delta);
         } else {
@@ -57,6 +61,14 @@ impl App {
         self.ui.saved_selected = clamp_index(self.ui.saved_selected, delta, len);
     }
 
+    pub(crate) fn move_notifications(&mut self, delta: isize) {
+        let len = self.visible_notification_indices().len();
+        if len == 0 {
+            return;
+        }
+        self.ui.notifications_selected = clamp_index(self.ui.notifications_selected, delta, len);
+    }
+
     pub(crate) fn reset_history_limit(&mut self) {
         self.history_limit = DEFAULT_HISTORY_LIMIT;
     }
@@ -73,6 +85,7 @@ impl App {
 
     pub(crate) fn workspace_rows(&self) -> Vec<WorkspaceRow> {
         let mut rows = Vec::new();
+        rows.push(WorkspaceRow::Notifications);
         for channel in &self.snapshot.channels {
             rows.push(WorkspaceRow::Channel(channel.id.clone()));
             let selected_channel = self.snapshot.selected_channel_id.as_deref()
@@ -145,6 +158,7 @@ impl App {
                         })
                 }),
             _ if matches!(self.ui.route, Route::Saved) => Some(WorkspaceRow::Saved),
+            _ if matches!(self.ui.route, Route::Notifications) => Some(WorkspaceRow::Notifications),
             _ => self
                 .snapshot
                 .selected_channel_id
@@ -209,6 +223,14 @@ impl App {
                 self.reset_detail_scroll();
                 self.actions.push(Action::ListSaved);
             }
+            WorkspaceRow::Notifications => {
+                self.ui.route = Route::Notifications;
+                self.ui.active_pane = ActivePane::Detail;
+                self.snapshot.selected_thread_id = None;
+                self.snapshot.selected_conversation_id = None;
+                self.reset_detail_scroll();
+                self.actions.push(Action::ListNotifications);
+            }
             WorkspaceRow::Dm {
                 conversation_id,
                 username,
@@ -240,12 +262,17 @@ impl App {
             self.activate_saved_result();
             return;
         }
+        if self.ui.route == Route::Notifications && self.ui.active_pane == ActivePane::Detail {
+            self.activate_notification_result();
+            return;
+        }
         match self.ui.active_pane {
             ActivePane::Detail => self.enter_compose(""),
             ActivePane::Rail => {
-                if matches!(self.ui.route, Route::Dms) {
-                    self.ui.active_pane = ActivePane::Detail;
-                } else if matches!(self.ui.route, Route::Saved) {
+                if matches!(
+                    self.ui.route,
+                    Route::Dms | Route::Saved | Route::Notifications
+                ) {
                     self.ui.active_pane = ActivePane::Detail;
                 } else if self.ui.threads_collapsed {
                     self.ui.threads_collapsed = false;
@@ -311,6 +338,59 @@ impl App {
         }
     }
 
+    pub(crate) fn activate_notification_result(&mut self) {
+        let Some(index) = self
+            .visible_notification_indices()
+            .get(self.ui.notifications_selected)
+            .copied()
+        else {
+            return;
+        };
+        let Some(notification) = self.snapshot.notifications.get(index).cloned() else {
+            return;
+        };
+        if notification.conversation_id.is_none() && notification.channel_id.is_none() {
+            return;
+        }
+        let focus = match notification.source_kind.as_deref() {
+            Some("thread") => Some(SourceFocus::ThreadRoot),
+            Some("comment") => notification.source_obj_index.map(SourceFocus::Comment),
+            Some("dm") => notification.source_obj_index.map(SourceFocus::Dm),
+            _ => None,
+        };
+        if let (Some(channel_id), Some(thread_id)) =
+            (notification.channel_id, notification.thread_id)
+        {
+            if let Some(focus) = focus {
+                self.select_thread_with_focus(channel_id, thread_id, focus);
+            } else {
+                self.select_thread(channel_id, thread_id);
+            }
+        } else if let Some(conversation_id) = notification.conversation_id {
+            if let Some(focus) = focus {
+                self.select_conversation_with_focus(conversation_id, focus);
+            } else {
+                self.select_conversation(conversation_id);
+            }
+        }
+    }
+
+    pub(crate) fn visible_notification_indices(&self) -> Vec<usize> {
+        visible_notification_indices(&self.snapshot.notifications, self.ui.notification_filter)
+    }
+
+    pub(crate) fn set_notification_filter(&mut self, filter: NotificationFilter) {
+        self.ui.notification_filter = filter;
+        self.ui.notifications_selected = 0;
+        self.reset_detail_scroll();
+    }
+
+    pub(crate) fn cycle_notification_filter(&mut self) {
+        if self.ui.route == Route::Notifications {
+            self.set_notification_filter(self.ui.notification_filter.next());
+        }
+    }
+
     pub(crate) fn navigate_left(&mut self) {
         match self.ui.active_pane {
             ActivePane::Detail => {
@@ -335,7 +415,7 @@ impl App {
     pub(crate) fn navigate_right(&mut self) {
         match self.ui.active_pane {
             ActivePane::Detail => {}
-            ActivePane::Rail if matches!(self.ui.route, Route::Saved) => {
+            ActivePane::Rail if matches!(self.ui.route, Route::Saved | Route::Notifications) => {
                 self.ui.active_pane = ActivePane::Detail;
             }
             ActivePane::List => self.ui.active_pane = ActivePane::Detail,
@@ -402,4 +482,22 @@ impl App {
             }
         }
     }
+}
+
+pub(crate) fn visible_notification_indices(
+    notifications: &[NotificationSummary],
+    filter: NotificationFilter,
+) -> Vec<usize> {
+    notifications
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, notification)| {
+            let visible = match filter {
+                NotificationFilter::All => true,
+                NotificationFilter::Unread => notification.read_at.is_none(),
+                NotificationFilter::Read => notification.read_at.is_some(),
+            };
+            visible.then_some(idx)
+        })
+        .collect()
 }

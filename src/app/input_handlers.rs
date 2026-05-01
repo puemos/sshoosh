@@ -125,7 +125,10 @@ impl App {
                     | HitTarget::ReactionAdd { .. }
                     | HitTarget::SearchResult(_)
                     | HitTarget::SavedResult(_)
-                    | HitTarget::TopbarNotifications
+                    | HitTarget::NotificationResult(_)
+                    | HitTarget::NotificationFilter(_)
+                    | HitTarget::NotificationReadAll
+                    | HitTarget::NotificationArchiveAll
                     | HitTarget::TopbarMentions
                     | HitTarget::ListModalRow(_),
                 ..
@@ -140,10 +143,15 @@ impl App {
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
             | HitTarget::WorkspaceSaved
+            | HitTarget::WorkspaceNotifications
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll
             | HitTarget::SearchResult(_)
             | HitTarget::SavedResult(_)
+            | HitTarget::NotificationResult(_)
+            | HitTarget::NotificationFilter(_)
+            | HitTarget::NotificationReadAll
+            | HitTarget::NotificationArchiveAll
             | HitTarget::EditableMessage(_)
             | HitTarget::ReactionChip { .. }
             | HitTarget::ReactionAdd { .. }
@@ -247,7 +255,6 @@ impl App {
 
     pub(crate) fn handle_mouse_click(&mut self, region: HitRegion, mouse: MouseEvent) {
         match region.target {
-            HitTarget::TopbarNotifications => self.actions.push(Action::ListNotifications),
             HitTarget::TopbarMentions => self.actions.push(Action::ListMentions),
             HitTarget::WorkspaceChannel(channel_id) => self.select_channel(channel_id),
             HitTarget::WorkspaceThread(thread_id) => {
@@ -263,6 +270,9 @@ impl App {
                 }
             }
             HitTarget::WorkspaceSaved => self.apply_workspace_row(WorkspaceRow::Saved),
+            HitTarget::WorkspaceNotifications => {
+                self.apply_workspace_row(WorkspaceRow::Notifications)
+            }
             HitTarget::WorkspaceDm {
                 conversation_id: Some(conversation_id),
                 ..
@@ -285,6 +295,25 @@ impl App {
                 self.ui.active_pane = ActivePane::Detail;
                 self.ui.saved_selected = index;
                 self.activate_saved_result();
+            }
+            HitTarget::NotificationResult(index) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.notifications_selected = index;
+                self.activate_notification_result();
+            }
+            HitTarget::NotificationFilter(filter) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.set_notification_filter(filter);
+            }
+            HitTarget::NotificationReadAll => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.actions.push(Action::MarkNotificationRead {
+                    notification_id: None,
+                });
+            }
+            HitTarget::NotificationArchiveAll => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.actions.push(Action::ArchiveNotifications);
             }
             HitTarget::EditableMessage(_) => self.ui.active_pane = ActivePane::Detail,
             HitTarget::ReactionChip {
@@ -381,7 +410,12 @@ impl App {
 
     pub(crate) fn activate_result_at_mouse_position(&mut self, rect: Rect, mouse: MouseEvent) {
         const RESULT_ROW_HEIGHT: u16 = 3;
-        if RESULT_ROW_HEIGHT == 0 || !matches!(self.ui.route, Route::Search | Route::Saved) {
+        if RESULT_ROW_HEIGHT == 0
+            || !matches!(
+                self.ui.route,
+                Route::Search | Route::Saved | Route::Notifications
+            )
+        {
             return;
         }
         let row = mouse
@@ -397,6 +431,10 @@ impl App {
             Route::Saved if index < self.snapshot.saved_messages.len() => {
                 self.ui.saved_selected = index;
                 self.activate_saved_result();
+            }
+            Route::Notifications if index < self.visible_notification_indices().len() => {
+                self.ui.notifications_selected = index;
+                self.activate_notification_result();
             }
             _ => {}
         }
@@ -474,6 +512,9 @@ impl App {
             Key::Home | Key::Char('g') => self.move_to_edge(false),
             Key::End | Key::Char('G') => self.move_to_edge(true),
             Key::Enter | Key::ShiftEnter => self.activate_selection(),
+            Key::Char('f') if self.ui.route == Route::Notifications => {
+                self.cycle_notification_filter();
+            }
             Key::Char('i') | Key::Char('r') => self.enter_compose(""),
             Key::Char('/') => self.enter_compose("/"),
             Key::Char(' ') => self.toggle_threads(),

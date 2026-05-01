@@ -525,6 +525,10 @@ impl ClientSession {
             .await
     }
 
+    pub async fn archive_notifications(&self, account_id: &str) -> anyhow::Result<()> {
+        self.state.archive_notifications(account_id).await
+    }
+
     pub async fn list_audit(&self, actor_id: &str, limit: i64) -> anyhow::Result<Vec<AuditEntry>> {
         self.state.list_audit(actor_id, limit).await
     }

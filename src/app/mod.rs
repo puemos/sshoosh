@@ -31,8 +31,8 @@ use self::{
     input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
     state::{
         ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
-        EditableMessageTarget, HitRegion, HitTarget, PaletteState, ReactionTarget, Route,
-        SelectionAnchor, SelectionRange, UiMode, UiState,
+        EditableMessageTarget, HitRegion, HitTarget, NotificationFilter, PaletteState,
+        ReactionTarget, Route, SelectionAnchor, SelectionRange, UiMode, UiState,
     },
 };
 
@@ -69,6 +69,7 @@ pub(crate) enum WorkspaceRow {
     Channel(String),
     Thread(String),
     Saved,
+    Notifications,
     Dm {
         conversation_id: Option<String>,
         username: String,

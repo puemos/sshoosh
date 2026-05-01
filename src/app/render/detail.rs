@@ -42,6 +42,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         draw_saved_detail(frame, area, snapshot, ui);
         return;
     }
+    if matches!(ui.route, Route::Notifications) {
+        draw_notifications_detail(frame, area, snapshot, ui);
+        return;
+    }
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
     let selected = snapshot
@@ -316,7 +320,16 @@ pub(crate) fn draw_saved_detail(
 ) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
-    draw_detail_header(frame, area, "Saved", ui);
+    let meta = format!(
+        "{} saved {}",
+        snapshot.saved_count,
+        if snapshot.saved_count == 1 {
+            "message"
+        } else {
+            "messages"
+        }
+    );
+    draw_thread_header(frame, area, None, "Saved", Some(&meta), ui);
     let messages_area = pane_scroll_area(area);
     let mut items = Vec::new();
     let mut row_hits = Vec::new();
@@ -381,6 +394,312 @@ pub(crate) fn draw_saved_detail(
         row_hits,
         ui.detail_scroll.offset().y,
     );
+}
+
+pub(crate) fn draw_notifications_detail(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
+    frame.render_widget(Block::default().style(theme::panel()), area);
+    let area = pane_inner(area);
+    draw_notifications_header(frame, area, snapshot, ui);
+    let messages_area = notifications_scroll_area(area);
+    let mut items = Vec::new();
+    let mut row_hits = Vec::new();
+    let visible_indices = visible_notification_indices_for_filter(snapshot, ui.notification_filter);
+    if visible_indices.is_empty() {
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        let (title, detail) = match ui.notification_filter {
+            NotificationFilter::All => {
+                ("No notifications", "Mentions and replies will show up here")
+            }
+            NotificationFilter::Unread => (
+                "No unread notifications",
+                "Unread mentions and replies will show up here",
+            ),
+            NotificationFilter::Read => (
+                "No read notifications",
+                "Read notifications will show up here",
+            ),
+        };
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_state_lines(title, detail, "/notifications"),
+        );
+        return;
+    }
+
+    let row_width = messages_area.width.saturating_sub(2) as usize;
+    let body_width = row_width.max(1);
+    let mut content_row = 0u16;
+    for (visible_idx, idx) in visible_indices.into_iter().enumerate() {
+        let Some(notification) = snapshot.notifications.get(idx) else {
+            continue;
+        };
+        let selected = visible_idx == ui.notifications_selected;
+        let item = notification_list_item(notification, selected, body_width);
+        let height = item.height() as u16;
+        items.push(item);
+        for offset in 0..height {
+            row_hits.push((
+                content_row.saturating_add(offset),
+                HitTarget::NotificationResult(visible_idx),
+            ));
+        }
+        content_row = content_row.saturating_add(height);
+    }
+
+    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    register_scroll_hits(
+        ui,
+        messages_area,
+        HitTarget::DetailScroll,
+        row_hits,
+        ui.detail_scroll.offset().y,
+    );
+}
+
+fn visible_notification_indices_for_filter(
+    snapshot: &Snapshot,
+    filter: NotificationFilter,
+) -> Vec<usize> {
+    snapshot
+        .notifications
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, notification)| {
+            let visible = match filter {
+                NotificationFilter::All => true,
+                NotificationFilter::Unread => notification.read_at.is_none(),
+                NotificationFilter::Read => notification.read_at.is_some(),
+            };
+            visible.then_some(idx)
+        })
+        .collect()
+}
+
+fn notifications_scroll_area(area: Rect) -> Rect {
+    let header_height = area.height.min(3);
+    Rect::new(
+        area.x,
+        area.y.saturating_add(header_height),
+        area.width,
+        area.height.saturating_sub(header_height),
+    )
+}
+
+fn draw_notifications_header(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let header = Rect::new(area.x, area.y, area.width, 1);
+    let toolbar = Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1).min(1),
+    );
+    let active = ui.active_pane == ActivePane::Detail;
+    let title_style = if active {
+        theme::title()
+    } else {
+        theme::muted()
+    };
+    let total = snapshot.notifications.len();
+    let unread = snapshot
+        .notifications
+        .iter()
+        .filter(|notification| notification.read_at.is_none())
+        .count();
+    let meta = format!("{unread} unread / {total} total");
+    let spans = vec![
+        Span::styled("Notifications", title_style),
+        Span::styled("   ", theme::muted()),
+        Span::styled(meta, theme::muted()),
+    ];
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(theme::panel()),
+        header,
+    );
+    if toolbar.is_empty() {
+        return;
+    }
+
+    let mut toolbar_spans = Vec::new();
+    let mut cursor = 0u16;
+    for filter in [
+        NotificationFilter::All,
+        NotificationFilter::Unread,
+        NotificationFilter::Read,
+    ] {
+        let active_filter = ui.notification_filter == filter;
+        let label = filter.label();
+        let text = format!(" {label} ");
+        let width = text.chars().count() as u16;
+        if cursor.saturating_add(width) > toolbar.width {
+            break;
+        }
+        let style = if active_filter {
+            theme::selection()
+        } else {
+            theme::muted()
+        };
+        toolbar_spans.push(Span::styled(text, style));
+        ui.hit_map.push(
+            Rect::new(toolbar.x.saturating_add(cursor), toolbar.y, width, 1),
+            HitTarget::NotificationFilter(filter),
+        );
+        cursor = cursor.saturating_add(width);
+        if cursor.saturating_add(1) < toolbar.width {
+            toolbar_spans.push(Span::styled(" ", theme::muted()));
+            cursor = cursor.saturating_add(1);
+        }
+    }
+    let divider = "  │  ";
+    let divider_width = divider.chars().count() as u16;
+    let read_all_width = " Read all ".chars().count() as u16;
+    if cursor
+        .saturating_add(divider_width)
+        .saturating_add(read_all_width)
+        <= toolbar.width
+    {
+        toolbar_spans.push(Span::styled(divider, theme::muted()));
+        cursor = cursor.saturating_add(divider_width);
+    }
+    push_notification_toolbar_action(
+        &mut toolbar_spans,
+        &mut cursor,
+        toolbar,
+        ui,
+        "Read all",
+        HitTarget::NotificationReadAll,
+        0,
+    );
+    push_notification_toolbar_action(
+        &mut toolbar_spans,
+        &mut cursor,
+        toolbar,
+        ui,
+        "Archive all",
+        HitTarget::NotificationArchiveAll,
+        3,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(toolbar_spans)).style(theme::panel()),
+        toolbar,
+    );
+}
+
+fn push_notification_toolbar_action(
+    spans: &mut Vec<Span<'static>>,
+    cursor: &mut u16,
+    toolbar: Rect,
+    ui: &mut UiState,
+    label: &'static str,
+    target: HitTarget,
+    gap: u16,
+) {
+    let text = format!(" {label} ");
+    let width = text.chars().count() as u16;
+    let gap = if *cursor == 0 { 0 } else { gap };
+    if cursor.saturating_add(gap).saturating_add(width) > toolbar.width {
+        return;
+    }
+    if gap > 0 {
+        spans.push(Span::styled(" ".repeat(gap as usize), theme::muted()));
+        *cursor = cursor.saturating_add(gap);
+    }
+    spans.push(Span::styled(text, theme::muted()));
+    ui.hit_map.push(
+        Rect::new(toolbar.x.saturating_add(*cursor), toolbar.y, width, 1),
+        target,
+    );
+    *cursor = cursor.saturating_add(width);
+}
+
+fn notification_list_item(
+    notification: &NotificationSummary,
+    selected: bool,
+    body_width: usize,
+) -> ListItem<'static> {
+    let unread = notification.read_at.is_none();
+    let meta_style = if selected {
+        theme::title()
+    } else if unread {
+        theme::unread()
+    } else {
+        theme::muted()
+    };
+    let body_style = if selected || unread {
+        theme::message_body()
+    } else {
+        theme::muted()
+    };
+    let actor = notification
+        .actor_username
+        .as_ref()
+        .map(|username| format!("@{username}"))
+        .unwrap_or_else(|| notification.kind.clone());
+    let source = notification_source_label(notification);
+    let created_at = format_human_timestamp(&notification.created_at);
+    let state = if unread { "unread" } else { "read" };
+    let mut lines = vec![Line::from(vec![
+        Span::styled(format!("{state:<7}"), meta_style),
+        Span::styled(sanitize_terminal_visible_text(&actor), meta_style),
+        Span::styled("  ", theme::muted()),
+        Span::styled(sanitize_terminal_visible_text(&source), theme::muted()),
+        Span::styled(format!("  {created_at}"), theme::muted()),
+    ])];
+    let body = sanitize_terminal_visible_text(&notification.body);
+    for line in wrap_plain_text(&body, body_width) {
+        lines.push(Line::from(Span::styled(line, body_style)));
+    }
+    lines.push(Line::from(""));
+    ListItem::new(lines)
+}
+
+fn notification_source_label(notification: &NotificationSummary) -> String {
+    if notification.conversation_id.is_some() {
+        return "DM".to_string();
+    }
+    match (
+        notification.channel_slug.as_deref(),
+        notification.thread_title.as_deref(),
+    ) {
+        (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+        (Some(slug), None) => format!("#{slug}"),
+        _ => notification.title.clone(),
+    }
+}
+
+fn wrap_plain_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+        let current_len = current.chars().count();
+        if current_len == 0 {
+            current.push_str(word);
+        } else if current_len.saturating_add(1).saturating_add(word_len) <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 pub(crate) fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
@@ -467,7 +786,7 @@ pub(crate) fn draw_pane_header(frame: &mut Frame, area: Rect, title: &str, style
 }
 
 pub(crate) fn pane_scroll_area(area: Rect) -> Rect {
-    let header_height = area.height.min(1);
+    let header_height = area.height.min(2);
     Rect::new(
         area.x,
         area.y.saturating_add(header_height),
@@ -555,13 +874,29 @@ pub(crate) fn render_scroll_items(
 pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
+    let selected = snapshot
+        .selected_conversation_id
+        .as_ref()
+        .and_then(|id| snapshot.conversations.iter().find(|dm| &dm.id == id));
     let title = snapshot
         .selected_conversation_id
         .as_ref()
         .and_then(|id| snapshot.conversations.iter().find(|dm| &dm.id == id))
         .map(|dm| format!("DM @{}", dm.peer_username))
         .unwrap_or_else(|| "DMs".to_string());
-    draw_detail_header(frame, area, &title, ui);
+    let meta = selected.map(|dm| {
+        let last_activity = dm
+            .last_activity_at
+            .as_deref()
+            .map(format_human_timestamp)
+            .unwrap_or_else(|| "no activity".to_string());
+        if dm.unread_count > 0 {
+            format!("{} unread · {}", dm.unread_count, last_activity)
+        } else {
+            last_activity
+        }
+    });
+    draw_thread_header(frame, area, None, &title, meta.as_deref(), ui);
     let messages_area = pane_scroll_area(area);
     let content_area = scroll_content_area(messages_area);
     let message_width = message_content_width(content_area);
@@ -572,10 +907,6 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut selection_hits = Vec::new();
     let mut focused_row = None;
     let mut content_row = 0u16;
-    let selected = snapshot
-        .selected_conversation_id
-        .as_ref()
-        .and_then(|id| snapshot.conversations.iter().find(|dm| &dm.id == id));
     if snapshot.conversation_messages_has_more {
         append_plain_item(
             &mut items,

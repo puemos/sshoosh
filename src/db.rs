@@ -29,6 +29,8 @@ const MIGRATION_REMOTE_SECURITY: &str =
     include_str!("../migrations/20260430000001_remote_security.sql");
 const MIGRATION_SAVED_MESSAGES: &str =
     include_str!("../migrations/20260501000000_saved_messages.sql");
+const MIGRATION_NOTIFICATION_ARCHIVE: &str =
+    include_str!("../migrations/20260501000001_notification_archive.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -292,6 +294,10 @@ impl Database {
             ),
             ("20260430000001_remote_security", MIGRATION_REMOTE_SECURITY),
             ("20260501000000_saved_messages", MIGRATION_SAVED_MESSAGES),
+            (
+                "20260501000001_notification_archive",
+                MIGRATION_NOTIFICATION_ARCHIVE,
+            ),
         ] {
             let exists: Option<String> =
                 query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")
@@ -299,6 +305,21 @@ impl Database {
                     .fetch_optional_unchecked(self)
                     .await?;
             if exists.is_some() {
+                continue;
+            }
+            if version == "20260501000001_notification_archive"
+                && self.notification_archive_column_exists().await?
+            {
+                self.execute_batch_unchecked(
+                    "CREATE INDEX IF NOT EXISTS idx_notifications_account_archived
+                       ON notifications(account_id, archived_at, created_at DESC);",
+                )
+                .await?;
+                query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
+                    .bind(version)
+                    .bind(now())
+                    .execute_unchecked(self)
+                    .await?;
                 continue;
             }
             self.execute_batch_unchecked(sql).await?;
@@ -311,6 +332,17 @@ impl Database {
         self.validate_encryption(self.allow_plaintext_encryption_migration)
             .await?;
         Ok(())
+    }
+
+    async fn notification_archive_column_exists(&self) -> anyhow::Result<bool> {
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM pragma_table_info('notifications')
+             WHERE name = 'archived_at'",
+        )
+        .fetch_one_unchecked(self)
+        .await?;
+        Ok(count > 0)
     }
 
     pub async fn doctor(&self) -> anyhow::Result<DoctorReport> {

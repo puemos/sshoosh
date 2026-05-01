@@ -8,13 +8,14 @@ use ratatui::{
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
-use crate::service::{Account, SavedMessageKind, SearchKind, Snapshot};
+use crate::service::{Account, NotificationSummary, SavedMessageKind, SearchKind, Snapshot};
 
 use super::{
     commands::{CommandSpec, SubcommandSpec, subcommands_for},
     state::{
         ActivePane, Banner, BannerPresentation, BottomBarAction, EditableMessageTarget, HitTarget,
-        LinkOverlay, ListModal, ReactionTarget, Route, SelectionRange, UiMode, UiState,
+        LinkOverlay, ListModal, NotificationFilter, ReactionTarget, Route, SelectionRange, UiMode,
+        UiState,
     },
     theme,
 };

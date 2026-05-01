@@ -862,15 +862,40 @@ mod cases {
     }
 
     #[tokio::test]
-    async fn mouse_clicks_topbar_notifications_and_mentions() {
-        let mut app = test_app("topbar-clicks").await;
+    async fn activated_sessions_start_on_notifications_page() {
+        let name = "default-notifications-page";
+        let db_path = temp_path(name).with_extension("sqlite");
+        let db = Database::connect(&db_path).await.expect("connect db");
+        db.init().await.expect("init db");
+        let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
+        let account = state
+            .ensure_account_for_key(
+                &format!("owner+{token}"),
+                &format!("SHA256:{name}"),
+                &format!("ssh-ed25519 {name}"),
+            )
+            .await
+            .expect("account");
+        let app = App::new(account, state, 100, 30).await.expect("app");
+
+        assert_eq!(app.ui.route, Route::Notifications);
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicks_sidebar_notifications_and_topbar_mentions() {
+        let mut app = test_app("notification-and-mention-clicks").await;
         app.resize(140, 30).expect("resize");
         app.snapshot.notification_unread_count = 2;
         app.snapshot.mention_unread_count = 1;
         app.render().expect("render");
 
         click_region(&mut app, |target| {
-            matches!(target, HitTarget::TopbarNotifications)
+            matches!(target, HitTarget::WorkspaceNotifications)
         });
         click_region(&mut app, |target| {
             matches!(target, HitTarget::TopbarMentions)

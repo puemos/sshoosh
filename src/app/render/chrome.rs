@@ -169,6 +169,7 @@ pub(crate) fn active_label(snapshot: &Snapshot, ui: &UiState) -> String {
             .map(|query| format!("Search: {query}"))
             .unwrap_or_else(|| "Search".to_string()),
         Route::Saved => "Saved".to_string(),
+        Route::Notifications => "Notifications".to_string(),
     }
 }
 

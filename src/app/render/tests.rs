@@ -14,7 +14,7 @@ mod cases {
         app::state,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
-            ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
+            NotificationSummary, ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
         },
     };
 
@@ -355,13 +355,13 @@ mod cases {
         assert!(bottom_status.contains("NORMAL"));
         assert!(bottom_status.contains("#general"));
         let rendered = format!("{buffer:?}");
-        assert!(rendered.contains("2 notifications"));
+        assert!(!rendered.contains("2 notifications"));
         assert!(rendered.contains("1 mentions"));
         assert!(
             ui.hit_map
                 .entries()
                 .iter()
-                .any(|region| matches!(region.target, HitTarget::TopbarNotifications))
+                .any(|region| matches!(region.target, HitTarget::WorkspaceNotifications))
         );
         assert!(
             ui.hit_map
@@ -380,7 +380,14 @@ mod cases {
             buffer.cell((119, 20)).expect("footer bg").bg,
             theme::COMPOSER
         );
-        assert_eq!(buffer.cell((1, 1)).expect("workspace header").symbol(), "C");
+        assert_eq!(
+            buffer
+                .cell((1, 1))
+                .expect("workspace notifications")
+                .symbol(),
+            "N"
+        );
+        assert_eq!(buffer.cell((1, 3)).expect("workspace header").symbol(), "C");
         assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "#");
     }
 
@@ -865,6 +872,157 @@ mod cases {
 
         assert_eq!(buffer.cell((x, y)).expect("saved label").symbol(), "S");
         assert!(!row_text(buffer, width, y).contains('★'));
+    }
+
+    #[test]
+    fn workspace_notifications_row_stays_above_channels() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            notification_unread_count: 3,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (_, notifications_y) =
+            position_for_text(buffer, width, height, "Notifications 3").unwrap();
+        let (_, channels_y) = position_for_text(buffer, width, height, "Channels").unwrap();
+
+        assert!(notifications_y < channels_y);
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::WorkspaceNotifications))
+        );
+    }
+
+    #[test]
+    fn notifications_page_filters_and_keeps_manual_scroll_offset() {
+        let width = 180;
+        let height = 18;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            notifications: (0..16)
+                .map(|idx| {
+                    test_notification(
+                        &format!("notification-{idx}"),
+                        &format!("Body {idx}"),
+                        if idx % 2 == 0 { None } else { Some("read") },
+                    )
+                })
+                .collect(),
+            notification_unread_count: 8,
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Notifications;
+        ui.active_pane = ActivePane::Detail;
+        ui.notification_filter = NotificationFilter::Unread;
+        ui.detail_scroll.set_offset(Position { x: 0, y: 6 });
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+
+        assert_eq!(ui.detail_scroll.offset().y, 6);
+        assert!(rendered.contains("Notifications"));
+        assert!(rendered.contains("8 unread / 16 total"));
+        assert!(rendered.contains("Unread"));
+        assert!(rendered.contains("Body 4"));
+        assert!(!rendered.contains("Body 5"));
+        assert!(ui.hit_map.entries().iter().any(|region| matches!(
+            region.target,
+            HitTarget::NotificationFilter(NotificationFilter::Read)
+        )));
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::NotificationReadAll))
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::NotificationArchiveAll))
+        );
+    }
+
+    #[test]
+    fn saved_and_dm_headers_include_thread_style_metadata() {
+        let width = 120;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Saved;
+        ui.active_pane = ActivePane::Detail;
+        let snapshot = Snapshot {
+            saved_count: 2,
+            ..Snapshot::default()
+        };
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(format!("{buffer:?}").contains("2 saved messages"));
+
+        ui.route = Route::Dms;
+        let snapshot = Snapshot {
+            selected_conversation_id: Some("dm".to_string()),
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "alice".to_string(),
+                unread_count: 4,
+                last_message_index: 9,
+                last_activity_at: Some("2026-04-30T10:00:00Z".to_string()),
+                last_message_preview: Some("recent message".to_string()),
+                muted_until: None,
+                saved_at: None,
+            }],
+            ..Snapshot::default()
+        };
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("DM @alice"));
+        assert!(rendered.contains("4 unread"));
     }
 
     #[test]
@@ -1537,15 +1695,15 @@ mod cases {
             .unwrap();
 
         assert!(matches!(
-            ui.hit_map.hit(1, 2).map(|region| region.target),
+            ui.hit_map.hit(1, 4).map(|region| region.target),
             Some(HitTarget::WorkspaceChannel(id)) if id == "general"
         ));
         assert!(matches!(
-            ui.hit_map.hit(1, 3).map(|region| region.target),
+            ui.hit_map.hit(1, 5).map(|region| region.target),
             Some(HitTarget::WorkspaceThread(id)) if id == "thread"
         ));
         assert!(matches!(
-            ui.hit_map.hit(40, 2).map(|region| region.target),
+            ui.hit_map.hit(40, 3).map(|region| region.target),
             Some(HitTarget::DetailScroll)
         ));
         assert!(matches!(
@@ -2000,6 +2158,26 @@ mod cases {
             row.push_str(buffer.cell((x, y)).expect("cell").symbol());
         }
         row
+    }
+
+    fn test_notification(id: &str, body: &str, read_at: Option<&str>) -> NotificationSummary {
+        NotificationSummary {
+            id: id.to_string(),
+            kind: "mention".to_string(),
+            source_kind: Some("comment".to_string()),
+            source_id: Some(format!("{id}-source")),
+            source_obj_index: Some(1),
+            actor_username: Some("alice".to_string()),
+            channel_id: Some("channel".to_string()),
+            channel_slug: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            thread_title: Some("Launch notes".to_string()),
+            conversation_id: None,
+            title: "Mention".to_string(),
+            body: body.to_string(),
+            created_at: "2026-04-30T10:00:00Z".to_string(),
+            read_at: read_at.map(ToOwned::to_owned),
+        }
     }
 
     fn activated_test_account() -> Account {

@@ -403,17 +403,45 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
             .list_mentions(&account_id, 50)
             .await
             .map(|rows| ActionResult::List(mentions_modal(&rows))),
-        Action::ListNotifications => session
-            .list_notifications(&account_id, 50)
-            .await
-            .map(|rows| ActionResult::List(notifications_modal(&rows))),
+        Action::ListNotifications => match session.list_notifications(&account_id, 50).await {
+            Ok(rows) => {
+                app.lock().await.set_notifications(rows);
+                Ok(ActionResult::message("Notifications loaded"))
+            }
+            Err(err) => Err(err),
+        },
         Action::OpenSourceTarget { target } => {
             open_source_target(app, &session, &account_id, target).await
         }
-        Action::MarkNotificationRead { notification_id } => session
-            .mark_notification_read(&account_id, notification_id.as_deref())
-            .await
-            .map(|_| ActionResult::message("Notifications marked read")),
+        Action::MarkNotificationRead { notification_id } => {
+            match session
+                .mark_notification_read(&account_id, notification_id.as_deref())
+                .await
+            {
+                Ok(()) => {
+                    if app.lock().await.notifications_active() {
+                        match session.list_notifications(&account_id, 50).await {
+                            Ok(rows) => app.lock().await.set_notifications(rows),
+                            Err(err) => return app.lock().await.set_banner_err(err.to_string()),
+                        }
+                    }
+                    Ok(ActionResult::message("Notifications marked read"))
+                }
+                Err(err) => Err(err),
+            }
+        }
+        Action::ArchiveNotifications => match session.archive_notifications(&account_id).await {
+            Ok(()) => {
+                if app.lock().await.notifications_active() {
+                    match session.list_notifications(&account_id, 50).await {
+                        Ok(rows) => app.lock().await.set_notifications(rows),
+                        Err(err) => return app.lock().await.set_banner_err(err.to_string()),
+                    }
+                }
+                Ok(ActionResult::message("Notifications archived"))
+            }
+            Err(err) => Err(err),
+        },
         Action::SetTerminalNotifications { enabled } => session
             .set_terminal_notifications(&account_id, enabled)
             .await
@@ -751,35 +779,6 @@ fn mentions_modal(rows: &[MentionSummary]) -> ListModal {
     }
 }
 
-fn notifications_modal(rows: &[NotificationSummary]) -> ListModal {
-    ListModal {
-        title: "Notifications".to_string(),
-        columns: columns(["id", "kind", "actor", "source", "state", "body"]),
-        rows: rows
-            .iter()
-            .map(|row| {
-                row_values([
-                    short_id(&row.id).to_string(),
-                    row.kind.clone(),
-                    row.actor_username
-                        .as_ref()
-                        .map(|username| format!("@{username}"))
-                        .unwrap_or_else(|| "-".to_string()),
-                    source_label(
-                        row.channel_slug.as_deref(),
-                        row.thread_title.as_deref(),
-                        row.conversation_id.as_deref(),
-                    ),
-                    read_state(row.read_at.as_deref()).to_string(),
-                    row.body.replace('\n', " "),
-                ])
-            })
-            .collect(),
-        row_actions: rows.iter().map(source_row_action).collect(),
-        empty: "No notifications found.".to_string(),
-    }
-}
-
 trait SourceRow {
     fn source_kind(&self) -> Option<&str>;
     fn source_obj_index(&self) -> Option<i64>;
@@ -993,45 +992,6 @@ mod tests {
         assert!(modal.rows[0][3].starts_with("Jan 2, 2020 "));
         assert!(!modal.rows[0][3].contains('T'));
         assert!(!modal.rows[0][3].contains('Z'));
-    }
-
-    #[test]
-    fn notifications_modal_includes_source_and_row_action() {
-        let rows = vec![NotificationSummary {
-            id: "019ddd09abcdef".to_string(),
-            kind: "mention".to_string(),
-            source_kind: Some("comment".to_string()),
-            source_id: Some("comment-1".to_string()),
-            source_obj_index: Some(7),
-            actor_username: Some("alice".to_string()),
-            channel_id: Some("channel".to_string()),
-            channel_slug: Some("project-jojo".to_string()),
-            thread_id: Some("thread".to_string()),
-            thread_title: Some("updates".to_string()),
-            conversation_id: None,
-            title: "Mention".to_string(),
-            body: "ping".to_string(),
-            created_at: "2026-04-30T10:00:00Z".to_string(),
-            read_at: None,
-        }];
-
-        let modal = notifications_modal(&rows);
-
-        assert_eq!(
-            modal.columns,
-            vec!["id", "kind", "actor", "source", "state", "body"]
-        );
-        assert_eq!(modal.rows[0][3], "#project-jojo / updates");
-        assert_eq!(
-            modal.row_actions[0],
-            Some(ListModalAction::OpenSource(SourceTarget {
-                channel_id: Some("channel".to_string()),
-                channel_slug: Some("project-jojo".to_string()),
-                thread_id: Some("thread".to_string()),
-                conversation_id: None,
-                focus: Some(SourceFocus::Comment(7)),
-            }))
-        );
     }
 
     #[test]

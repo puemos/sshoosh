@@ -17,6 +17,10 @@ impl App {
         let mut ui = UiState::default();
         ui.sync_route_from_snapshot(&snapshot);
         if account.activated {
+            ui.route = Route::Notifications;
+            ui.active_pane = ActivePane::Detail;
+        }
+        if account.activated {
             ui.show_startup_splash(Duration::from_millis(2400));
         }
         Ok(Self {
@@ -58,6 +62,7 @@ impl App {
         let search_has_more = self.snapshot.search_has_more;
         let saved_messages = self.snapshot.saved_messages.clone();
         let saved_has_more = self.snapshot.saved_has_more;
+        let notifications = self.snapshot.notifications.clone();
         self.snapshot = self
             .client
             .snapshot(
@@ -87,6 +92,13 @@ impl App {
                 .ui
                 .saved_selected
                 .min(self.snapshot.saved_messages.len().saturating_sub(1));
+        } else if self.ui.route == Route::Notifications {
+            self.snapshot.notifications = notifications;
+            let visible_len = self.visible_notification_indices().len();
+            self.ui.notifications_selected = self
+                .ui
+                .notifications_selected
+                .min(visible_len.saturating_sub(1));
         }
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
@@ -188,6 +200,10 @@ impl App {
 
     pub fn saved_active(&self) -> bool {
         self.ui.route == Route::Saved
+    }
+
+    pub fn notifications_active(&self) -> bool {
+        self.ui.route == Route::Notifications
     }
 
     pub fn reset_search_limit(&mut self) -> i64 {
@@ -342,6 +358,17 @@ impl App {
                 .saved_selected
                 .min(self.snapshot.saved_messages.len().saturating_sub(1));
         }
+    }
+
+    pub fn set_notifications(&mut self, notifications: Vec<NotificationSummary>) {
+        self.snapshot.notifications = notifications;
+        self.snapshot.selected_thread_id = None;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
+        self.ui.route = Route::Notifications;
+        self.ui.active_pane = ActivePane::Detail;
+        self.ui.notifications_selected = 0;
+        self.reset_detail_scroll();
     }
 
     fn queue_new_terminal_notifications(&mut self, enabled: bool) {

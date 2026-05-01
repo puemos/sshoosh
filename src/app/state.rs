@@ -36,6 +36,33 @@ pub enum Route {
     Dms,
     Search,
     Saved,
+    Notifications,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NotificationFilter {
+    #[default]
+    All,
+    Unread,
+    Read,
+}
+
+impl NotificationFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Unread => "Unread",
+            Self::Read => "Read",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Unread,
+            Self::Unread => Self::Read,
+            Self::Read => Self::All,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +82,8 @@ pub struct UiState {
     pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
     pub saved_selected: usize,
+    pub notifications_selected: usize,
+    pub notification_filter: NotificationFilter,
     pub pending_source_focus: Option<SourceFocus>,
     pub hit_map: HitMap,
     pub link_overlays: Vec<LinkOverlay>,
@@ -80,6 +109,8 @@ impl Default for UiState {
             comment_delete: None,
             search_selected: 0,
             saved_selected: 0,
+            notifications_selected: 0,
+            notification_filter: NotificationFilter::All,
             pending_source_focus: None,
             hit_map: HitMap::default(),
             link_overlays: Vec::new(),
@@ -275,15 +306,19 @@ pub enum HitTarget {
     WorkspaceChannel(String),
     WorkspaceThread(String),
     WorkspaceSaved,
+    WorkspaceNotifications,
     WorkspaceDm {
         conversation_id: Option<String>,
         username: String,
     },
-    TopbarNotifications,
     TopbarMentions,
     DetailScroll,
     SearchResult(usize),
     SavedResult(usize),
+    NotificationResult(usize),
+    NotificationFilter(NotificationFilter),
+    NotificationReadAll,
+    NotificationArchiveAll,
     EditableMessage(EditableMessageTarget),
     ReactionChip {
         target: ReactionTarget,
@@ -353,6 +388,7 @@ impl UiState {
             let _ = conversation_id;
         } else if self.route != Route::Search
             && self.route != Route::Saved
+            && self.route != Route::Notifications
             && let Some(channel_id) = snapshot.selected_channel_id.clone()
         {
             self.route = Route::Channel(channel_id);

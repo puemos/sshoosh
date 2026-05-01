@@ -226,10 +226,9 @@ fn draw_status_cluster(
     }
     let active = active_label(snapshot, ui);
     let unread = snapshot.total_unread();
-    let notifications = snapshot.notification_unread_count;
     let mentions = snapshot.mention_unread_count;
     let compact_width = char_width(mode_label(ui)).saturating_add(char_width(&active)) + 5;
-    let show_badges = area.width as usize >= compact_width.saturating_add(38);
+    let show_badges = area.width as usize >= compact_width.saturating_add(22);
     let show_account = area.width as usize >= compact_width.saturating_add(62);
 
     let mut spans = Vec::new();
@@ -250,22 +249,6 @@ fn draw_status_cluster(
             format!("{unread} unread"),
             unread > 0,
             theme::WARN,
-        );
-        let notification_start = spans_width(&spans) as u16;
-        push_badge(
-            &mut spans,
-            format!("{notifications} notifications"),
-            notifications > 0,
-            theme::ACCENT_SOFT,
-        );
-        ui.hit_map.push(
-            Rect::new(
-                area.x.saturating_add(notification_start),
-                area.y,
-                (notifications.to_string().chars().count() as u16).saturating_add(15),
-                1,
-            ),
-            HitTarget::TopbarNotifications,
         );
         let mention_start = spans_width(&spans) as u16;
         push_badge(

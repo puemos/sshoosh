@@ -160,6 +160,7 @@ pub enum Action {
     MarkNotificationRead {
         notification_id: Option<String>,
     },
+    ArchiveNotifications,
     SetTerminalNotifications {
         enabled: bool,
     },
