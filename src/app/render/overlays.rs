@@ -427,10 +427,17 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
     }
 
     ui.hit_map.push(area, HitTarget::CommentMenuBackdrop);
-    let rows = [
-        ("Edit", HitTarget::CommentMenuEdit(menu.target)),
-        ("Delete", HitTarget::CommentMenuDelete(menu.target)),
-    ];
+    let mut rows = vec![(
+        if menu.saved { "Unsave" } else { "Save" },
+        HitTarget::CommentMenuSave {
+            target: menu.target,
+            saved: !menu.saved,
+        },
+    )];
+    if menu.can_edit_delete {
+        rows.push(("Edit", HitTarget::CommentMenuEdit(menu.target)));
+        rows.push(("Delete", HitTarget::CommentMenuDelete(menu.target)));
+    }
     let title = "Message";
     let label_width = rows
         .iter()
@@ -439,7 +446,7 @@ pub(crate) fn draw_comment_menu(frame: &mut Frame, area: Rect, ui: &mut UiState)
         .max()
         .unwrap_or(0) as u16;
     let width = label_width.saturating_add(4).min(area.width);
-    let height = 6.min(area.height);
+    let height = (rows.len() as u16).saturating_add(4).min(area.height);
     let max_x = area
         .x
         .saturating_add(area.width.saturating_sub(width.saturating_add(1)));

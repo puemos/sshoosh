@@ -55,6 +55,7 @@ mod cases {
             "/notify",
             "/notification-read",
             "/audit",
+            "/saved",
         ] {
             assert!(registry.parse_action(line).is_err(), "{line}");
         }
@@ -171,8 +172,20 @@ mod cases {
                 Action::SetThreadMuted { ttl_hours: Some(6) },
             ),
             ("/thread unmute", Action::SetThreadMuted { ttl_hours: None }),
-            ("/thread save", Action::SetThreadSaved { saved: true }),
-            ("/thread unsave", Action::SetThreadSaved { saved: false }),
+            (
+                "/save #2",
+                Action::SetMessageSaved {
+                    index: 2,
+                    saved: true,
+                },
+            ),
+            (
+                "/unsave 2",
+                Action::SetMessageSaved {
+                    index: 2,
+                    saved: false,
+                },
+            ),
             (
                 "/search deploy notes",
                 Action::Search {

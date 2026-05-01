@@ -17,6 +17,7 @@ pub const ACCENT: Color = Color::Rgb(120, 182, 173); // #78B6AD
 pub const ACCENT_SOFT: Color = Color::Rgb(135, 201, 229); // #87C9E5
 pub const MENTION: Color = Color::Rgb(232, 121, 211); // hot magenta — kept distinct from author palette
 pub const PIN: Color = Color::Rgb(231, 224, 154); // #E7E09A
+pub const SAVED: Color = Color::Rgb(154, 231, 178); // green marker
 
 // Stable per-author palette: 16 hues evenly spaced around the color wheel,
 // at fixed saturation/lightness tuned for the dark message surface.
@@ -155,6 +156,13 @@ pub fn message_author_on(author_color: Color, bg: Color) -> Style {
 
 pub fn message_meta_on(bg: Color) -> Style {
     Style::default().fg(MUTED).bg(bg)
+}
+
+pub fn message_saved_on(bg: Color) -> Style {
+    Style::default()
+        .fg(SAVED)
+        .bg(bg)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn message_body() -> Style {

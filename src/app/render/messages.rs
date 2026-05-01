@@ -6,6 +6,7 @@ use ratatui::style::Color;
 
 const MESSAGE_PREFIX: &str = "";
 const MESSAGE_PREFIX_WIDTH: u16 = 0;
+pub(crate) const SAVED_MARKER: &str = "✸";
 
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
@@ -86,6 +87,7 @@ pub(crate) fn message_card<'a>(
     author: &str,
     created_at: Option<&str>,
     edited_at: Option<&str>,
+    saved: bool,
     reactions: &[ReactionSummary],
     reaction_target: Option<ReactionTarget>,
     body: &str,
@@ -108,7 +110,15 @@ pub(crate) fn message_card<'a>(
     if matches!(header_mode, HeaderMode::Full) {
         lines.push(message_card_line(
             gutter,
-            header_spans(kind, author, author_color, created_at, surface, width),
+            header_spans(
+                kind,
+                author,
+                author_color,
+                created_at,
+                saved,
+                surface,
+                width,
+            ),
         ));
         row_idx += 1;
     }
@@ -190,6 +200,7 @@ fn header_spans<'a>(
     author: &str,
     author_color: Color,
     created_at: Option<&str>,
+    saved: bool,
     surface: Color,
     width: usize,
 ) -> Vec<Span<'a>> {
@@ -204,7 +215,21 @@ fn header_spans<'a>(
         right_parts.push("thread root".to_string());
     }
     let right = right_parts.join(" · ");
-    let right_chars = right.chars().count();
+    let saved_prefix = if saved && !right.is_empty() {
+        " · "
+    } else {
+        ""
+    };
+    let saved_width = if saved {
+        SAVED_MARKER.chars().count()
+    } else {
+        0
+    };
+    let right_chars = right
+        .chars()
+        .count()
+        .saturating_add(saved_prefix.chars().count())
+        .saturating_add(saved_width);
 
     let mut spans = vec![Span::styled(
         author_text,
@@ -217,13 +242,25 @@ fn header_spans<'a>(
             " ".repeat(pad),
             theme::message_meta_on(surface),
         ));
-        spans.push(Span::styled(right, theme::message_meta_on(surface)));
-    } else if !right.is_empty() {
+        if !right.is_empty() {
+            spans.push(Span::styled(right, theme::message_meta_on(surface)));
+        }
+        if saved {
+            spans.push(Span::styled(saved_prefix, theme::message_meta_on(surface)));
+            spans.push(Span::styled(SAVED_MARKER, theme::message_saved_on(surface)));
+        }
+    } else if !right.is_empty() || saved {
         // Not enough room to right-align — fall back to inline.
-        spans.push(Span::styled(
-            format!(" · {right}"),
-            theme::message_meta_on(surface),
-        ));
+        if !right.is_empty() {
+            spans.push(Span::styled(
+                format!(" · {right}"),
+                theme::message_meta_on(surface),
+            ));
+        }
+        if saved {
+            spans.push(Span::styled(saved_prefix, theme::message_meta_on(surface)));
+            spans.push(Span::styled(SAVED_MARKER, theme::message_saved_on(surface)));
+        }
     }
     spans
 }

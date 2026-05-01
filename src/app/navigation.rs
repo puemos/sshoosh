@@ -5,6 +5,10 @@ impl App {
             self.move_search(delta);
             return;
         }
+        if self.ui.route == Route::Saved && self.ui.active_pane == ActivePane::Detail {
+            self.move_saved(delta);
+            return;
+        }
         if self.ui.active_pane == ActivePane::Detail {
             self.move_detail(delta);
         } else {
@@ -45,6 +49,14 @@ impl App {
         self.ui.search_selected = clamp_index(self.ui.search_selected, delta, len);
     }
 
+    pub(crate) fn move_saved(&mut self, delta: isize) {
+        let len = self.snapshot.saved_messages.len();
+        if len == 0 {
+            return;
+        }
+        self.ui.saved_selected = clamp_index(self.ui.saved_selected, delta, len);
+    }
+
     pub(crate) fn reset_history_limit(&mut self) {
         self.history_limit = DEFAULT_HISTORY_LIMIT;
     }
@@ -75,6 +87,7 @@ impl App {
                 );
             }
         }
+        rows.push(WorkspaceRow::Saved);
         if self.snapshot.dm_sidebar.is_empty() {
             rows.extend(
                 self.snapshot
@@ -131,6 +144,7 @@ impl App {
                                 })
                         })
                 }),
+            _ if matches!(self.ui.route, Route::Saved) => Some(WorkspaceRow::Saved),
             _ => self
                 .snapshot
                 .selected_channel_id
@@ -187,6 +201,14 @@ impl App {
                 }
                 self.refresh_requested = true;
             }
+            WorkspaceRow::Saved => {
+                self.ui.route = Route::Saved;
+                self.ui.active_pane = ActivePane::Detail;
+                self.snapshot.selected_thread_id = None;
+                self.snapshot.selected_conversation_id = None;
+                self.reset_detail_scroll();
+                self.actions.push(Action::ListSaved);
+            }
             WorkspaceRow::Dm {
                 conversation_id,
                 username,
@@ -214,10 +236,16 @@ impl App {
             self.activate_search_result();
             return;
         }
+        if self.ui.route == Route::Saved && self.ui.active_pane == ActivePane::Detail {
+            self.activate_saved_result();
+            return;
+        }
         match self.ui.active_pane {
             ActivePane::Detail => self.enter_compose(""),
             ActivePane::Rail => {
                 if matches!(self.ui.route, Route::Dms) {
+                    self.ui.active_pane = ActivePane::Detail;
+                } else if matches!(self.ui.route, Route::Saved) {
                     self.ui.active_pane = ActivePane::Detail;
                 } else if self.ui.threads_collapsed {
                     self.ui.threads_collapsed = false;
@@ -263,6 +291,22 @@ impl App {
         }
     }
 
+    pub(crate) fn activate_saved_result(&mut self) {
+        let Some(item) = self
+            .snapshot
+            .saved_messages
+            .get(self.ui.saved_selected)
+            .cloned()
+        else {
+            return;
+        };
+        if let (Some(channel_id), Some(thread_id)) = (item.channel_id, item.thread_id) {
+            self.select_thread(channel_id, thread_id);
+        } else if let Some(conversation_id) = item.conversation_id {
+            self.select_conversation(conversation_id);
+        }
+    }
+
     pub(crate) fn navigate_left(&mut self) {
         match self.ui.active_pane {
             ActivePane::Detail => {
@@ -287,6 +331,9 @@ impl App {
     pub(crate) fn navigate_right(&mut self) {
         match self.ui.active_pane {
             ActivePane::Detail => {}
+            ActivePane::Rail if matches!(self.ui.route, Route::Saved) => {
+                self.ui.active_pane = ActivePane::Detail;
+            }
             ActivePane::List => self.ui.active_pane = ActivePane::Detail,
             ActivePane::Rail if matches!(self.ui.route, Route::Dms) => {
                 self.ui.active_pane = ActivePane::Detail;

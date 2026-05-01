@@ -115,9 +115,6 @@ pub enum Action {
     SetThreadMuted {
         ttl_hours: Option<i64>,
     },
-    SetThreadSaved {
-        saved: bool,
-    },
     EditComment {
         index: i64,
         body: String,
@@ -135,7 +132,8 @@ pub enum Action {
     SetDmMuted {
         ttl_hours: Option<i64>,
     },
-    SetDmSaved {
+    SetMessageSaved {
+        index: i64,
         saved: bool,
     },
     React {
@@ -162,6 +160,7 @@ pub enum Action {
     Search {
         query: String,
     },
+    ListSaved,
     LoadMore,
     LoadOlder,
 }

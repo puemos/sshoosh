@@ -265,6 +265,34 @@ impl ServerState {
         soft_delete_comment(self.db.write_pool(), actor_id, thread_id, obj_index).await
     }
 
+    pub async fn set_comment_saved(
+        &self,
+        actor_id: &str,
+        thread_id: &str,
+        obj_index: i64,
+        saved: bool,
+    ) -> anyhow::Result<()> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let thread = load_thread_meta_tx(&mut tx, thread_id).await?;
+        ensure_can_view_channel(&mut tx, actor_id, &thread.channel_id).await?;
+        let comment = load_comment_meta_tx(&mut tx, thread_id, obj_index).await?;
+        set_saved_message_tx(&mut tx, actor_id, "comment", &comment.id, saved).await?;
+        insert_audit(
+            &mut tx,
+            Some(actor_id),
+            if saved {
+                "message.saved"
+            } else {
+                "message.unsaved"
+            },
+            Some(&comment.id),
+            serde_json::json!({"source_kind": "comment", "thread_id": thread_id}),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn edit_dm(
         &self,
         actor_id: &str,
@@ -289,6 +317,33 @@ impl ServerState {
         obj_index: i64,
     ) -> anyhow::Result<()> {
         soft_delete_dm(self.db.write_pool(), actor_id, conversation_id, obj_index).await
+    }
+
+    pub async fn set_dm_message_saved(
+        &self,
+        actor_id: &str,
+        conversation_id: &str,
+        obj_index: i64,
+        saved: bool,
+    ) -> anyhow::Result<()> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let message =
+            load_dm_message_meta_tx(&mut tx, actor_id, conversation_id, obj_index).await?;
+        set_saved_message_tx(&mut tx, actor_id, "dm", &message.id, saved).await?;
+        insert_audit(
+            &mut tx,
+            Some(actor_id),
+            if saved {
+                "message.saved"
+            } else {
+                "message.unsaved"
+            },
+            Some(&message.id),
+            serde_json::json!({"source_kind": "dm", "conversation_id": conversation_id}),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn set_conversation_muted(
@@ -344,4 +399,46 @@ impl ServerState {
     ) -> anyhow::Result<SearchPage> {
         search_visible(self.db.read_pool(), actor_id, query, limit).await
     }
+
+    pub async fn saved_messages_page(
+        &self,
+        actor_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
+        load_saved_messages(self.db.read_pool(), actor_id, limit).await
+    }
+}
+
+pub(crate) async fn set_saved_message_tx(
+    mut tx: &mut DbTransaction,
+    account_id: &str,
+    source_kind: &str,
+    source_id: &str,
+    saved: bool,
+) -> anyhow::Result<()> {
+    if saved {
+        query(
+            "INSERT INTO saved_messages (account_id, source_kind, source_id, saved_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(account_id, source_kind, source_id)
+             DO UPDATE SET saved_at = excluded.saved_at",
+        )
+        .bind(account_id)
+        .bind(source_kind)
+        .bind(source_id)
+        .bind(now())
+        .execute(&mut tx)
+        .await?;
+    } else {
+        query(
+            "DELETE FROM saved_messages
+             WHERE account_id = ? AND source_kind = ? AND source_id = ?",
+        )
+        .bind(account_id)
+        .bind(source_kind)
+        .bind(source_id)
+        .execute(&mut tx)
+        .await?;
+    }
+    Ok(())
 }

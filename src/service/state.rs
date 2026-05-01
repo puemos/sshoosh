@@ -381,6 +381,8 @@ impl ServerState {
             search_query: None,
             search_results: Vec::new(),
             search_has_more: false,
+            saved_messages: Vec::new(),
+            saved_has_more: false,
             notifications,
             notification_unread_count,
             mention_unread_count,

@@ -27,6 +27,8 @@ const MIGRATION_PENDING_USERNAME: &str =
     include_str!("../migrations/20260430000001_pending_username.sql");
 const MIGRATION_REMOTE_SECURITY: &str =
     include_str!("../migrations/20260430000001_remote_security.sql");
+const MIGRATION_SAVED_MESSAGES: &str =
+    include_str!("../migrations/20260501000000_saved_messages.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -289,6 +291,7 @@ impl Database {
                 MIGRATION_PENDING_USERNAME,
             ),
             ("20260430000001_remote_security", MIGRATION_REMOTE_SECURITY),
+            ("20260501000000_saved_messages", MIGRATION_SAVED_MESSAGES),
         ] {
             let exists: Option<String> =
                 query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")

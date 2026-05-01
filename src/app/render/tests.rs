@@ -213,6 +213,7 @@ mod cases {
             "owner",
             Some("2020-01-02T03:04:00Z"),
             Some("2020-01-02T03:05:00Z"),
+            false,
             &[ReactionSummary {
                 emoji: "👍".to_string(),
                 count: 2,
@@ -1097,6 +1098,7 @@ mod cases {
                     body: "Hello owner".to_string(),
                     created_at: "2020-01-02T03:04:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
                 ConversationMessage {
@@ -1106,6 +1108,7 @@ mod cases {
                     body: "Hi Alice".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
             ],
@@ -1172,6 +1175,7 @@ mod cases {
                 body: "Looks good".to_string(),
                 created_at: "2020-01-02T03:05:00Z".to_string(),
                 edited_at: None,
+                saved_at: None,
                 reactions: Vec::new(),
             }],
             selected_channel_id: Some("channel".to_string()),
@@ -1240,6 +1244,7 @@ mod cases {
                     body: "Looks good https://example.com".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: Some("2020-01-02T03:06:00Z".to_string()),
+                    saved_at: None,
                     reactions: vec![ReactionSummary {
                         emoji: "👍".to_string(),
                         count: 2,
@@ -1253,6 +1258,7 @@ mod cases {
                     body: "I would keep normal comments quieter.".to_string(),
                     created_at: "2020-01-02T03:07:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
                 CommentItem {
@@ -1262,6 +1268,7 @@ mod cases {
                     body: "Error from provider: 13 request validation errors".to_string(),
                     created_at: "2020-01-02T03:08:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
             ],
@@ -1716,6 +1723,8 @@ mod cases {
         let mut ui = UiState::default();
         ui.comment_menu = Some(state::CommentMenuState {
             target: EditableMessageTarget::Comment(7),
+            can_edit_delete: true,
+            saved: false,
             x: 4,
             y: 3,
         });
@@ -1727,13 +1736,16 @@ mod cases {
         let buffer = terminal.backend().buffer();
         let (title_x, title_y) =
             position_for_text(buffer, width, height, "Message").expect("menu title");
+        let (save_x, save_y) = position_for_text(buffer, width, height, "Save").expect("save row");
         let (edit_x, edit_y) = position_for_text(buffer, width, height, "Edit").expect("edit row");
         let (delete_x, delete_y) =
             position_for_text(buffer, width, height, "Delete").expect("delete row");
 
+        assert_eq!(save_x, title_x);
         assert_eq!(edit_x, title_x);
         assert_eq!(delete_x, title_x);
-        assert!(edit_y >= title_y.saturating_add(2));
+        assert!(save_y >= title_y.saturating_add(2));
+        assert_eq!(edit_y, save_y.saturating_add(1));
         assert_eq!(delete_y, edit_y.saturating_add(1));
 
         let edit_region = ui
@@ -1992,6 +2004,7 @@ mod cases {
                     body: "First message".to_string(),
                     created_at: "2020-01-02T03:04:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
                 ConversationMessage {
@@ -2001,6 +2014,7 @@ mod cases {
                     body: "Second message".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
                 ConversationMessage {
@@ -2010,6 +2024,7 @@ mod cases {
                     body: "Third message".to_string(),
                     created_at: "2020-01-02T03:06:00Z".to_string(),
                     edited_at: None,
+                    saved_at: None,
                     reactions: Vec::new(),
                 },
             ],

@@ -232,9 +232,10 @@ pub(crate) async fn load_comments(
 ) -> anyhow::Result<(Vec<CommentItem>, bool)> {
     let limit = limit.clamp(1, MAX_HISTORY_LIMIT);
     let rows = query(
-        "SELECT id, author, obj_index, body, created_at, edited_at, reactions
+        "SELECT id, author, obj_index, body, created_at, edited_at, saved_at, reactions
          FROM (
            SELECT c.id, a.username AS author, c.obj_index, c.body, c.created_at, c.edited_at,
+                  sm.saved_at,
                   COALESCE((
                     SELECT group_concat(emoji || char(31) || count || char(31) || reacted_by_me, char(30))
                     FROM (
@@ -249,12 +250,15 @@ pub(crate) async fn load_comments(
                   ), '') AS reactions
            FROM comments c
            JOIN accounts a ON a.id = c.author_account_id
+           LEFT JOIN saved_messages sm
+             ON sm.account_id = ? AND sm.source_kind = 'comment' AND sm.source_id = c.id
            WHERE c.thread_id = ? AND c.deleted_at IS NULL
            ORDER BY c.obj_index DESC
            LIMIT ?
          ) recent
         ORDER BY obj_index ASC",
     )
+    .bind(account_id)
     .bind(account_id)
     .bind(thread_id)
     .bind(limit.saturating_add(1))
@@ -269,6 +273,7 @@ pub(crate) async fn load_comments(
             body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
+            saved_at: row.get("saved_at"),
             reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
         })
         .collect();
@@ -417,9 +422,10 @@ pub(crate) async fn load_conversation_messages(
 ) -> anyhow::Result<(Vec<ConversationMessage>, bool)> {
     let limit = limit.clamp(1, MAX_HISTORY_LIMIT);
     let rows = query(
-        "SELECT id, author, obj_index, body, created_at, edited_at, reactions
+        "SELECT id, author, obj_index, body, created_at, edited_at, saved_at, reactions
          FROM (
            SELECT m.id, a.username AS author, m.obj_index, m.body, m.created_at, m.edited_at,
+                  sm.saved_at,
                   COALESCE((
                     SELECT group_concat(emoji || char(31) || count || char(31) || reacted_by_me, char(30))
                     FROM (
@@ -434,12 +440,15 @@ pub(crate) async fn load_conversation_messages(
                   ), '') AS reactions
            FROM conversation_messages m
            JOIN accounts a ON a.id = m.author_account_id
+           LEFT JOIN saved_messages sm
+             ON sm.account_id = ? AND sm.source_kind = 'dm' AND sm.source_id = m.id
            WHERE m.conversation_id = ? AND m.deleted_at IS NULL
            ORDER BY m.obj_index DESC
            LIMIT ?
          ) recent
         ORDER BY obj_index ASC",
     )
+    .bind(account_id)
     .bind(account_id)
     .bind(conversation_id)
     .bind(limit.saturating_add(1))
@@ -454,6 +463,7 @@ pub(crate) async fn load_conversation_messages(
             body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
+            saved_at: row.get("saved_at"),
             reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
         })
         .collect();
@@ -462,6 +472,101 @@ pub(crate) async fn load_conversation_messages(
         messages.remove(0);
     }
     Ok((messages, has_more))
+}
+
+pub(crate) async fn load_saved_messages(
+    pool: &Database,
+    account_id: &str,
+    limit: i64,
+) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
+    let limit = limit.clamp(1, 500);
+    let fetch_limit = limit.saturating_add(1);
+    let rows = query(
+        "SELECT kind, source_id, author, body, source_label, saved_at, created_at,
+                channel_id, thread_id, conversation_id
+         FROM (
+           SELECT 'comment' AS kind,
+                  sm.source_id,
+                  a.username AS author,
+                  cm.body,
+                  '#' || ch.slug || ' · ' || t.title AS source_label,
+                  sm.saved_at,
+                  cm.created_at,
+                  ch.id AS channel_id,
+                  t.id AS thread_id,
+                  NULL AS conversation_id
+           FROM saved_messages sm
+           JOIN comments cm ON cm.id = sm.source_id
+           JOIN threads t ON t.id = cm.thread_id
+           JOIN channels ch ON ch.id = cm.channel_id
+           JOIN accounts a ON a.id = cm.author_account_id
+           WHERE sm.account_id = ?
+             AND sm.source_kind = 'comment'
+             AND cm.deleted_at IS NULL
+             AND t.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM channel_members m
+               WHERE m.channel_id = cm.channel_id AND m.account_id = ?
+             )
+           UNION ALL
+           SELECT 'dm' AS kind,
+                  sm.source_id,
+                  a.username AS author,
+                  dm.body,
+                  'DM @' || peer.username AS source_label,
+                  sm.saved_at,
+                  dm.created_at,
+                  NULL AS channel_id,
+                  NULL AS thread_id,
+                  conv.id AS conversation_id
+           FROM saved_messages sm
+           JOIN conversation_messages dm ON dm.id = sm.source_id
+           JOIN conversations conv ON conv.id = dm.conversation_id
+           JOIN accounts a ON a.id = dm.author_account_id
+           JOIN conversation_members me
+             ON me.conversation_id = conv.id AND me.account_id = ?
+           JOIN conversation_members other
+             ON other.conversation_id = conv.id AND other.account_id <> ?
+           JOIN accounts peer ON peer.id = other.account_id
+           WHERE sm.account_id = ?
+             AND sm.source_kind = 'dm'
+             AND dm.deleted_at IS NULL
+         )
+         ORDER BY saved_at DESC, source_id DESC
+         LIMIT ?",
+    )
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(fetch_limit)
+    .fetch_all(pool)
+    .await?;
+    let mut items: Vec<_> = rows
+        .into_iter()
+        .map(|row| {
+            let kind = match row.get::<String>("kind").as_str() {
+                "comment" => SavedMessageKind::Comment,
+                _ => SavedMessageKind::Dm,
+            };
+            SavedMessageItem {
+                kind,
+                source_id: row.get("source_id"),
+                author: row.get("author"),
+                body: sanitize_stored_text(&row.get::<String>("body")),
+                source_label: sanitize_single_line_text(&row.get::<String>("source_label")),
+                saved_at: row.get("saved_at"),
+                created_at: row.get("created_at"),
+                channel_id: row.get("channel_id"),
+                thread_id: row.get("thread_id"),
+                conversation_id: row.get("conversation_id"),
+            }
+        })
+        .collect();
+    let has_more = items.len() > limit as usize;
+    items.truncate(limit as usize);
+    Ok((items, has_more))
 }
 
 pub(crate) async fn load_account_tx(

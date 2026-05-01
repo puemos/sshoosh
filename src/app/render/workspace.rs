@@ -61,6 +61,17 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         }
     }
     items.push(ListItem::new(""));
+    let saved_selected = matches!(&ui.route, Route::Saved);
+    let saved_row = items.len() as u16;
+    if saved_selected {
+        selected_y = Some(saved_row);
+    }
+    items.push(ListItem::new(Line::from(Span::styled(
+        "★ Saved",
+        workspace_label_style(saved_selected, 0),
+    ))));
+    row_hits.push((saved_row, HitTarget::WorkspaceSaved));
+    items.push(ListItem::new(""));
     items.push(ListItem::new(Line::from(Span::styled(
         "DMs",
         theme::section_header(matches!(&ui.route, Route::Dms)),
@@ -171,9 +182,6 @@ pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String 
     if thread.muted_until.is_some() {
         out.push_str(" muted");
     }
-    if thread.saved_at.is_some() {
-        out.push_str(" saved");
-    }
     if !thread.reactions.is_empty() {
         out.push(' ');
         out.push_str(&compact_reaction_summary(&thread.reactions));
@@ -199,9 +207,6 @@ pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::DmSidebar
     });
     if dm.muted_until.is_some() {
         out.push_str(" muted");
-    }
-    if dm.saved_at.is_some() {
-        out.push_str(" saved");
     }
     out
 }

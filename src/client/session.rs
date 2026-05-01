@@ -412,6 +412,30 @@ impl ClientSession {
             .await
     }
 
+    pub async fn set_comment_saved(
+        &self,
+        actor_id: &str,
+        thread_id: &str,
+        index: i64,
+        saved: bool,
+    ) -> anyhow::Result<()> {
+        self.state
+            .set_comment_saved(actor_id, thread_id, index, saved)
+            .await
+    }
+
+    pub async fn set_dm_message_saved(
+        &self,
+        actor_id: &str,
+        conversation_id: &str,
+        index: i64,
+        saved: bool,
+    ) -> anyhow::Result<()> {
+        self.state
+            .set_dm_message_saved(actor_id, conversation_id, index, saved)
+            .await
+    }
+
     pub async fn set_conversation_saved(
         &self,
         actor_id: &str,
@@ -512,5 +536,13 @@ impl ClientSession {
         limit: i64,
     ) -> anyhow::Result<SearchPage> {
         self.state.search_page(account_id, query, limit).await
+    }
+
+    pub async fn saved_messages_page(
+        &self,
+        account_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
+        self.state.saved_messages_page(account_id, limit).await
     }
 }

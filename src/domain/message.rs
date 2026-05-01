@@ -35,6 +35,7 @@ pub struct CommentItem {
     pub body: String,
     pub created_at: String,
     pub edited_at: Option<String>,
+    pub saved_at: Option<String>,
     pub reactions: Vec<ReactionSummary>,
 }
 
@@ -85,7 +86,28 @@ pub struct ConversationMessage {
     pub body: String,
     pub created_at: String,
     pub edited_at: Option<String>,
+    pub saved_at: Option<String>,
     pub reactions: Vec<ReactionSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SavedMessageKind {
+    Comment,
+    Dm,
+}
+
+#[derive(Clone, Debug)]
+pub struct SavedMessageItem {
+    pub kind: SavedMessageKind,
+    pub source_id: String,
+    pub author: String,
+    pub body: String,
+    pub source_label: String,
+    pub saved_at: String,
+    pub created_at: String,
+    pub channel_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -103,6 +125,8 @@ pub struct Snapshot {
     pub search_query: Option<String>,
     pub search_results: Vec<SearchResult>,
     pub search_has_more: bool,
+    pub saved_messages: Vec<SavedMessageItem>,
+    pub saved_has_more: bool,
     pub notifications: Vec<NotificationSummary>,
     pub notification_unread_count: i64,
     pub mention_unread_count: i64,

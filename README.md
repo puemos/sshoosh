@@ -246,8 +246,8 @@ Admin and lifecycle commands:
 /thread unpin
 /thread mute [hours]
 /thread unmute
-/thread save
-/thread unsave
+/save index
+/unsave index
 /reaction add emoji [comment-or-message-index]
 /reaction remove emoji [comment-or-message-index]
 /notification mentions

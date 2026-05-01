@@ -137,8 +137,10 @@ impl App {
             HitTarget::WorkspaceScroll
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
+            | HitTarget::WorkspaceSaved
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll
+            | HitTarget::SavedResult(_)
             | HitTarget::EditableMessage(_)
             | HitTarget::ReactionChip { .. }
             | HitTarget::ReactionAdd { .. }
@@ -257,6 +259,7 @@ impl App {
                     self.select_thread(channel_id, thread_id);
                 }
             }
+            HitTarget::WorkspaceSaved => self.apply_workspace_row(WorkspaceRow::Saved),
             HitTarget::WorkspaceDm {
                 conversation_id: Some(conversation_id),
                 ..
@@ -267,6 +270,11 @@ impl App {
             } => self.actions.push(Action::OpenDm { target: username }),
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
             HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
+            HitTarget::SavedResult(index) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.saved_selected = index;
+                self.activate_saved_result();
+            }
             HitTarget::EditableMessage(_) => self.ui.active_pane = ActivePane::Detail,
             HitTarget::ReactionChip {
                 target,
@@ -337,6 +345,13 @@ impl App {
             HitTarget::CommentMenuDelete(target) => {
                 self.ui.comment_menu = None;
                 self.ui.comment_delete = Some(CommentDeleteState { target });
+            }
+            HitTarget::CommentMenuSave { target, saved } => {
+                self.close_comment_overlays();
+                self.actions.push(Action::SetMessageSaved {
+                    index: target.index(),
+                    saved,
+                });
             }
             HitTarget::CommentDeleteConfirm(target) => {
                 self.close_comment_overlays();
@@ -609,13 +624,11 @@ impl App {
             self.close_comment_overlays();
             return;
         };
-        if !self.is_own_message(target) {
-            self.close_comment_overlays();
-            return;
-        }
         self.ui.comment_delete = None;
         self.ui.comment_menu = Some(CommentMenuState {
             target,
+            can_edit_delete: self.is_own_message(target),
+            saved: self.is_message_saved(target),
             x: mouse.column,
             y: mouse.row,
         });
@@ -723,6 +736,23 @@ impl App {
                 .iter()
                 .find(|message| message.obj_index == index)
                 .is_some_and(|message| self.is_current_user(&message.author)),
+        }
+    }
+
+    pub(crate) fn is_message_saved(&self, target: EditableMessageTarget) -> bool {
+        match target {
+            EditableMessageTarget::Comment(index) => self
+                .snapshot
+                .comments
+                .iter()
+                .find(|comment| comment.obj_index == index)
+                .is_some_and(|comment| comment.saved_at.is_some()),
+            EditableMessageTarget::Dm(index) => self
+                .snapshot
+                .conversation_messages
+                .iter()
+                .find(|message| message.obj_index == index)
+                .is_some_and(|message| message.saved_at.is_some()),
         }
     }
 

@@ -506,9 +506,9 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .await
         .expect("unarchive thread");
     state
-        .set_thread_saved(&alice.id, &thread_id, true)
+        .set_comment_saved(&owner.id, &thread_id, 1, true)
         .await
-        .expect("save thread");
+        .expect("save comment");
     state
         .set_thread_muted(&alice.id, &thread_id, Some(1))
         .await
@@ -541,9 +541,9 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .await
         .expect("edit dm");
     state
-        .set_conversation_saved(&owner.id, &dm_id, true)
+        .set_dm_message_saved(&owner.id, &dm_id, 1, true)
         .await
-        .expect("save dm");
+        .expect("save dm message");
     state
         .set_conversation_muted(&owner.id, &dm_id, Some(1))
         .await
@@ -557,6 +557,18 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
             .iter()
             .any(|result| result.conversation_id.as_deref() == Some(&dm_id))
     );
+    let saved_messages = state
+        .saved_messages_page(&owner.id, 20)
+        .await
+        .expect("saved messages")
+        .0;
+    assert_eq!(saved_messages.len(), 2);
+    assert!(saved_messages.iter().any(|item| {
+        item.thread_id.as_deref() == Some(&thread_id) && item.body == "Edited searchable reply"
+    }));
+    assert!(saved_messages.iter().any(|item| {
+        item.conversation_id.as_deref() == Some(&dm_id) && item.body == "Private edited searchable"
+    }));
 
     state
         .delete_comment(&owner.id, &thread_id, 1)
@@ -566,6 +578,12 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .delete_dm(&owner.id, &dm_id, 1)
         .await
         .expect("delete dm");
+    let saved_after_delete = state
+        .saved_messages_page(&owner.id, 20)
+        .await
+        .expect("saved messages after delete")
+        .0;
+    assert!(saved_after_delete.is_empty());
     state
         .delete_thread(&owner.id, &thread_id)
         .await

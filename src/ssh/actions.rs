@@ -329,16 +329,16 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                 .map(|_| ActionResult::message(mute_message(ttl_hours, "Thread"))),
             _ => Err(anyhow::anyhow!("No thread or DM selected")),
         },
-        Action::SetThreadSaved { saved } => match (conversation_id, thread_id) {
+        Action::SetMessageSaved { index, saved } => match (conversation_id, thread_id) {
             (Some(conversation_id), _) => session
-                .set_conversation_saved(&account_id, &conversation_id, saved)
+                .set_dm_message_saved(&account_id, &conversation_id, index, saved)
                 .await
-                .map(|_| ActionResult::message(saved_message(saved, "DM"))),
+                .map(|_| ActionResult::message(saved_message(saved, "Message"))),
             (None, Some(thread_id)) => session
-                .set_thread_saved(&account_id, &thread_id, saved)
+                .set_comment_saved(&account_id, &thread_id, index, saved)
                 .await
-                .map(|_| ActionResult::message(saved_message(saved, "Thread"))),
-            _ => Err(anyhow::anyhow!("No thread or DM selected")),
+                .map(|_| ActionResult::message(saved_message(saved, "Message"))),
+            _ => Err(anyhow::anyhow!("No message selected")),
         },
         Action::EditComment { index, body } => match thread_id {
             Some(thread_id) => session
@@ -373,13 +373,6 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                 .set_conversation_muted(&account_id, &conversation_id, ttl_hours)
                 .await
                 .map(|_| ActionResult::message(mute_message(ttl_hours, "DM"))),
-            None => Err(anyhow::anyhow!("No DM selected")),
-        },
-        Action::SetDmSaved { saved } => match conversation_id {
-            Some(conversation_id) => session
-                .set_conversation_saved(&account_id, &conversation_id, saved)
-                .await
-                .map(|_| ActionResult::message(saved_message(saved, "DM"))),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::React { emoji, index } => {
@@ -457,35 +450,67 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) {
                 Err(err) => Err(err),
             }
         }
+        Action::ListSaved => {
+            let limit = app.lock().await.reset_saved_limit();
+            match session.saved_messages_page(&account_id, limit).await {
+                Ok((messages, has_more)) => {
+                    app.lock()
+                        .await
+                        .set_saved_messages(messages, has_more, true);
+                    Ok(ActionResult::message("Saved messages loaded"))
+                }
+                Err(err) => Err(err),
+            }
+        }
         Action::LoadMore => {
-            let search_request = {
+            let saved_request = {
                 let mut app = app.lock().await;
-                if let Some(query) = app.search_query() {
-                    let limit = app.increase_search_limit();
-                    Some((query, limit))
+                if app.saved_active() {
+                    Some(app.increase_saved_limit())
                 } else {
                     None
                 }
             };
-            if let Some((query, limit)) = search_request {
-                match session.search_page(&account_id, &query, limit).await {
-                    Ok(page) => {
-                        app.lock().await.set_search_results(
-                            query,
-                            page.results,
-                            page.has_more,
-                            false,
-                        );
-                        Ok(ActionResult::message("Loaded more results"))
+            if let Some(limit) = saved_request {
+                match session.saved_messages_page(&account_id, limit).await {
+                    Ok((messages, has_more)) => {
+                        app.lock()
+                            .await
+                            .set_saved_messages(messages, has_more, false);
+                        Ok(ActionResult::message("Loaded more saved messages"))
                     }
                     Err(err) => Err(err),
                 }
             } else {
-                let limit = app.lock().await.increase_history_limit();
-                app.lock().await.force_full_repaint();
-                Ok(ActionResult::message(format!(
-                    "Loaded latest {limit} history items"
-                )))
+                let search_request = {
+                    let mut app = app.lock().await;
+                    if let Some(query) = app.search_query() {
+                        let limit = app.increase_search_limit();
+                        Some((query, limit))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((query, limit)) = search_request {
+                    match session.search_page(&account_id, &query, limit).await {
+                        Ok(page) => {
+                            app.lock().await.set_search_results(
+                                query,
+                                page.results,
+                                page.has_more,
+                                false,
+                            );
+                            Ok(ActionResult::message("Loaded more results"))
+                        }
+                        Err(err) => Err(err),
+                    }
+                } else {
+                    let limit = app.lock().await.increase_history_limit();
+                    app.lock().await.force_full_repaint();
+                    Ok(ActionResult::message(format!(
+                        "Loaded latest {limit} history items"
+                    )))
+                }
             }
         }
         Action::LoadOlder => {

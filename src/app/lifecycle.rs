@@ -38,6 +38,7 @@ impl App {
             emitted_pointer_shape: PointerShape::Default,
             history_limit: DEFAULT_HISTORY_LIMIT,
             search_limit: DEFAULT_SEARCH_LIMIT,
+            saved_limit: DEFAULT_SEARCH_LIMIT,
             seen_notification_ids,
             pending_terminal_notifications: VecDeque::new(),
             emitted_terminal_title: None,
@@ -55,6 +56,8 @@ impl App {
         let search_query = self.snapshot.search_query.clone();
         let search_results = self.snapshot.search_results.clone();
         let search_has_more = self.snapshot.search_has_more;
+        let saved_messages = self.snapshot.saved_messages.clone();
+        let saved_has_more = self.snapshot.saved_has_more;
         self.snapshot = self
             .client
             .snapshot(
@@ -77,6 +80,13 @@ impl App {
                 .ui
                 .search_selected
                 .min(self.snapshot.search_results.len().saturating_sub(1));
+        } else if self.ui.route == Route::Saved {
+            self.snapshot.saved_messages = saved_messages;
+            self.snapshot.saved_has_more = saved_has_more;
+            self.ui.saved_selected = self
+                .ui
+                .saved_selected
+                .min(self.snapshot.saved_messages.len().saturating_sub(1));
         }
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
@@ -176,6 +186,10 @@ impl App {
             .flatten()
     }
 
+    pub fn saved_active(&self) -> bool {
+        self.ui.route == Route::Saved
+    }
+
     pub fn reset_search_limit(&mut self) -> i64 {
         self.search_limit = DEFAULT_SEARCH_LIMIT;
         self.search_limit
@@ -187,6 +201,19 @@ impl App {
             .saturating_add(SEARCH_PAGE_SIZE)
             .min(MAX_SEARCH_LIMIT);
         self.search_limit
+    }
+
+    pub fn reset_saved_limit(&mut self) -> i64 {
+        self.saved_limit = DEFAULT_SEARCH_LIMIT;
+        self.saved_limit
+    }
+
+    pub fn increase_saved_limit(&mut self) -> i64 {
+        self.saved_limit = self
+            .saved_limit
+            .saturating_add(SEARCH_PAGE_SIZE)
+            .min(MAX_SEARCH_LIMIT);
+        self.saved_limit
     }
 
     pub fn increase_history_limit(&mut self) -> i64 {
@@ -265,6 +292,28 @@ impl App {
                 .ui
                 .search_selected
                 .min(self.snapshot.search_results.len().saturating_sub(1));
+        }
+    }
+
+    pub fn set_saved_messages(
+        &mut self,
+        messages: Vec<SavedMessageItem>,
+        has_more: bool,
+        reset_selection: bool,
+    ) {
+        self.snapshot.saved_messages = messages;
+        self.snapshot.saved_has_more = has_more;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.route = Route::Saved;
+        self.ui.active_pane = ActivePane::Detail;
+        if reset_selection {
+            self.ui.saved_selected = 0;
+            self.reset_detail_scroll();
+        } else {
+            self.ui.saved_selected = self
+                .ui
+                .saved_selected
+                .min(self.snapshot.saved_messages.len().saturating_sub(1));
         }
     }
 

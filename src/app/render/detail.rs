@@ -37,6 +37,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         draw_search_detail(frame, area, snapshot, ui);
         return;
     }
+    if matches!(ui.route, Route::Saved) {
+        draw_saved_detail(frame, area, snapshot, ui);
+        return;
+    }
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
     let selected = snapshot
@@ -108,6 +112,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &thread.author,
                 Some(&thread.created_at),
                 thread.edited_at.as_deref(),
+                false,
                 &thread.reactions,
                 Some(ReactionTarget::ThreadRoot),
                 &thread.body,
@@ -165,6 +170,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &comment.author,
                 Some(&comment.created_at),
                 comment.edited_at.as_deref(),
+                comment.saved_at.is_some(),
                 &comment.reactions,
                 Some(ReactionTarget::Comment(comment.obj_index)),
                 &comment.body,
@@ -274,6 +280,82 @@ pub(crate) fn draw_search_detail(
         }
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+}
+
+pub(crate) fn draw_saved_detail(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
+    frame.render_widget(Block::default().style(theme::panel()), area);
+    let area = pane_inner(area);
+    draw_detail_header(frame, area, "Saved", ui);
+    let messages_area = pane_scroll_area(area);
+    let mut items = Vec::new();
+    let mut row_hits = Vec::new();
+    if snapshot.saved_messages.is_empty() {
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_state_lines(
+                "No saved messages",
+                "Use /save #n or right-click a message",
+                "★ Saved",
+            ),
+        );
+        return;
+    }
+
+    let row_width = messages_area.width as usize;
+    for (idx, item) in snapshot.saved_messages.iter().enumerate() {
+        let selected = idx == ui.saved_selected;
+        let style = if selected {
+            theme::title()
+        } else {
+            theme::message_body()
+        };
+        let kind = match item.kind {
+            SavedMessageKind::Comment => "comment",
+            SavedMessageKind::Dm => "dm",
+        };
+        let saved_at = format_human_timestamp(&item.saved_at);
+        let created_at = format_human_timestamp(&item.created_at);
+        let body = sanitize_terminal_visible_text(&item.body);
+        let snippet = truncate_text(body, row_width.saturating_sub(2));
+        let row = items.len() as u16;
+        let item = ListItem::new(vec![
+            Line::from(vec![
+                Span::styled(format!("{:<8}", kind), theme::muted()),
+                Span::styled(format!("@{}", item.author), style),
+                Span::styled(format!(" · {}", item.source_label), theme::muted()),
+            ]),
+            Line::from(vec![
+                Span::styled(format!("saved {saved_at} · {created_at}  "), theme::muted()),
+                Span::raw(snippet),
+            ]),
+            Line::from(""),
+        ]);
+        let height = item.height() as u16;
+        items.push(item);
+        for offset in 0..height {
+            row_hits.push((row.saturating_add(offset), HitTarget::SavedResult(idx)));
+        }
+    }
+    if snapshot.saved_has_more {
+        items.push(history_prompt("More saved messages available. Use /more."));
+    }
+    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+    register_scroll_hits(
+        ui,
+        messages_area,
+        HitTarget::DetailScroll,
+        row_hits,
+        ui.detail_scroll.offset().y,
+    );
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
 }
 
@@ -508,6 +590,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 &message.author,
                 Some(&message.created_at),
                 message.edited_at.as_deref(),
+                message.saved_at.is_some(),
                 &message.reactions,
                 Some(ReactionTarget::Dm(message.obj_index)),
                 &message.body,

@@ -35,6 +35,7 @@ pub enum Route {
     #[default]
     Dms,
     Search,
+    Saved,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +54,7 @@ pub struct UiState {
     pub comment_menu: Option<CommentMenuState>,
     pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
+    pub saved_selected: usize,
     pub hit_map: HitMap,
     pub link_overlays: Vec<LinkOverlay>,
     pub message_selection_regions: Vec<MessageSelectionRegion>,
@@ -76,6 +78,7 @@ impl Default for UiState {
             comment_menu: None,
             comment_delete: None,
             search_selected: 0,
+            saved_selected: 0,
             hit_map: HitMap::default(),
             link_overlays: Vec::new(),
             message_selection_regions: Vec::new(),
@@ -269,6 +272,7 @@ pub enum HitTarget {
     WorkspaceScroll,
     WorkspaceChannel(String),
     WorkspaceThread(String),
+    WorkspaceSaved,
     WorkspaceDm {
         conversation_id: Option<String>,
         username: String,
@@ -276,6 +280,7 @@ pub enum HitTarget {
     TopbarNotifications,
     TopbarMentions,
     DetailScroll,
+    SavedResult(usize),
     EditableMessage(EditableMessageTarget),
     ReactionChip {
         target: ReactionTarget,
@@ -306,6 +311,10 @@ pub enum HitTarget {
     CommentMenuBackdrop,
     CommentMenuEdit(EditableMessageTarget),
     CommentMenuDelete(EditableMessageTarget),
+    CommentMenuSave {
+        target: EditableMessageTarget,
+        saved: bool,
+    },
     CommentDeleteConfirm(EditableMessageTarget),
     CommentDeleteCancel,
 }
@@ -340,6 +349,7 @@ impl UiState {
             }
             let _ = conversation_id;
         } else if self.route != Route::Search
+            && self.route != Route::Saved
             && let Some(channel_id) = snapshot.selected_channel_id.clone()
         {
             self.route = Route::Channel(channel_id);
@@ -641,6 +651,8 @@ impl PaletteState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommentMenuState {
     pub target: EditableMessageTarget,
+    pub can_edit_delete: bool,
+    pub saved: bool,
     pub x: u16,
     pub y: u16,
 }

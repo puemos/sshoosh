@@ -75,7 +75,7 @@ impl Default for CommandRegistry {
                     name: "thread",
                     aliases: &["t"],
                     description: "Manage threads",
-                    args: "new|rename|delete|archive|pin|mute|save|read",
+                    args: "new|rename|delete|archive|pin|mute|read",
                     shortcut: Some("t"),
                     category: "Create",
                 },
@@ -83,7 +83,7 @@ impl Default for CommandRegistry {
                     name: "dm",
                     aliases: &["msg"],
                     description: "Open or manage direct messages",
-                    args: "open|edit|delete|mute|save|read",
+                    args: "open|edit|delete|mute|read",
                     shortcut: Some("d"),
                     category: "Navigate",
                 },
@@ -142,6 +142,22 @@ impl Default for CommandRegistry {
                     args: "query",
                     shortcut: None,
                     category: "Search",
+                },
+                CommandSpec {
+                    name: "save",
+                    aliases: &[],
+                    description: "Save a message",
+                    args: "index",
+                    shortcut: None,
+                    category: "Lifecycle",
+                },
+                CommandSpec {
+                    name: "unsave",
+                    aliases: &[],
+                    description: "Unsave a message",
+                    args: "index",
+                    shortcut: None,
+                    category: "Lifecycle",
                 },
                 CommandSpec {
                     name: "more",
@@ -215,6 +231,14 @@ impl CommandRegistry {
             "reaction" => parse_reaction_command(rest).map(Some),
             "search" => require(rest, "Search query is required")
                 .map(|query| Some(Action::Search { query })),
+            "save" => parse_index(rest, "Message index is required")
+                .map(|index| Some(Action::SetMessageSaved { index, saved: true })),
+            "unsave" => parse_index(rest, "Message index is required").map(|index| {
+                Some(Action::SetMessageSaved {
+                    index,
+                    saved: false,
+                })
+            }),
             "more" => Ok(Some(Action::LoadMore)),
             "older" => Ok(Some(Action::LoadOlder)),
             "help" => Ok(None),

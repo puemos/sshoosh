@@ -11,7 +11,7 @@ mod cases {
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
-            ReactionSummary, ServerState, Snapshot, ThreadItem,
+            ReactionSummary, SavedMessageItem, SavedMessageKind, ServerState, Snapshot, ThreadItem,
         },
     };
 
@@ -98,6 +98,7 @@ mod cases {
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             edited_at: None,
+            saved_at: None,
             reactions: Vec::new(),
         }
     }
@@ -110,6 +111,7 @@ mod cases {
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             edited_at: None,
+            saved_at: None,
             reactions: Vec::new(),
         }
     }
@@ -567,6 +569,54 @@ mod cases {
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicks_saved_workspace_row_as_screen() {
+        let mut app = test_app("workspace-clicks-saved").await;
+        app.ui.active_pane = ActivePane::Rail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::WorkspaceSaved)
+        });
+
+        assert_eq!(app.ui.route, Route::Saved);
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert_eq!(app.actions, vec![Action::ListSaved]);
+    }
+
+    #[tokio::test]
+    async fn saved_screen_activates_selected_saved_message() {
+        let mut app = test_app("saved-screen-activate").await;
+        app.snapshot.saved_messages = vec![SavedMessageItem {
+            kind: SavedMessageKind::Comment,
+            source_id: "comment-1".to_string(),
+            author: "alice".to_string(),
+            body: "Saved note".to_string(),
+            source_label: "#general · thread".to_string(),
+            saved_at: "2020-01-03T03:04:00Z".to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render saved screen");
+        let saved_hit_rows = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .filter(|region| matches!(region.target, HitTarget::SavedResult(0)))
+            .count();
+        assert!(saved_hit_rows >= 2);
+
+        app.activate_selection();
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
     }
 
     #[tokio::test]
@@ -1325,7 +1375,7 @@ mod cases {
     }
 
     #[tokio::test]
-    async fn right_click_other_users_comment_does_not_open_menu() {
+    async fn right_click_other_users_comment_opens_save_only_menu() {
         let mut app = test_app("comment-menu-other").await;
         app.snapshot.comments = vec![comment(1, "alice", "not mine")];
         app.render().expect("render");
@@ -1337,7 +1387,29 @@ mod cases {
             )
         });
 
-        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(
+            app.ui
+                .comment_menu
+                .map(|menu| { (menu.target, menu.can_edit_delete, menu.saved) }),
+            Some((EditableMessageTarget::Comment(1), false, false))
+        );
+        app.render().expect("render menu");
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::CommentMenuSave {
+                    target: EditableMessageTarget::Comment(1),
+                    saved: true
+                }
+            )
+        });
+        assert_eq!(
+            app.actions,
+            vec![Action::SetMessageSaved {
+                index: 1,
+                saved: true
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1419,7 +1491,7 @@ mod cases {
     }
 
     #[tokio::test]
-    async fn right_click_other_users_dm_does_not_open_menu() {
+    async fn right_click_other_users_dm_opens_save_only_menu() {
         let mut app = test_app("dm-menu-other").await;
         app.snapshot.selected_thread_id = None;
         app.snapshot.selected_conversation_id = Some("dm".to_string());
@@ -1434,7 +1506,12 @@ mod cases {
             )
         });
 
-        assert!(app.ui.comment_menu.is_none());
+        assert_eq!(
+            app.ui
+                .comment_menu
+                .map(|menu| { (menu.target, menu.can_edit_delete, menu.saved) }),
+            Some((EditableMessageTarget::Dm(1), false, false))
+        );
     }
 
     #[tokio::test]
@@ -1486,6 +1563,8 @@ mod cases {
         let mut app = test_app("comment-menu-esc").await;
         app.ui.comment_menu = Some(CommentMenuState {
             target: EditableMessageTarget::Comment(1),
+            can_edit_delete: true,
+            saved: false,
             x: 10,
             y: 10,
         });

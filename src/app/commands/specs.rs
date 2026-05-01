@@ -151,18 +151,6 @@ pub(crate) const THREAD_SUBCOMMANDS: &[SubcommandSpec] = &[
         args: "",
     },
     SubcommandSpec {
-        name: "save",
-        aliases: &[],
-        description: "Save current thread",
-        args: "",
-    },
-    SubcommandSpec {
-        name: "unsave",
-        aliases: &[],
-        description: "Unsave current thread",
-        args: "",
-    },
-    SubcommandSpec {
         name: "read",
         aliases: &[],
         description: "Mark current thread read",
@@ -205,18 +193,6 @@ pub(crate) const DM_SUBCOMMANDS: &[SubcommandSpec] = &[
         name: "unmute",
         aliases: &[],
         description: "Unmute current DM",
-        args: "",
-    },
-    SubcommandSpec {
-        name: "save",
-        aliases: &[],
-        description: "Save current DM",
-        args: "",
-    },
-    SubcommandSpec {
-        name: "unsave",
-        aliases: &[],
-        description: "Unsave current DM",
         args: "",
     },
     SubcommandSpec {
