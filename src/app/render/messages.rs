@@ -6,7 +6,7 @@ use ratatui::style::Color;
 
 const MESSAGE_PREFIX: &str = "";
 const MESSAGE_PREFIX_WIDTH: u16 = 0;
-pub(crate) const SAVED_MARKER: &str = "✸";
+pub(crate) const SAVED_MARKER: &str = "◆";
 
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,

@@ -1244,7 +1244,7 @@ mod cases {
                     body: "Looks good https://example.com".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: Some("2020-01-02T03:06:00Z".to_string()),
-                    saved_at: None,
+                    saved_at: Some("2020-01-02T03:10:00Z".to_string()),
                     reactions: vec![ReactionSummary {
                         emoji: "👍".to_string(),
                         count: 2,
@@ -1315,9 +1315,20 @@ mod cases {
             position_for_text(buffer, width, height, "Looks good").expect("alice body");
         let (alice_author_x, alice_author_y) =
             position_for_text(buffer, width, height, "@alice").expect("alice author");
+        let (alice_saved_x, alice_saved_y) =
+            position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
         assert_eq!(alice_author_x, root_author_x);
         assert_eq!(alice_x, root_author_x);
         assert_eq!(alice_y, alice_author_y + 1);
+        assert_eq!(alice_saved_y, alice_author_y);
+        assert!(alice_saved_x > alice_author_x);
+        assert_eq!(
+            buffer
+                .cell((alice_saved_x, alice_saved_y))
+                .expect("saved marker")
+                .fg,
+            theme::SAVED
+        );
         assert!(!row_text(buffer, width, alice_author_y).contains("▏"));
         assert!(!row_text(buffer, width, alice_y).contains("▏"));
         assert_eq!(
