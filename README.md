@@ -16,6 +16,16 @@ ssh -p 2222 "$USER+TOKEN@127.0.0.1"
 
 Connect as `username+TOKEN@host` with the one-time bootstrap token to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys must also connect as `username+invite-token@host`, or an owner/admin can add a key directly to an existing account. Unknown keys without a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
+## Demo Data
+
+For local demos, first sign in once over SSH so the database has your real account and SSH key. Then run the standalone seed script:
+
+```sh
+./scripts/demo_seed.py --db ./sshoosh.sqlite --reset
+```
+
+`--reset` clears workspace data, preserves the most recently active account and its SSH keys, promotes that account to owner, and fills the database with six months of realistic team activity. Use `--owner <username>` to choose the account explicitly.
+
 ## Quick Deploy
 
 `sshoosh` is a raw SSH/TCP server, not an HTTP app. Deploy it on a host that can run a long-lived process and expose TCP to the port where `sshoosh serve` listens. Keep `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY` on persistent storage; the optional `SSHOOSH_ENCRYPTION_KEY` must also be stable if encryption is enabled. Losing the server key makes SSH clients warn that the host key changed.
