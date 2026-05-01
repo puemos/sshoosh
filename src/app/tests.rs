@@ -11,7 +11,8 @@ mod cases {
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
-            ReactionSummary, SavedMessageItem, SavedMessageKind, ServerState, Snapshot, ThreadItem,
+            ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind, SearchResult,
+            ServerState, Snapshot, ThreadItem,
         },
     };
 
@@ -617,6 +618,102 @@ mod cases {
 
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+    }
+
+    #[tokio::test]
+    async fn mouse_clicking_saved_result_opens_source() {
+        let mut app = test_app("saved-screen-mouse-activate").await;
+        app.snapshot.saved_messages = vec![SavedMessageItem {
+            kind: SavedMessageKind::Comment,
+            source_id: "comment-1".to_string(),
+            author: "alice".to_string(),
+            body: "Saved note".to_string(),
+            source_label: "#general · thread".to_string(),
+            saved_at: "2020-01-03T03:04:00Z".to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render saved screen");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::SavedResult(0))
+        });
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn detail_scroll_click_on_saved_row_opens_source() {
+        let mut app = test_app("saved-screen-detail-fallback").await;
+        app.snapshot.saved_messages = vec![SavedMessageItem {
+            kind: SavedMessageKind::Comment,
+            source_id: "comment-1".to_string(),
+            author: "alice".to_string(),
+            body: "Saved note".to_string(),
+            source_label: "#general · thread".to_string(),
+            saved_at: "2020-01-03T03:04:00Z".to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render saved screen");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::DetailScroll))
+            .cloned()
+            .expect("detail scroll region");
+
+        app.handle_mouse_click(
+            region.clone(),
+            MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: region.rect.x,
+                row: region.rect.y.saturating_add(1),
+                modifiers: Default::default(),
+            },
+        );
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicking_search_result_opens_source() {
+        let mut app = test_app("search-screen-mouse-activate").await;
+        app.snapshot.search_query = Some("deploy".to_string());
+        app.snapshot.search_results = vec![SearchResult {
+            kind: SearchKind::Comment,
+            label: "Deploy notes".to_string(),
+            context: "#general · thread".to_string(),
+            snippet: "deploy window at noon".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        app.ui.route = Route::Search;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render search screen");
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::SearchResult(0))
+        });
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
     }
 
     #[tokio::test]

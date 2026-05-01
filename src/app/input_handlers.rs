@@ -123,6 +123,8 @@ impl App {
                     HitTarget::MessageLink(_)
                     | HitTarget::ReactionChip { .. }
                     | HitTarget::ReactionAdd { .. }
+                    | HitTarget::SearchResult(_)
+                    | HitTarget::SavedResult(_)
                     | HitTarget::TopbarNotifications
                     | HitTarget::TopbarMentions
                     | HitTarget::ListModalRow(_),
@@ -140,6 +142,7 @@ impl App {
             | HitTarget::WorkspaceSaved
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll
+            | HitTarget::SearchResult(_)
             | HitTarget::SavedResult(_)
             | HitTarget::EditableMessage(_)
             | HitTarget::ReactionChip { .. }
@@ -269,7 +272,15 @@ impl App {
                 username,
             } => self.actions.push(Action::OpenDm { target: username }),
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
-            HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
+            HitTarget::DetailScroll => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.activate_result_at_mouse_position(region.rect, mouse);
+            }
+            HitTarget::SearchResult(index) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.search_selected = index;
+                self.activate_search_result();
+            }
             HitTarget::SavedResult(index) => {
                 self.ui.active_pane = ActivePane::Detail;
                 self.ui.saved_selected = index;
@@ -365,6 +376,29 @@ impl App {
                 }
             }
             HitTarget::CommentDeleteCancel => self.close_comment_overlays(),
+        }
+    }
+
+    pub(crate) fn activate_result_at_mouse_position(&mut self, rect: Rect, mouse: MouseEvent) {
+        const RESULT_ROW_HEIGHT: u16 = 3;
+        if RESULT_ROW_HEIGHT == 0 || !matches!(self.ui.route, Route::Search | Route::Saved) {
+            return;
+        }
+        let row = mouse
+            .row
+            .saturating_sub(rect.y)
+            .saturating_add(self.ui.detail_scroll.offset().y);
+        let index = (row / RESULT_ROW_HEIGHT) as usize;
+        match self.ui.route {
+            Route::Search if index < self.snapshot.search_results.len() => {
+                self.ui.search_selected = index;
+                self.activate_search_result();
+            }
+            Route::Saved if index < self.snapshot.saved_messages.len() => {
+                self.ui.saved_selected = index;
+                self.activate_saved_result();
+            }
+            _ => {}
         }
     }
 

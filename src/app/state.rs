@@ -280,6 +280,7 @@ pub enum HitTarget {
     TopbarNotifications,
     TopbarMentions,
     DetailScroll,
+    SearchResult(usize),
     SavedResult(usize),
     EditableMessage(EditableMessageTarget),
     ReactionChip {

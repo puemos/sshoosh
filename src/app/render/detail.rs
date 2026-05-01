@@ -48,7 +48,6 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         .as_ref()
         .and_then(|id| snapshot.threads.iter().find(|thread| &thread.id == id));
     let mut items: Vec<ListItem> = Vec::new();
-    let message_width = message_content_width(area);
     let channel_slug = snapshot
         .selected_channel_id
         .as_ref()
@@ -82,6 +81,8 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     });
     draw_thread_header(frame, area, channel_slug, title, header_meta.as_deref(), ui);
     let messages_area = pane_scroll_area(area);
+    let content_area = scroll_content_area(messages_area);
+    let message_width = message_content_width(content_area);
     let mut link_hits = Vec::new();
     let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
@@ -206,17 +207,12 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
-    register_reaction_hits(
-        ui,
-        messages_area,
-        reaction_hits,
-        ui.detail_scroll.offset().y,
-    );
-    register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
+    register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
+    register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
+    register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
         ui,
-        messages_area,
+        content_area,
         selection_hits,
         ui.detail_scroll.offset().y,
     );
@@ -238,6 +234,7 @@ pub(crate) fn draw_search_detail(
     draw_detail_header(frame, area, &title, ui);
     let messages_area = pane_scroll_area(area);
     let mut items = Vec::new();
+    let mut row_hits = Vec::new();
     if snapshot.search_results.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
         render_empty_state(
@@ -260,7 +257,8 @@ pub(crate) fn draw_search_detail(
                 SearchKind::Comment => "comment",
                 SearchKind::Dm => "dm",
             };
-            items.push(ListItem::new(vec![
+            let row = items.len() as u16;
+            let item = ListItem::new(vec![
                 Line::from(vec![
                     Span::styled(format!("{:<8}", kind), theme::muted()),
                     Span::styled(sanitize_terminal_visible_text(&result.label), style),
@@ -273,14 +271,25 @@ pub(crate) fn draw_search_detail(
                     Span::raw(sanitize_terminal_visible_text(&result.snippet)),
                 ]),
                 Line::from(""),
-            ]));
+            ]);
+            let height = item.height() as u16;
+            items.push(item);
+            for offset in 0..height {
+                row_hits.push((row.saturating_add(offset), HitTarget::SearchResult(idx)));
+            }
         }
         if snapshot.search_has_more {
             items.push(history_prompt("More results available. Use /more."));
         }
     }
-    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    register_scroll_hits(
+        ui,
+        messages_area,
+        HitTarget::DetailScroll,
+        row_hits,
+        ui.detail_scroll.offset().y,
+    );
 }
 
 pub(crate) fn draw_saved_detail(
@@ -348,7 +357,7 @@ pub(crate) fn draw_saved_detail(
     if snapshot.saved_has_more {
         items.push(history_prompt("More saved messages available. Use /more."));
     }
-    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
         ui,
         messages_area,
@@ -356,7 +365,6 @@ pub(crate) fn draw_saved_detail(
         row_hits,
         ui.detail_scroll.offset().y,
     );
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
 }
 
 pub(crate) fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
@@ -452,6 +460,10 @@ pub(crate) fn pane_scroll_area(area: Rect) -> Rect {
     )
 }
 
+pub(crate) fn scroll_content_area(area: Rect) -> Rect {
+    Rect::new(area.x, area.y, area.width.saturating_sub(2), area.height)
+}
+
 pub(crate) fn ensure_scroll_row_visible(
     state: &mut ScrollViewState,
     row: Option<u16>,
@@ -535,7 +547,8 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         .unwrap_or_else(|| "DMs".to_string());
     draw_detail_header(frame, area, &title, ui);
     let messages_area = pane_scroll_area(area);
-    let message_width = message_content_width(area);
+    let content_area = scroll_content_area(messages_area);
+    let message_width = message_content_width(content_area);
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
     let mut reaction_hits = Vec::new();
@@ -616,17 +629,12 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     }
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
-    register_reaction_hits(
-        ui,
-        messages_area,
-        reaction_hits,
-        ui.detail_scroll.offset().y,
-    );
-    register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
+    register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
+    register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
+    register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
         ui,
-        messages_area,
+        content_area,
         selection_hits,
         ui.detail_scroll.offset().y,
     );
