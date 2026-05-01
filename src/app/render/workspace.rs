@@ -32,18 +32,39 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             .push(notifications_area, HitTarget::WorkspaceNotifications);
     }
 
-    let channel_header_area = Rect::new(
+    let saved_selected = matches!(&ui.route, Route::Saved);
+    let saved_badge = format!(" {}", snapshot.saved_count);
+    let saved_label = truncate_text("Saved", row_width.saturating_sub(saved_badge.len()));
+    let saved_area = Rect::new(
         area.x,
-        area.y.saturating_add(2),
+        area.y.saturating_add(1),
         area.width,
-        area.height.saturating_sub(2),
+        area.height.saturating_sub(1).min(1),
     );
-    draw_workspace_header(frame, channel_header_area, "Channels", ui);
-    let scroll_area = Rect::new(
+    if !saved_area.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(saved_label, workspace_label_style(saved_selected, 0)),
+                Span::styled(saved_badge, theme::muted()),
+            ]))
+            .style(theme::panel()),
+            saved_area,
+        );
+        ui.hit_map.push(saved_area, HitTarget::WorkspaceSaved);
+    }
+
+    let channel_header_area = Rect::new(
         area.x,
         area.y.saturating_add(3),
         area.width,
         area.height.saturating_sub(3),
+    );
+    draw_workspace_header(frame, channel_header_area, "Channels", ui);
+    let scroll_area = Rect::new(
+        area.x,
+        area.y.saturating_add(4),
+        area.width,
+        area.height.saturating_sub(4),
     );
     for channel in &snapshot.channels {
         let row = items.len() as u16;
@@ -97,19 +118,6 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             }
         }
     }
-    items.push(ListItem::new(""));
-    let saved_selected = matches!(&ui.route, Route::Saved);
-    let saved_row = items.len() as u16;
-    if saved_selected {
-        selected_y = Some(saved_row);
-    }
-    let saved_badge = format!(" {}", snapshot.saved_count);
-    let saved_label = truncate_text("Saved", row_width.saturating_sub(saved_badge.len()));
-    items.push(ListItem::new(Line::from(vec![
-        Span::styled(saved_label, workspace_label_style(saved_selected, 0)),
-        Span::styled(saved_badge, theme::muted()),
-    ])));
-    row_hits.push((saved_row, HitTarget::WorkspaceSaved));
     items.push(ListItem::new(""));
     items.push(ListItem::new(Line::from(Span::styled(
         "DMs",

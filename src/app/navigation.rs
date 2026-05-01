@@ -86,6 +86,7 @@ impl App {
     pub(crate) fn workspace_rows(&self) -> Vec<WorkspaceRow> {
         let mut rows = Vec::new();
         rows.push(WorkspaceRow::Notifications);
+        rows.push(WorkspaceRow::Saved);
         for channel in &self.snapshot.channels {
             rows.push(WorkspaceRow::Channel(channel.id.clone()));
             let selected_channel = self.snapshot.selected_channel_id.as_deref()
@@ -100,7 +101,6 @@ impl App {
                 );
             }
         }
-        rows.push(WorkspaceRow::Saved);
         if self.snapshot.dm_sidebar.is_empty() {
             rows.extend(
                 self.snapshot

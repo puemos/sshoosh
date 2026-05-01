@@ -875,7 +875,7 @@ mod cases {
     }
 
     #[test]
-    fn workspace_notifications_row_stays_above_channels() {
+    fn workspace_saved_row_stays_under_notifications() {
         let width = 80;
         let height = 24;
         let backend = TestBackend::new(width, height);
@@ -900,14 +900,22 @@ mod cases {
         let buffer = terminal.backend().buffer();
         let (_, notifications_y) =
             position_for_text(buffer, width, height, "Notifications 3").unwrap();
+        let (_, saved_y) = position_for_text(buffer, width, height, "Saved 0").unwrap();
         let (_, channels_y) = position_for_text(buffer, width, height, "Channels").unwrap();
 
-        assert!(notifications_y < channels_y);
+        assert!(notifications_y < saved_y);
+        assert!(saved_y < channels_y);
         assert!(
             ui.hit_map
                 .entries()
                 .iter()
                 .any(|region| matches!(region.target, HitTarget::WorkspaceNotifications))
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::WorkspaceSaved))
         );
     }
 
