@@ -16,6 +16,8 @@ Environment=SSHOOSH_MASTER_LEASE_TTL_SECS=15
 Environment=SSHOOSH_MASTER_HEARTBEAT_SECS=5
 Environment=SSHOOSH_HOST=0.0.0.0
 Environment=SSHOOSH_PORT=2222
+Environment=SSHOOSH_MAX_CONNECTIONS=256
+Environment=SSHOOSH_MAX_CONNECTIONS_PER_IP=32
 Environment=SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
 ExecStart=/usr/local/bin/sshoosh serve
 Restart=on-failure
