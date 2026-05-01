@@ -2087,6 +2087,114 @@ mod cases {
     }
 
     #[test]
+    fn render_dm_detail_keeps_metadata_before_scrollbar() {
+        let width = 50;
+        let height = 8;
+        let metadata = "metadata-visible-before-scroll";
+        let body = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST";
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "maya".to_string(),
+                last_message_index: 4,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            conversation_messages: vec![
+                ConversationMessage {
+                    id: "m1".to_string(),
+                    author: "maya".to_string(),
+                    obj_index: 1,
+                    body: body.to_string(),
+                    created_at: metadata.to_string(),
+                    edited_at: None,
+                    saved_at: Some("saved-marker-visible".to_string()),
+                    reactions: Vec::new(),
+                },
+                ConversationMessage {
+                    id: "m2".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 2,
+                    body: "Second message".to_string(),
+                    created_at: "later-2".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+                ConversationMessage {
+                    id: "m3".to_string(),
+                    author: "maya".to_string(),
+                    obj_index: 3,
+                    body: "Third message".to_string(),
+                    created_at: "later-3".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+                ConversationMessage {
+                    id: "m4".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 4,
+                    body: "Fourth message".to_string(),
+                    created_at: "later-4".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+            ],
+            selected_conversation_id: Some("dm".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Dms;
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw_dm_detail(frame, Rect::new(0, 0, width, height), &snapshot, &mut ui))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (meta_x, meta_y) =
+            position_for_text(buffer, width, height, metadata).expect("full metadata");
+        let (saved_x, saved_y) =
+            position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
+        let (body_x, body_y) = position_for_text(buffer, width, height, body).expect("body line");
+        let scrollbar_x = width - 2;
+        let padding_x = scrollbar_x - 1;
+        let content_right = padding_x - 1;
+
+        assert!(meta_x + metadata.chars().count() as u16 <= content_right + 1);
+        assert!(saved_x <= content_right);
+        assert_eq!(saved_y, meta_y);
+        assert!(row_text(buffer, width, meta_y).contains(metadata));
+        assert_eq!(
+            buffer
+                .cell((padding_x, meta_y))
+                .expect("metadata padding")
+                .symbol(),
+            " "
+        );
+        assert!(body_x + body.chars().count() as u16 <= content_right + 1);
+        assert_eq!(
+            buffer
+                .cell((padding_x, body_y))
+                .expect("body padding")
+                .symbol(),
+            " "
+        );
+        assert!(
+            ui.message_selection_regions
+                .iter()
+                .all(|region| region.rect.x + region.rect.width <= padding_x)
+        );
+    }
+
+    #[test]
     fn render_multiline_composer_input() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
