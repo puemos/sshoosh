@@ -32,7 +32,7 @@ fn is_displayable_reaction_emoji(emoji: &str) -> bool {
 }
 
 pub(crate) async fn load_user_presence(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     active_account_ids: &HashSet<String>,
 ) -> anyhow::Result<Vec<UserPresence>> {
     let rows = query(
@@ -58,7 +58,7 @@ pub(crate) async fn load_user_presence(
 }
 
 pub(crate) async fn load_notifications(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<NotificationSummary>> {
@@ -114,7 +114,7 @@ pub(crate) async fn load_notifications(
 }
 
 pub(crate) async fn load_channels(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
 ) -> anyhow::Result<Vec<Channel>> {
     let current_time = now();
@@ -124,13 +124,7 @@ pub(crate) async fn load_channels(
                     CASE
                       WHEN t.id IS NULL THEN 0
                       WHEN r.muted_until IS NOT NULL AND r.muted_until > ? THEN 0
-                      ELSE (
-                        SELECT COUNT(*)
-                        FROM comments cm
-                        WHERE cm.thread_id = t.id
-                          AND cm.deleted_at IS NULL
-                          AND cm.obj_index > COALESCE(r.last_read_index, 0)
-                      )
+                      ELSE COALESCE(r.unread_count, t.comment_count)
                     END
                 ), 0) AS unread_count
          FROM channels c
@@ -165,7 +159,7 @@ pub(crate) async fn load_channels(
 }
 
 pub(crate) async fn load_threads(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     channel_id: &str,
 ) -> anyhow::Result<Vec<ThreadItem>> {
@@ -174,13 +168,7 @@ pub(crate) async fn load_threads(
                 t.comment_count, t.last_comment_index,
                 CASE
                   WHEN r.muted_until IS NOT NULL AND r.muted_until > ? THEN 0
-                  ELSE (
-                    SELECT COUNT(*)
-                    FROM comments cm
-                    WHERE cm.thread_id = t.id
-                      AND cm.deleted_at IS NULL
-                      AND cm.obj_index > COALESCE(r.last_read_index, 0)
-                  )
+                  ELSE COALESCE(r.unread_count, t.comment_count)
                 END AS unread_count,
                 t.last_activity_at, t.created_at, t.edited_at, t.archived_at, t.pinned_at,
                 r.muted_until, r.saved_at,
@@ -233,7 +221,7 @@ pub(crate) async fn load_threads(
 }
 
 pub(crate) async fn load_comments(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     thread_id: &str,
     limit: i64,
@@ -293,7 +281,7 @@ pub(crate) async fn load_comments(
 }
 
 pub(crate) async fn load_conversations(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
 ) -> anyhow::Result<Vec<Conversation>> {
     let rows = query(
@@ -302,13 +290,7 @@ pub(crate) async fn load_conversations(
                 c.last_message_index,
                 CASE
                   WHEN me.muted_until IS NOT NULL AND me.muted_until > ? THEN 0
-                  ELSE (
-                    SELECT COUNT(*)
-                    FROM conversation_messages msg
-                    WHERE msg.conversation_id = c.id
-                      AND msg.deleted_at IS NULL
-                      AND msg.obj_index > me.last_read_index
-                  )
+                  ELSE me.unread_count
                 END AS unread_count,
                 c.last_activity_at,
                 me.muted_until,
@@ -350,7 +332,7 @@ pub(crate) async fn load_conversations(
 }
 
 pub(crate) async fn load_dm_sidebar(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
 ) -> anyhow::Result<Vec<DmSidebarItem>> {
     let rows = query(
@@ -360,13 +342,7 @@ pub(crate) async fn load_dm_sidebar(
                 CASE
                   WHEN c.id IS NULL THEN 0
                   WHEN me.muted_until IS NOT NULL AND me.muted_until > ? THEN 0
-                  ELSE (
-                    SELECT COUNT(*)
-                    FROM conversation_messages msg
-                    WHERE msg.conversation_id = c.id
-                      AND msg.deleted_at IS NULL
-                      AND msg.obj_index > me.last_read_index
-                  )
+                  ELSE me.unread_count
                 END AS unread_count,
                 c.last_activity_at,
                 me.muted_until,
@@ -423,7 +399,7 @@ pub(crate) async fn load_dm_sidebar(
 }
 
 pub(crate) async fn load_conversation_messages(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     conversation_id: &str,
     limit: i64,
@@ -483,7 +459,7 @@ pub(crate) async fn load_conversation_messages(
 }
 
 pub(crate) async fn load_saved_messages(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<SavedMessageItem>, bool)> {
@@ -597,7 +573,7 @@ pub(crate) async fn load_saved_messages(
 }
 
 pub(crate) async fn load_saved_message_count(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
 ) -> anyhow::Result<i64> {
     query_scalar(

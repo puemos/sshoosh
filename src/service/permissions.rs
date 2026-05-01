@@ -452,14 +452,23 @@ pub(crate) async fn upsert_thread_read_state(
     } else {
         existing.as_ref().and_then(|(_, value)| value.clone())
     };
+    let unread_count: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM comments
+         WHERE thread_id = ? AND deleted_at IS NULL",
+    )
+    .bind(thread_id)
+    .fetch_one(&mut tx)
+    .await?;
     query(
-        "INSERT INTO thread_reads (thread_id, account_id, muted_until, saved_at)
-         VALUES (?, ?, ?, ?)
+        "INSERT INTO thread_reads (thread_id, account_id, unread_count, muted_until, saved_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(thread_id, account_id)
          DO UPDATE SET muted_until = ?, saved_at = ?",
     )
     .bind(thread_id)
     .bind(account_id)
+    .bind(unread_count)
     .bind(next_muted_until.as_deref())
     .bind(next_saved_at.as_deref())
     .bind(next_muted_until.as_deref())
@@ -472,6 +481,7 @@ pub(crate) async fn upsert_thread_read_state(
 pub(crate) struct CommentMeta {
     pub(crate) id: String,
     pub(crate) author_account_id: String,
+    pub(crate) obj_index: i64,
 }
 
 pub(crate) async fn load_comment_meta_tx(
@@ -494,6 +504,7 @@ pub(crate) async fn load_comment_meta_tx(
     Ok(CommentMeta {
         id: row.get("id"),
         author_account_id: row.get("author_account_id"),
+        obj_index,
     })
 }
 
@@ -592,6 +603,17 @@ pub(crate) async fn soft_delete_comment(
     .bind(thread_id)
     .execute(&mut tx)
     .await?;
+    query(
+        "UPDATE thread_reads
+         SET unread_count = MAX(unread_count - 1, 0)
+         WHERE thread_id = ?
+           AND unread_count > 0
+           AND last_read_index < ?",
+    )
+    .bind(thread_id)
+    .bind(row.obj_index)
+    .execute(&mut tx)
+    .await?;
     delete_search_index_tx(&mut tx, "comment", &row.id).await?;
     insert_audit(
         &mut tx,
@@ -617,6 +639,7 @@ pub(crate) async fn soft_delete_comment(
 pub(crate) struct DmMessageMeta {
     pub(crate) id: String,
     pub(crate) author_account_id: String,
+    pub(crate) obj_index: i64,
 }
 
 pub(crate) async fn load_dm_message_meta_tx(
@@ -648,6 +671,7 @@ pub(crate) async fn load_dm_message_meta_tx(
     Ok(DmMessageMeta {
         id: row.get("id"),
         author_account_id: row.get("author_account_id"),
+        obj_index,
     })
 }
 
@@ -729,6 +753,17 @@ pub(crate) async fn soft_delete_dm(
         .bind(&row.id)
         .execute(&mut tx)
         .await?;
+    query(
+        "UPDATE conversation_members
+         SET unread_count = MAX(unread_count - 1, 0)
+         WHERE conversation_id = ?
+           AND unread_count > 0
+           AND last_read_index < ?",
+    )
+    .bind(conversation_id)
+    .bind(row.obj_index)
+    .execute(&mut tx)
+    .await?;
     delete_search_index_tx(&mut tx, "dm", &row.id).await?;
     insert_audit(
         &mut tx,
@@ -757,7 +792,7 @@ pub(crate) async fn begin(pool: &Database) -> anyhow::Result<DbTransaction> {
 }
 
 pub(crate) async fn load_active_presence_sessions(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
 ) -> anyhow::Result<HashSet<String>> {
     let rows = query(
         "SELECT account_id, last_seen_at

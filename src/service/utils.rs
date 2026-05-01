@@ -33,7 +33,7 @@ pub fn parse_mentions(body: &str) -> Vec<String> {
 }
 
 pub(crate) async fn search_visible(
-    pool: &Database,
+    pool: impl DbExecutor + Copy,
     account_id: &str,
     search: &str,
     limit: i64,

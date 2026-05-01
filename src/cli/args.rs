@@ -84,6 +84,21 @@ pub(crate) enum Command {
         #[arg(long = "ssh-arg", action = ArgAction::Append)]
         ssh_args: Vec<String>,
     },
+    #[command(about = "Seed a temporary database and print DB performance timings")]
+    DevDbBench {
+        #[arg(long, default_value_t = 50)]
+        users: usize,
+        #[arg(long, default_value_t = 50)]
+        channels: usize,
+        #[arg(long, default_value_t = 1_000)]
+        threads: usize,
+        #[arg(long, default_value_t = 100_000)]
+        comments: usize,
+        #[arg(long, default_value_t = 10_000)]
+        dms: usize,
+        #[arg(long, default_value_t = 25)]
+        iterations: usize,
+    },
     Invite {
         #[arg(long, default_value = "member")]
         role: String,

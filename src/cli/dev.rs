@@ -52,6 +52,92 @@ pub(crate) async fn run_dev(cfg: config::Config) -> anyhow::Result<()> {
     }
 }
 
+pub(crate) async fn run_dev_db_bench(
+    users: usize,
+    channels: usize,
+    threads: usize,
+    comments: usize,
+    dms: usize,
+    iterations: usize,
+) -> anyhow::Result<()> {
+    let users = users.max(2);
+    let channels = channels.max(1);
+    let threads = threads.max(1);
+    let iterations = iterations.max(1);
+    let db_path =
+        std::env::temp_dir().join(format!("sshoosh-db-bench-{}.sqlite", uuid::Uuid::now_v7()));
+    let cfg = db::DatabaseConfig {
+        db_path: db_path.clone(),
+        database_url: None,
+        database_auth_token: None,
+        node_id: "db-bench".to_string(),
+        encryption_key: None,
+        master_lease_ttl: Duration::from_secs(15),
+        master_heartbeat: Duration::from_secs(5),
+        allow_plaintext_encryption_migration: false,
+    };
+    let db = db::Database::connect_with_config(&cfg).await?;
+    db.init().await?;
+    seed_bench_database(&db, users, channels, threads, comments, dms).await?;
+    let state = service::ServerState::new(db.clone()).await?;
+
+    let account_id = "bench-user-0001";
+    let channel_id = "bench-channel-0000";
+    let thread_id = "bench-thread-000000";
+    let conversation_id = "bench-dm-0000";
+    let mut snapshot_times = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let started = std::time::Instant::now();
+        let _ = state
+            .snapshot(
+                account_id,
+                Some(channel_id),
+                Some(thread_id),
+                Some(conversation_id),
+            )
+            .await?;
+        snapshot_times.push(started.elapsed());
+    }
+
+    let started = std::time::Instant::now();
+    state
+        .add_comment(
+            "bench-user-0000".to_string(),
+            thread_id.to_string(),
+            "benchmark write comment".to_string(),
+        )
+        .await?;
+    let comment_write = started.elapsed();
+
+    let started = std::time::Instant::now();
+    state
+        .send_dm(
+            "bench-user-0000".to_string(),
+            conversation_id.to_string(),
+            "benchmark write dm".to_string(),
+        )
+        .await?;
+    let dm_write = started.elapsed();
+
+    snapshot_times.sort();
+    println!("database benchmark: {}", db_path.display());
+    println!(
+        "seed: users={users} channels={channels} threads={threads} comments={comments} dms={dms}"
+    );
+    println!(
+        "snapshot: p50={}ms p95={}ms max={}ms iterations={iterations}",
+        percentile_ms(&snapshot_times, 50),
+        percentile_ms(&snapshot_times, 95),
+        snapshot_times.last().map(duration_ms).unwrap_or(0),
+    );
+    println!(
+        "writes: comment={}ms dm={}ms",
+        duration_ms(&comment_write),
+        duration_ms(&dm_write)
+    );
+    Ok(())
+}
+
 pub(crate) async fn rebuild_and_spawn_dev_server(
     cfg: &config::Config,
 ) -> anyhow::Result<Option<Child>> {
@@ -126,6 +212,173 @@ pub(crate) fn spawn_dev_server(cfg: &config::Config) -> anyhow::Result<Child> {
         .stderr(Stdio::inherit())
         .spawn()
         .context("starting dev server")
+}
+
+async fn seed_bench_database(
+    db: &db::Database,
+    users: usize,
+    channels: usize,
+    threads: usize,
+    comments: usize,
+    dms: usize,
+) -> anyhow::Result<()> {
+    let now = db::now();
+    let mut tx = db.begin().await?;
+
+    for user in 0..users {
+        let account_id = format!("bench-user-{user:04}");
+        let username = format!("bench{user:04}");
+        db::query(
+            "INSERT INTO accounts
+             (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at)
+             VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?)",
+        )
+        .bind(&account_id)
+        .bind(&username)
+        .bind(&username)
+        .bind(if user == 0 { "owner" } else { "member" })
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await?;
+    }
+
+    for channel in 0..channels {
+        let channel_id = format!("bench-channel-{channel:04}");
+        let slug = format!("bench-channel-{channel:04}");
+        db::query(
+            "INSERT INTO channels
+             (id, slug, name, visibility, topic, created_by_account_id, created_at, updated_at)
+             VALUES (?, ?, ?, 'public', 'Benchmark channel', 'bench-user-0000', ?, ?)",
+        )
+        .bind(&channel_id)
+        .bind(&slug)
+        .bind(&slug)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await?;
+        for user in 0..users {
+            db::query(
+                "INSERT INTO channel_members (channel_id, account_id, role, joined_at)
+                 VALUES (?, ?, 'member', ?)",
+            )
+            .bind(&channel_id)
+            .bind(format!("bench-user-{user:04}"))
+            .bind(&now)
+            .execute(&mut tx)
+            .await?;
+        }
+    }
+
+    let mut comments_per_thread = vec![0_i64; threads];
+    for comment in 0..comments {
+        comments_per_thread[comment % threads] += 1;
+    }
+    for (thread, comment_count) in comments_per_thread.iter().copied().enumerate() {
+        let channel = thread % channels;
+        let thread_id = format!("bench-thread-{thread:06}");
+        let channel_id = format!("bench-channel-{channel:04}");
+        db::query(
+            "INSERT INTO threads
+             (id, channel_id, creator_account_id, title, body, comment_count, last_comment_index, last_activity_at, created_at, updated_at)
+             VALUES (?, ?, 'bench-user-0000', ?, '', ?, ?, ?, ?, ?)",
+        )
+        .bind(&thread_id)
+        .bind(&channel_id)
+        .bind(format!("Benchmark thread {thread}"))
+        .bind(comment_count)
+        .bind(comment_count)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await?;
+        db::query(
+            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, unread_count)
+             VALUES (?, 'bench-user-0001', 0, ?)",
+        )
+        .bind(&thread_id)
+        .bind(comment_count)
+        .execute(&mut tx)
+        .await?;
+    }
+
+    let mut obj_index_by_thread = vec![0_i64; threads];
+    for comment in 0..comments {
+        let thread = comment % threads;
+        obj_index_by_thread[thread] += 1;
+        let channel = thread % channels;
+        db::query(
+            "INSERT INTO comments
+             (id, thread_id, channel_id, author_account_id, obj_index, body, created_at, updated_at)
+             VALUES (?, ?, ?, 'bench-user-0000', ?, ?, ?, ?)",
+        )
+        .bind(format!("bench-comment-{comment:08}"))
+        .bind(format!("bench-thread-{thread:06}"))
+        .bind(format!("bench-channel-{channel:04}"))
+        .bind(obj_index_by_thread[thread])
+        .bind(format!("Benchmark comment {comment}"))
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await?;
+    }
+
+    db::query(
+        "INSERT INTO conversations
+         (id, dm_key, creator_account_id, last_message_index, last_activity_at, created_at)
+         VALUES ('bench-dm-0000', 'bench-user-0000:bench-user-0001', 'bench-user-0000', ?, ?, ?)",
+    )
+    .bind(dms as i64)
+    .bind(&now)
+    .bind(&now)
+    .execute(&mut tx)
+    .await?;
+    for user in [0, 1] {
+        db::query(
+            "INSERT INTO conversation_members
+             (conversation_id, account_id, joined_at, last_read_index, unread_count)
+             VALUES ('bench-dm-0000', ?, ?, ?, ?)",
+        )
+        .bind(format!("bench-user-{user:04}"))
+        .bind(&now)
+        .bind(if user == 0 { dms as i64 } else { 0 })
+        .bind(if user == 0 { 0 } else { dms as i64 })
+        .execute(&mut tx)
+        .await?;
+    }
+    for message in 0..dms {
+        db::query(
+            "INSERT INTO conversation_messages
+             (id, conversation_id, author_account_id, obj_index, body, created_at, updated_at)
+             VALUES (?, 'bench-dm-0000', 'bench-user-0000', ?, ?, ?, ?)",
+        )
+        .bind(format!("bench-dm-message-{message:08}"))
+        .bind((message + 1) as i64)
+        .bind(format!("Benchmark DM {message}"))
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+fn percentile_ms(samples: &[Duration], percentile: usize) -> u128 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let index = ((samples.len() - 1) * percentile).div_ceil(100);
+    duration_ms(&samples[index.min(samples.len() - 1)])
+}
+
+fn duration_ms(duration: &Duration) -> u128 {
+    duration.as_millis()
 }
 
 pub(crate) fn spawn_dev_ssh_client(

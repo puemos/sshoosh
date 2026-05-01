@@ -119,10 +119,12 @@ impl ServerState {
             .fetch_one(&mut tx)
             .await?;
         query(
-            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
-             VALUES (?, ?, ?, NULL)
+            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, unread_count, marked_unread_at)
+             VALUES (?, ?, ?, 0, NULL)
              ON CONFLICT(thread_id, account_id)
-             DO UPDATE SET last_read_index = excluded.last_read_index, marked_unread_at = NULL",
+             DO UPDATE SET last_read_index = excluded.last_read_index,
+                           unread_count = 0,
+                           marked_unread_at = NULL",
         )
         .bind(thread_id)
         .bind(account_id)
@@ -169,15 +171,27 @@ impl ServerState {
             .fetch_one(&mut tx)
             .await?;
         let unread_from = last_index.saturating_sub(1);
+        let unread_count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM comments
+             WHERE thread_id = ? AND deleted_at IS NULL AND obj_index > ?",
+        )
+        .bind(thread_id)
+        .bind(unread_from)
+        .fetch_one(&mut tx)
+        .await?;
         query(
-            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, marked_unread_at)
-             VALUES (?, ?, ?, ?)
+            "INSERT INTO thread_reads (thread_id, account_id, last_read_index, unread_count, marked_unread_at)
+             VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(thread_id, account_id)
-             DO UPDATE SET last_read_index = excluded.last_read_index, marked_unread_at = excluded.marked_unread_at",
+             DO UPDATE SET last_read_index = excluded.last_read_index,
+                           unread_count = excluded.unread_count,
+                           marked_unread_at = excluded.marked_unread_at",
         )
         .bind(thread_id)
         .bind(account_id)
         .bind(unread_from)
+        .bind(unread_count)
         .bind(now())
         .execute(&mut tx)
         .await?;
@@ -206,7 +220,9 @@ impl ServerState {
             bail!("Not a participant in this conversation");
         };
         query(
-            "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
+            "UPDATE conversation_members
+             SET last_read_index = ?, unread_count = 0
+             WHERE conversation_id = ? AND account_id = ?",
         )
         .bind(last_index)
         .bind(conversation_id)
@@ -259,10 +275,23 @@ impl ServerState {
         let Some(last_index) = last_index else {
             bail!("Not a participant in this conversation");
         };
-        query(
-            "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
+        let unread_from = last_index.saturating_sub(1);
+        let unread_count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM conversation_messages
+             WHERE conversation_id = ? AND deleted_at IS NULL AND obj_index > ?",
         )
-        .bind(last_index.saturating_sub(1))
+        .bind(conversation_id)
+        .bind(unread_from)
+        .fetch_one(&mut tx)
+        .await?;
+        query(
+            "UPDATE conversation_members
+             SET last_read_index = ?, unread_count = ?
+             WHERE conversation_id = ? AND account_id = ?",
+        )
+        .bind(unread_from)
+        .bind(unread_count)
         .bind(conversation_id)
         .bind(account_id)
         .execute(&mut tx)
@@ -280,13 +309,7 @@ impl ServerState {
              WHERE t.deleted_at IS NULL
                AND t.archived_at IS NULL
                AND (r.muted_until IS NULL OR r.muted_until <= ?)
-               AND (
-                 SELECT COUNT(*)
-                 FROM comments cm
-                 WHERE cm.thread_id = t.id
-                   AND cm.deleted_at IS NULL
-                   AND cm.obj_index > COALESCE(r.last_read_index, 0)
-               ) > 0
+               AND COALESCE(r.unread_count, t.comment_count) > 0
                AND EXISTS (
                  SELECT 1 FROM channel_members m
                  WHERE m.channel_id = c.id AND m.account_id = ?
@@ -310,13 +333,7 @@ impl ServerState {
             "SELECT c.id
              FROM conversations c
              JOIN conversation_members me ON me.conversation_id = c.id AND me.account_id = ?
-             WHERE (
-                 SELECT COUNT(*)
-                 FROM conversation_messages msg
-                 WHERE msg.conversation_id = c.id
-                   AND msg.deleted_at IS NULL
-                   AND msg.obj_index > me.last_read_index
-               ) > 0
+             WHERE me.unread_count > 0
                AND c.archived_at IS NULL
                AND (me.muted_until IS NULL OR me.muted_until <= ?)
              ORDER BY c.last_activity_at DESC

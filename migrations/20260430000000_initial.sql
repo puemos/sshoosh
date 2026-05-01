@@ -11,6 +11,8 @@ CREATE TABLE accounts (
   disabled_at TEXT
 );
 
+CREATE INDEX idx_accounts_username_lower ON accounts(lower(username));
+
 CREATE TABLE ssh_keys (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -94,6 +96,8 @@ CREATE TABLE threads (
 );
 
 CREATE INDEX idx_threads_channel_activity ON threads(channel_id, last_activity_at DESC, id DESC);
+CREATE INDEX idx_threads_channel_visibility_activity
+  ON threads(channel_id, deleted_at, archived_at, pinned_at, last_activity_at DESC, id DESC);
 
 CREATE TABLE comments (
   id TEXT PRIMARY KEY,
@@ -110,11 +114,15 @@ CREATE TABLE comments (
 );
 
 CREATE INDEX idx_comments_thread_index ON comments(thread_id, obj_index ASC);
+CREATE INDEX idx_comments_thread_unread
+  ON comments(thread_id, obj_index ASC)
+  WHERE deleted_at IS NULL;
 
 CREATE TABLE thread_reads (
   thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   last_read_index INTEGER NOT NULL DEFAULT 0,
+  unread_count INTEGER NOT NULL DEFAULT 0,
   marked_unread_at TEXT,
   muted_until TEXT,
   saved_at TEXT,
@@ -136,10 +144,13 @@ CREATE TABLE conversation_members (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   joined_at TEXT NOT NULL,
   last_read_index INTEGER NOT NULL DEFAULT 0,
+  unread_count INTEGER NOT NULL DEFAULT 0,
   muted_until TEXT,
   saved_at TEXT,
   PRIMARY KEY (conversation_id, account_id)
 );
+
+CREATE INDEX idx_conversation_members_account ON conversation_members(account_id, conversation_id);
 
 CREATE TABLE conversation_messages (
   id TEXT PRIMARY KEY,
@@ -155,6 +166,9 @@ CREATE TABLE conversation_messages (
 );
 
 CREATE INDEX idx_conversation_messages_index ON conversation_messages(conversation_id, obj_index ASC);
+CREATE INDEX idx_conversation_messages_unread
+  ON conversation_messages(conversation_id, obj_index ASC)
+  WHERE deleted_at IS NULL;
 
 CREATE TABLE mentions (
   id TEXT PRIMARY KEY,

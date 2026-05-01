@@ -204,7 +204,8 @@ pub(crate) async fn create_thread(
     query(
         "INSERT INTO thread_reads (thread_id, account_id, last_read_index)
          VALUES (?, ?, 0)
-         ON CONFLICT(thread_id, account_id) DO UPDATE SET last_read_index = 0",
+         ON CONFLICT(thread_id, account_id)
+         DO UPDATE SET last_read_index = 0, unread_count = 0",
     )
     .bind(&thread_id)
     .bind(actor_id)
@@ -314,11 +315,28 @@ pub(crate) async fn add_comment(
         "INSERT INTO thread_reads (thread_id, account_id, last_read_index)
          VALUES (?, ?, ?)
          ON CONFLICT(thread_id, account_id)
-         DO UPDATE SET last_read_index = excluded.last_read_index",
+         DO UPDATE SET last_read_index = excluded.last_read_index, unread_count = 0",
     )
     .bind(thread_id)
     .bind(actor_id)
     .bind(next_index)
+    .execute(&mut tx)
+    .await?;
+    query(
+        "INSERT INTO thread_reads (thread_id, account_id, last_read_index, unread_count)
+         SELECT ?,
+                m.account_id,
+                0,
+                (SELECT COUNT(*) FROM comments cm WHERE cm.thread_id = ? AND cm.deleted_at IS NULL)
+         FROM channel_members m
+         WHERE m.channel_id = ? AND m.account_id <> ?
+         ON CONFLICT(thread_id, account_id)
+         DO UPDATE SET unread_count = thread_reads.unread_count + 1",
+    )
+    .bind(thread_id)
+    .bind(thread_id)
+    .bind(&channel_id)
+    .bind(actor_id)
     .execute(&mut tx)
     .await?;
     let thread_title: String = query_scalar("SELECT title FROM threads WHERE id = ?")
@@ -510,9 +528,20 @@ pub(crate) async fn send_dm(
         .execute(&mut tx)
         .await?;
     query(
-        "UPDATE conversation_members SET last_read_index = ? WHERE conversation_id = ? AND account_id = ?",
+        "UPDATE conversation_members
+         SET last_read_index = ?, unread_count = 0
+         WHERE conversation_id = ? AND account_id = ?",
     )
     .bind(next_index)
+    .bind(conversation_id)
+    .bind(actor_id)
+    .execute(&mut tx)
+    .await?;
+    query(
+        "UPDATE conversation_members
+         SET unread_count = unread_count + 1
+         WHERE conversation_id = ? AND account_id <> ?",
+    )
     .bind(conversation_id)
     .bind(actor_id)
     .execute(&mut tx)

@@ -596,6 +596,140 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
 }
 
 #[tokio::test]
+async fn sqlite_unread_counters_track_reads_unreads_and_deletes() {
+    let (_config, state) = test_state("unread-counters").await;
+    let owner = bootstrap_owner(&state, "SHA256:counter-owner", "ssh-ed25519 owner").await;
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:counter-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
+    let channel_id = state
+        .create_channel(owner.id.clone(), "counter-room".to_string(), false)
+        .await
+        .expect("channel");
+    state
+        .join_channel(alice.id.clone(), "counter-room".to_string())
+        .await
+        .expect("alice joins");
+    let thread_id = state
+        .create_thread(
+            owner.id.clone(),
+            channel_id.clone(),
+            "Counter thread".to_string(),
+        )
+        .await
+        .expect("thread");
+
+    state
+        .add_comment(owner.id.clone(), thread_id.clone(), "first".to_string())
+        .await
+        .expect("first comment");
+    state
+        .add_comment(owner.id.clone(), thread_id.clone(), "second".to_string())
+        .await
+        .expect("second comment");
+    let alice_snapshot = state
+        .snapshot(&alice.id, Some(&channel_id), Some(&thread_id), None)
+        .await
+        .expect("alice snapshot");
+    assert_eq!(alice_snapshot.channel_unread(&channel_id), 2);
+    assert_eq!(alice_snapshot.threads[0].unread_count, 2);
+
+    state
+        .mark_thread_read(&alice.id, &thread_id)
+        .await
+        .expect("mark thread read");
+    let unread_after_read: i64 = query_scalar(
+        "SELECT unread_count FROM thread_reads WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("thread read row");
+    assert_eq!(unread_after_read, 0);
+
+    state
+        .mark_thread_unread(&alice.id, &thread_id)
+        .await
+        .expect("mark thread unread");
+    let unread_after_unread: i64 = query_scalar(
+        "SELECT unread_count FROM thread_reads WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("thread unread row");
+    assert_eq!(unread_after_unread, 1);
+
+    state
+        .delete_comment(&owner.id, &thread_id, 2)
+        .await
+        .expect("delete unread comment");
+    let unread_after_delete: i64 = query_scalar(
+        "SELECT unread_count FROM thread_reads WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("thread deleted row");
+    assert_eq!(unread_after_delete, 0);
+
+    let dm_id = state
+        .open_dm(owner.id.clone(), "alice".to_string())
+        .await
+        .expect("open dm");
+    state
+        .send_dm(owner.id.clone(), dm_id.clone(), "hello".to_string())
+        .await
+        .expect("send dm");
+    let alice_dm_snapshot = state
+        .snapshot(&alice.id, None, None, Some(&dm_id))
+        .await
+        .expect("alice dm snapshot");
+    assert_eq!(alice_dm_snapshot.conversations[0].unread_count, 1);
+
+    state
+        .mark_conversation_read(&alice.id, &dm_id)
+        .await
+        .expect("mark dm read");
+    state
+        .mark_conversation_unread(&alice.id, &dm_id)
+        .await
+        .expect("mark dm unread");
+    let dm_unread: i64 = query_scalar(
+        "SELECT unread_count FROM conversation_members WHERE conversation_id = ? AND account_id = ?",
+    )
+    .bind(&dm_id)
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("dm unread row");
+    assert_eq!(dm_unread, 1);
+
+    state
+        .delete_dm(&owner.id, &dm_id, 1)
+        .await
+        .expect("delete dm");
+    let dm_unread_after_delete: i64 = query_scalar(
+        "SELECT unread_count FROM conversation_members WHERE conversation_id = ? AND account_id = ?",
+    )
+    .bind(&dm_id)
+    .bind(&alice.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("dm deleted row");
+    assert_eq!(dm_unread_after_delete, 0);
+}
+
+#[tokio::test]
 async fn visible_text_persistence_strips_terminal_controls() {
     let (_config, state) = test_state("sanitize-visible-text").await;
     let owner = bootstrap_owner(&state, "SHA256:sanitize-owner", "ssh-ed25519 owner").await;

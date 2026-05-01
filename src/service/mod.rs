@@ -14,7 +14,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::db::{Database, DbRow, DbTransaction, query, query_as, query_scalar};
+use crate::db::{Database, DbExecutor, DbRow, DbTransaction, query, query_as, query_scalar};
 
 pub use crate::domain::*;
 

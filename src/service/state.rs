@@ -294,23 +294,34 @@ impl ServerState {
         selected_conversation_id: Option<&str>,
         history_limit: i64,
     ) -> anyhow::Result<Snapshot> {
+        let started = std::time::Instant::now();
         let history_limit = history_limit.clamp(1, MAX_HISTORY_LIMIT);
-        let account = self.reload_account(account_id).await?;
+        let read_session = self.db.read_session().await?;
+        let account = {
+            let row = query(
+                "SELECT id, username, display_name, role, activated_at, pending_username
+                 FROM accounts WHERE id = ? AND disabled_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_one(&read_session)
+            .await?;
+            account_from_row(row)?
+        };
         if !account.activated {
             return Ok(Snapshot::default());
         }
 
-        let channels = load_channels(self.db.read_pool(), account_id).await?;
-        let mut active_account_ids = load_active_presence_sessions(self.db.read_pool()).await?;
+        let channels = load_channels(&read_session, account_id).await?;
+        let mut active_account_ids = load_active_presence_sessions(&read_session).await?;
         active_account_ids.extend(self.active_account_ids().await);
-        let users = load_user_presence(self.db.read_pool(), &active_account_ids).await?;
+        let users = load_user_presence(&read_session, &active_account_ids).await?;
         let selected_channel_id = selected_channel_id
             .filter(|id| channels.iter().any(|channel| channel.id == *id))
             .map(ToOwned::to_owned)
             .or_else(|| channels.first().map(|channel| channel.id.clone()));
 
         let threads = if let Some(channel_id) = selected_channel_id.as_deref() {
-            load_threads(self.db.read_pool(), account_id, channel_id).await?
+            load_threads(&read_session, account_id, channel_id).await?
         } else {
             Vec::new()
         };
@@ -319,14 +330,14 @@ impl ServerState {
             .map(ToOwned::to_owned)
             .or_else(|| threads.first().map(|thread| thread.id.clone()));
         let (comments, comments_has_more) = if let Some(thread_id) = selected_thread_id.as_deref() {
-            load_comments(self.db.read_pool(), account_id, thread_id, history_limit).await?
+            load_comments(&read_session, account_id, thread_id, history_limit).await?
         } else {
             (Vec::new(), false)
         };
 
-        let conversations = load_conversations(self.db.read_pool(), account_id).await?;
-        let dm_sidebar = load_dm_sidebar(self.db.read_pool(), account_id).await?;
-        let saved_count = load_saved_message_count(self.db.read_pool(), account_id).await?;
+        let conversations = load_conversations(&read_session, account_id).await?;
+        let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
+        let saved_count = load_saved_message_count(&read_session, account_id).await?;
         let selected_conversation_id = selected_conversation_id
             .filter(|id| {
                 conversations
@@ -334,41 +345,35 @@ impl ServerState {
                     .any(|conversation| conversation.id == *id)
             })
             .map(ToOwned::to_owned);
-        let (conversation_messages, conversation_messages_has_more) =
-            if let Some(conversation_id) = selected_conversation_id.as_deref() {
-                load_conversation_messages(
-                    self.db.read_pool(),
-                    account_id,
-                    conversation_id,
-                    history_limit,
-                )
+        let (conversation_messages, conversation_messages_has_more) = if let Some(conversation_id) =
+            selected_conversation_id.as_deref()
+        {
+            load_conversation_messages(&read_session, account_id, conversation_id, history_limit)
                 .await?
-            } else {
-                (Vec::new(), false)
-            };
-        let notifications = load_notifications(self.db.read_pool(), account_id, 20).await?;
-        let notification_unread_sql = format!(
-            "SELECT COUNT(*)
-             FROM notifications n
-             WHERE n.account_id = ? AND n.read_at IS NULL AND n.archived_at IS NULL AND {}",
-            notification_visible_source_sql("n")
-        );
-        let notification_unread_count: i64 = query_scalar(&notification_unread_sql)
-            .bind(account_id)
-            .fetch_one(self.db.read_pool())
-            .await?;
-        let mention_unread_sql = format!(
-            "SELECT COUNT(*)
-             FROM mentions m
-             WHERE m.target_account_id = ? AND m.read_at IS NULL AND {}",
+        } else {
+            (Vec::new(), false)
+        };
+        let notifications = load_notifications(&read_session, account_id, 20).await?;
+        let unread_count_sql = format!(
+            "SELECT
+               (SELECT COUNT(*)
+                FROM notifications n
+                WHERE n.account_id = ? AND n.read_at IS NULL AND n.archived_at IS NULL AND {}) AS notification_unread_count,
+               (SELECT COUNT(*)
+                FROM mentions m
+                WHERE m.target_account_id = ? AND m.read_at IS NULL AND {}) AS mention_unread_count",
+            notification_visible_source_sql("n"),
             mention_visible_source_sql("m")
         );
-        let mention_unread_count: i64 = query_scalar(&mention_unread_sql)
+        let unread_count_row = query(&unread_count_sql)
             .bind(account_id)
-            .fetch_one(self.db.read_pool())
+            .bind(account_id)
+            .fetch_one(&read_session)
             .await?;
+        let notification_unread_count: i64 = unread_count_row.get("notification_unread_count");
+        let mention_unread_count: i64 = unread_count_row.get("mention_unread_count");
 
-        Ok(Snapshot {
+        let snapshot = Snapshot {
             current_username: Some(account.username),
             users,
             channels,
@@ -391,7 +396,20 @@ impl ServerState {
             selected_channel_id,
             selected_thread_id,
             selected_conversation_id,
-        })
+        };
+        tracing::debug!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            channels = snapshot.channels.len(),
+            threads = snapshot.threads.len(),
+            comments = snapshot.comments.len(),
+            conversations = snapshot.conversations.len(),
+            dm_sidebar = snapshot.dm_sidebar.len(),
+            conversation_messages = snapshot.conversation_messages.len(),
+            notifications = snapshot.notifications.len(),
+            saved_count = snapshot.saved_count,
+            "snapshot loaded"
+        );
+        Ok(snapshot)
     }
 
     pub async fn touch_account(&self, account_id: &str) -> anyhow::Result<()> {

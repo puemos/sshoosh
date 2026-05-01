@@ -3,10 +3,10 @@ use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicI64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, bail};
@@ -31,6 +31,8 @@ const MIGRATION_SAVED_MESSAGES: &str =
     include_str!("../migrations/20260501000000_saved_messages.sql");
 const MIGRATION_NOTIFICATION_ARCHIVE: &str =
     include_str!("../migrations/20260501000001_notification_archive.sql");
+const MIGRATION_PERFORMANCE_COUNTERS: &str =
+    include_str!("../migrations/20260501000002_performance_counters.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -72,6 +74,11 @@ pub struct DbTransaction {
     tx: libsql::Transaction,
     encryption: Option<Arc<EncryptionService>>,
     bypass_master_check: bool,
+}
+
+pub struct DbReadSession {
+    conn: Connection,
+    encryption: Option<Arc<EncryptionService>>,
 }
 
 #[derive(Clone, Debug)]
@@ -298,6 +305,10 @@ impl Database {
                 "20260501000001_notification_archive",
                 MIGRATION_NOTIFICATION_ARCHIVE,
             ),
+            (
+                "20260501000002_performance_counters",
+                MIGRATION_PERFORMANCE_COUNTERS,
+            ),
         ] {
             let exists: Option<String> =
                 query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")
@@ -315,6 +326,16 @@ impl Database {
                        ON notifications(account_id, archived_at, created_at DESC);",
                 )
                 .await?;
+                query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
+                    .bind(version)
+                    .bind(now())
+                    .execute_unchecked(self)
+                    .await?;
+                continue;
+            }
+            if version == "20260501000002_performance_counters"
+                && self.performance_counter_columns_exist().await?
+            {
                 query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
                     .bind(version)
                     .bind(now())
@@ -343,6 +364,24 @@ impl Database {
         .fetch_one_unchecked(self)
         .await?;
         Ok(count > 0)
+    }
+
+    async fn performance_counter_columns_exist(&self) -> anyhow::Result<bool> {
+        let thread_count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM pragma_table_info('thread_reads')
+             WHERE name = 'unread_count'",
+        )
+        .fetch_one_unchecked(self)
+        .await?;
+        let conversation_count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM pragma_table_info('conversation_members')
+             WHERE name = 'unread_count'",
+        )
+        .fetch_one_unchecked(self)
+        .await?;
+        Ok(thread_count > 0 && conversation_count > 0)
     }
 
     pub async fn doctor(&self) -> anyhow::Result<DoctorReport> {
@@ -443,6 +482,15 @@ impl Database {
 
     pub async fn begin(&self) -> anyhow::Result<DbTransaction> {
         self.transaction().await
+    }
+
+    pub async fn read_session(&self) -> anyhow::Result<DbReadSession> {
+        let conn = self.connection()?;
+        self.configure_connection(&conn).await?;
+        Ok(DbReadSession {
+            conn,
+            encryption: self.encryption.clone(),
+        })
     }
 
     pub async fn master_status(&self) -> anyhow::Result<Option<MasterStatus>> {
@@ -699,10 +747,18 @@ impl DbExecutor for &Database {
         query.encrypt_params(self.encryption.as_deref())?;
         let conn = self.connection()?;
         self.configure_connection(&conn).await?;
+        let started = Instant::now();
         let rows_affected = conn
             .execute(&query.sql, params_from_iter(query.params))
             .await
             .with_context(|| format!("executing SQL: {}", summarize_sql(&query.sql)))?;
+        trace_query(
+            "execute",
+            &query.sql,
+            started.elapsed(),
+            Some(rows_affected),
+            None,
+        );
         let mut rows = conn.query("SELECT last_insert_rowid()", ()).await?;
         let last_insert_rowid = rows
             .next()
@@ -719,11 +775,58 @@ impl DbExecutor for &Database {
         let conn = self.connection()?;
         self.configure_connection(&conn).await?;
         let row_id_hint = query.row_id_hint();
+        let sql = query.sql.clone();
+        let started = Instant::now();
         let mut rows = conn
             .query(&query.sql, params_from_iter(query.params))
             .await
             .with_context(|| format!("querying SQL: {}", summarize_sql(&query.sql)))?;
-        collect_rows(&mut rows, self.encryption.clone(), row_id_hint).await
+        let rows = collect_rows(&mut rows, self.encryption.clone(), row_id_hint).await?;
+        trace_query("query", &sql, started.elapsed(), None, Some(rows.len()));
+        Ok(rows)
+    }
+}
+
+impl DbExecutor for &DbReadSession {
+    async fn execute_query(&mut self, mut query: Query) -> anyhow::Result<DbResult> {
+        query.encrypt_params(self.encryption.as_deref())?;
+        let started = Instant::now();
+        let rows_affected = self
+            .conn
+            .execute(&query.sql, params_from_iter(query.params))
+            .await
+            .with_context(|| format!("executing SQL: {}", summarize_sql(&query.sql)))?;
+        trace_query(
+            "execute",
+            &query.sql,
+            started.elapsed(),
+            Some(rows_affected),
+            None,
+        );
+        let mut rows = self.conn.query("SELECT last_insert_rowid()", ()).await?;
+        let last_insert_rowid = rows
+            .next()
+            .await?
+            .and_then(|row| row.get::<i64>(0).ok())
+            .unwrap_or(0);
+        Ok(DbResult {
+            rows_affected,
+            last_insert_rowid,
+        })
+    }
+
+    async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>> {
+        let row_id_hint = query.row_id_hint();
+        let sql = query.sql.clone();
+        let started = Instant::now();
+        let mut rows = self
+            .conn
+            .query(&query.sql, params_from_iter(query.params))
+            .await
+            .with_context(|| format!("querying SQL: {}", summarize_sql(&query.sql)))?;
+        let rows = collect_rows(&mut rows, self.encryption.clone(), row_id_hint).await?;
+        trace_query("query", &sql, started.elapsed(), None, Some(rows.len()));
+        Ok(rows)
     }
 }
 
@@ -733,11 +836,19 @@ impl DbExecutor for &mut DbTransaction {
             query.bypass_master_check = true;
         }
         query.encrypt_params(self.encryption.as_deref())?;
+        let started = Instant::now();
         let rows_affected = self
             .tx
             .execute(&query.sql, params_from_iter(query.params))
             .await
             .with_context(|| format!("executing SQL: {}", summarize_sql(&query.sql)))?;
+        trace_query(
+            "execute",
+            &query.sql,
+            started.elapsed(),
+            Some(rows_affected),
+            None,
+        );
         let mut rows = self.tx.query("SELECT last_insert_rowid()", ()).await?;
         let last_insert_rowid = rows
             .next()
@@ -752,12 +863,16 @@ impl DbExecutor for &mut DbTransaction {
 
     async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>> {
         let row_id_hint = query.row_id_hint();
+        let sql = query.sql.clone();
+        let started = Instant::now();
         let mut rows = self
             .tx
             .query(&query.sql, params_from_iter(query.params))
             .await
             .with_context(|| format!("querying SQL: {}", summarize_sql(&query.sql)))?;
-        collect_rows(&mut rows, self.encryption.clone(), row_id_hint).await
+        let rows = collect_rows(&mut rows, self.encryption.clone(), row_id_hint).await?;
+        trace_query("query", &sql, started.elapsed(), None, Some(rows.len()));
+        Ok(rows)
     }
 }
 
@@ -1511,6 +1626,41 @@ fn redact_database_url(url: &str) -> String {
 
 fn summarize_sql(sql: &str) -> String {
     normalize_sql(sql).chars().take(160).collect()
+}
+
+fn trace_query(
+    operation: &'static str,
+    sql: &str,
+    elapsed: Duration,
+    rows_affected: Option<u64>,
+    row_count: Option<usize>,
+) {
+    static SLOW_QUERY_MS: OnceLock<u128> = OnceLock::new();
+    let slow_ms = *SLOW_QUERY_MS.get_or_init(|| {
+        std::env::var("SSHOOSH_SLOW_QUERY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .unwrap_or(50)
+    });
+    if elapsed.as_millis() >= slow_ms {
+        tracing::warn!(
+            operation,
+            elapsed_ms = elapsed.as_millis() as u64,
+            rows_affected,
+            row_count,
+            sql = %summarize_sql(sql),
+            "slow database query"
+        );
+    } else {
+        tracing::trace!(
+            operation,
+            elapsed_ms = elapsed.as_millis() as u64,
+            rows_affected,
+            row_count,
+            sql = %summarize_sql(sql),
+            "database query"
+        );
+    }
 }
 
 fn normalize_sql(sql: &str) -> String {
