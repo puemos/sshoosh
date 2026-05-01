@@ -541,20 +541,20 @@ fn render_empty_state(
 
 fn empty_thread_lines(snapshot: &Snapshot) -> Vec<Line<'static>> {
     if snapshot.channels.is_empty() {
-        return splash_state_lines(
+        return empty_state_lines(
             "No channels yet",
             "Create a place for the first thread",
             "/channel new name",
         );
     }
     if snapshot.threads.is_empty() {
-        return splash_state_lines(
+        return empty_state_lines(
             "No threads in this channel",
             "Start the conversation here",
             "/thread new title",
         );
     }
-    splash_state_lines(
+    empty_state_lines(
         "Select a thread",
         "Browse threads on the left",
         "/thread new title",
@@ -601,15 +601,4 @@ fn empty_state_lines(
             Span::styled(command, theme::accent()),
         ]),
     ]
-}
-
-fn splash_state_lines(
-    title: &'static str,
-    detail: &'static str,
-    command: &'static str,
-) -> Vec<Line<'static>> {
-    let mut lines = sshoosh_logo_lines();
-    lines.push(Line::from(""));
-    lines.extend(empty_state_lines(title, detail, command));
-    lines
 }
