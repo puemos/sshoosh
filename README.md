@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/public/assets/sshoosh-logo.svg" alt="sshoosh logo" width="420">
+  <img src="docs/public/assets/sshoosh-logo-light.svg" alt="sshoosh logo" width="420">
 </p>
 
 # sshoosh

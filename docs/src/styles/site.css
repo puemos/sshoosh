@@ -118,10 +118,26 @@ input {
   text-decoration: none;
 }
 
-.brand img {
+.brand:hover {
+  background: transparent;
+}
+
+.brand-logo {
   width: 92px;
   height: auto;
   object-fit: contain;
+}
+
+.brand-logo-dark {
+  display: none;
+}
+
+html[data-theme="dark"] .brand-logo-light {
+  display: none;
+}
+
+html[data-theme="dark"] .brand-logo-dark {
+  display: block;
 }
 
 .topline nav {
@@ -159,12 +175,6 @@ input {
   max-width: 620px;
   margin: 0 auto;
   padding-top: 56px;
-}
-
-.hero-logo {
-  display: block;
-  width: min(100%, 500px);
-  margin: 0 0 24px;
 }
 
 .eyebrow,
