@@ -11,6 +11,8 @@ pub struct Config {
     pub master_heartbeat: Duration,
     pub host: String,
     pub port: u16,
+    pub max_connections: usize,
+    pub max_connections_per_ip: usize,
     pub server_key_path: PathBuf,
     pub mouse_enabled: bool,
 }

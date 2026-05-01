@@ -455,6 +455,7 @@ impl Database {
             "backup output already exists; refusing to overwrite {out}"
         );
         let escaped = out.replace('\'', "''");
+        let _umask = RestrictiveUmask::new();
         self.execute_batch_unchecked(&format!("VACUUM INTO '{escaped}'"))
             .await?;
         secure_local_database_files(path)?;
@@ -1530,6 +1531,41 @@ fn secure_local_database_files(path: &Path) -> anyhow::Result<()> {
         secure_local_database_file(&sqlite_sidecar_path(path, "-shm"))?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+struct RestrictiveUmask {
+    previous: libc::mode_t,
+}
+
+#[cfg(unix)]
+impl RestrictiveUmask {
+    fn new() -> Self {
+        Self {
+            // SAFETY: umask is process-global. This guard restores the previous mask on drop.
+            previous: unsafe { libc::umask(0o077) },
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RestrictiveUmask {
+    fn drop(&mut self) {
+        // SAFETY: restoring a previously returned umask value.
+        unsafe {
+            libc::umask(self.previous);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct RestrictiveUmask;
+
+#[cfg(not(unix))]
+impl RestrictiveUmask {
+    fn new() -> Self {
+        Self
+    }
 }
 
 #[cfg(unix)]
