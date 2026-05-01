@@ -490,7 +490,8 @@ pub(crate) async fn load_saved_messages(
     let limit = limit.clamp(1, 500);
     let fetch_limit = limit.saturating_add(1);
     let rows = query(
-        "SELECT kind, source_id, source_obj_index, author, body, source_label, saved_at, created_at,
+        "SELECT kind, source_id, source_obj_index, author, body, source_label,
+                channel_slug, thread_title, dm_peer_username, saved_at, created_at,
                 channel_id, thread_id, conversation_id
          FROM (
            SELECT 'comment' AS kind,
@@ -499,6 +500,9 @@ pub(crate) async fn load_saved_messages(
                   a.username AS author,
                   cm.body,
                   '#' || ch.slug || ' · ' || t.title AS source_label,
+                  ch.slug AS channel_slug,
+                  t.title AS thread_title,
+                  NULL AS dm_peer_username,
                   sm.saved_at,
                   cm.created_at,
                   ch.id AS channel_id,
@@ -524,6 +528,9 @@ pub(crate) async fn load_saved_messages(
                   a.username AS author,
                   dm.body,
                   'DM @' || peer.username AS source_label,
+                  NULL AS channel_slug,
+                  NULL AS thread_title,
+                  peer.username AS dm_peer_username,
                   sm.saved_at,
                   dm.created_at,
                   NULL AS channel_id,
@@ -567,6 +574,15 @@ pub(crate) async fn load_saved_messages(
                 author: row.get("author"),
                 body: sanitize_stored_text(&row.get::<String>("body")),
                 source_label: sanitize_single_line_text(&row.get::<String>("source_label")),
+                channel_slug: row
+                    .get::<Option<String>>("channel_slug")
+                    .map(|slug| sanitize_single_line_text(&slug)),
+                thread_title: row
+                    .get::<Option<String>>("thread_title")
+                    .map(|title| sanitize_single_line_text(&title)),
+                dm_peer_username: row
+                    .get::<Option<String>>("dm_peer_username")
+                    .map(|username| sanitize_single_line_text(&username)),
                 saved_at: row.get("saved_at"),
                 created_at: row.get("created_at"),
                 channel_id: row.get("channel_id"),

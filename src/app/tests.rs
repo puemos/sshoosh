@@ -625,6 +625,9 @@ mod cases {
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("thread".to_string()),
+            dm_peer_username: None,
             saved_at: "2020-01-03T03:04:00Z".to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             channel_id: Some("general".to_string()),
@@ -669,6 +672,9 @@ mod cases {
             author: "owner".to_string(),
             body: "Saved DM".to_string(),
             source_label: "DM @alice".to_string(),
+            channel_slug: None,
+            thread_title: None,
+            dm_peer_username: Some("alice".to_string()),
             saved_at: "2020-01-03T03:04:00Z".to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             channel_id: None,
@@ -685,6 +691,60 @@ mod cases {
         app.render().expect("render focused dm");
         assert_eq!(app.ui.detail_scroll.offset().y, 16);
         assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn saved_screen_renders_source_titles_without_saved_label() {
+        let mut app = test_app("saved-screen-titles").await;
+        app.resize(120, 18).expect("resize");
+        app.snapshot.current_username = Some("shy".to_string());
+        app.snapshot.saved_count = 2;
+        app.snapshot.saved_messages = vec![
+            SavedMessageItem {
+                kind: SavedMessageKind::Dm,
+                source_id: "dm-message-1".to_string(),
+                source_obj_index: 1,
+                author: "shy".to_string(),
+                body: "DM body".to_string(),
+                source_label: "DM @alice".to_string(),
+                channel_slug: None,
+                thread_title: None,
+                dm_peer_username: Some("alice".to_string()),
+                saved_at: "2020-01-03T03:04:00Z".to_string(),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                channel_id: None,
+                thread_id: None,
+                conversation_id: Some("dm".to_string()),
+            },
+            SavedMessageItem {
+                kind: SavedMessageKind::Comment,
+                source_id: "comment-1".to_string(),
+                source_obj_index: 1,
+                author: "shy".to_string(),
+                body: "Comment body".to_string(),
+                source_label: "#support · Search quality pass".to_string(),
+                channel_slug: Some("support".to_string()),
+                thread_title: Some("Search quality pass".to_string()),
+                dm_peer_username: None,
+                saved_at: "2020-01-03T03:04:00Z".to_string(),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                channel_id: Some("support".to_string()),
+                thread_id: Some("thread".to_string()),
+                conversation_id: None,
+            },
+        ];
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+
+        let output =
+            String::from_utf8_lossy(&app.render().expect("render saved screen")).into_owned();
+
+        assert!(output.contains("DM @shy → @alice"), "{output:?}");
+        assert!(
+            output.contains("@shy on #support / Search quality pass"),
+            "{output:?}"
+        );
+        assert!(!output.contains("saved   @"), "{output:?}");
     }
 
     #[tokio::test]
@@ -729,6 +789,9 @@ mod cases {
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("thread".to_string()),
+            dm_peer_username: None,
             saved_at: "2020-01-03T03:04:00Z".to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             channel_id: Some("general".to_string()),
@@ -758,6 +821,9 @@ mod cases {
             author: "alice".to_string(),
             body: "Saved note".to_string(),
             source_label: "#general · thread".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("thread".to_string()),
+            dm_peer_username: None,
             saved_at: "2020-01-03T03:04:00Z".to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             channel_id: Some("general".to_string()),
@@ -803,6 +869,9 @@ mod cases {
                 author: "alice".to_string(),
                 body: format!("Saved note {index} with enough text to wrap in a compact pane"),
                 source_label: "#general · thread".to_string(),
+                channel_slug: Some("general".to_string()),
+                thread_title: Some("thread".to_string()),
+                dm_peer_username: None,
                 saved_at: "2020-01-03T03:04:00Z".to_string(),
                 created_at: "2020-01-02T03:04:00Z".to_string(),
                 channel_id: Some("general".to_string()),

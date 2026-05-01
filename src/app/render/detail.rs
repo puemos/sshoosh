@@ -359,12 +359,9 @@ pub(crate) fn draw_saved_detail(
         if selected {
             selected_row = Some(content_row);
         }
-        let item = message_result_list_item(MessageResultRow {
+        let item = saved_message_result_list_item(SavedMessageResultRow {
             selected,
-            emphasized: false,
-            leading: "saved".to_string(),
-            actor: format!("@{}", item.author),
-            source: saved_source_label(item),
+            title: saved_result_title(snapshot, item),
             meta: saved_at,
             body: item.body.clone(),
             body_width,
@@ -469,10 +466,6 @@ pub(crate) fn draw_notifications_detail(
         row_hits,
         ui.detail_scroll.offset().y,
     );
-}
-
-fn saved_source_label(item: &crate::service::SavedMessageItem) -> String {
-    item.source_label.replace(" · ", " / ")
 }
 
 fn visible_notification_indices_for_filter(
@@ -642,6 +635,66 @@ struct MessageResultRow {
     meta: String,
     body: String,
     body_width: usize,
+}
+
+struct SavedMessageResultRow {
+    selected: bool,
+    title: String,
+    meta: String,
+    body: String,
+    body_width: usize,
+}
+
+fn saved_result_title(snapshot: &Snapshot, item: &crate::service::SavedMessageItem) -> String {
+    match item.kind {
+        SavedMessageKind::Dm => {
+            let actor = snapshot
+                .current_username
+                .as_deref()
+                .unwrap_or(item.author.as_str());
+            let peer = item
+                .dm_peer_username
+                .as_deref()
+                .unwrap_or(item.source_label.strip_prefix("DM @").unwrap_or("DM"));
+            format!("DM @{actor} → @{peer}")
+        }
+        SavedMessageKind::Comment => {
+            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
+                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+                _ => item.source_label.replace(" · ", " / "),
+            };
+            format!("@{} on {}", item.author, source)
+        }
+    }
+}
+
+fn saved_message_result_list_item(row: SavedMessageResultRow) -> ListItem<'static> {
+    let title_style = if row.selected {
+        theme::title()
+    } else {
+        theme::muted()
+    };
+    let body_style = if row.selected {
+        theme::message_body()
+    } else {
+        theme::muted()
+    };
+    let mut lines = vec![
+        Line::from(Span::styled(
+            sanitize_terminal_visible_text(&row.title),
+            title_style,
+        )),
+        Line::from(Span::styled(
+            sanitize_terminal_visible_text(&row.meta),
+            theme::muted(),
+        )),
+    ];
+    let body = sanitize_terminal_visible_text(&row.body);
+    for line in wrap_plain_text(&body, row.body_width) {
+        lines.push(Line::from(Span::styled(line, body_style)));
+    }
+    lines.push(Line::from(""));
+    ListItem::new(lines)
 }
 
 fn message_result_list_item(row: MessageResultRow) -> ListItem<'static> {
