@@ -319,7 +319,7 @@ impl ServerState {
             .map(ToOwned::to_owned)
             .or_else(|| threads.first().map(|thread| thread.id.clone()));
         let (comments, comments_has_more) = if let Some(thread_id) = selected_thread_id.as_deref() {
-            load_comments(self.db.read_pool(), thread_id, history_limit).await?
+            load_comments(self.db.read_pool(), account_id, thread_id, history_limit).await?
         } else {
             (Vec::new(), false)
         };
@@ -333,13 +333,18 @@ impl ServerState {
                     .any(|conversation| conversation.id == *id)
             })
             .map(ToOwned::to_owned);
-        let (conversation_messages, conversation_messages_has_more) = if let Some(conversation_id) =
-            selected_conversation_id.as_deref()
-        {
-            load_conversation_messages(self.db.read_pool(), conversation_id, history_limit).await?
-        } else {
-            (Vec::new(), false)
-        };
+        let (conversation_messages, conversation_messages_has_more) =
+            if let Some(conversation_id) = selected_conversation_id.as_deref() {
+                load_conversation_messages(
+                    self.db.read_pool(),
+                    account_id,
+                    conversation_id,
+                    history_limit,
+                )
+                .await?
+            } else {
+                (Vec::new(), false)
+            };
         let notifications = load_notifications(self.db.read_pool(), account_id, 20).await?;
         let notification_unread_sql = format!(
             "SELECT COUNT(*)

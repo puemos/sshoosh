@@ -497,7 +497,7 @@ def seed_demo_data(conn: sqlite3.Connection, anchor: Account) -> dict[str, int]:
                             f"demo-reaction-{reaction_counter:04d}",
                             comment_id,
                             reactor.id,
-                            "eyes" if comment_index % 4 == 0 else "thumbsup",
+                            "👀" if comment_index % 4 == 0 else "👍",
                             ts(comment_at + timedelta(minutes=10)),
                         ),
                     )

@@ -10,8 +10,8 @@ mod cases {
     use crate::{
         db::Database,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, ServerState,
-            Snapshot, ThreadItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
+            ReactionSummary, ServerState, Snapshot, ThreadItem,
         },
     };
 
@@ -72,7 +72,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             conversations: vec![Conversation {
                 id: "dm".to_string(),
@@ -98,7 +98,7 @@ mod cases {
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             edited_at: None,
-            reactions: String::new(),
+            reactions: Vec::new(),
         }
     }
 
@@ -110,7 +110,7 @@ mod cases {
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             edited_at: None,
-            reactions: String::new(),
+            reactions: Vec::new(),
         }
     }
 
@@ -719,6 +719,96 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn clicking_inactive_reaction_chip_adds_reaction() {
+        let mut app = test_app("reaction-chip-add").await;
+        app.snapshot.comments = vec![CommentItem {
+            reactions: vec![ReactionSummary {
+                emoji: "👍".to_string(),
+                count: 1,
+                reacted_by_me: false,
+            }],
+            ..comment(2, "alice", "Looks good")
+        }];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::ReactionChip {
+                    emoji,
+                    reacted_by_me: false,
+                    ..
+                } if emoji == "👍"
+            )
+        });
+
+        assert_eq!(
+            app.actions,
+            vec![Action::React {
+                emoji: "👍".to_string(),
+                index: Some(2),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn clicking_active_reaction_chip_removes_reaction() {
+        let mut app = test_app("reaction-chip-remove").await;
+        app.snapshot.comments = vec![CommentItem {
+            reactions: vec![ReactionSummary {
+                emoji: "✅".to_string(),
+                count: 2,
+                reacted_by_me: true,
+            }],
+            ..comment(3, "alice", "Approved")
+        }];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::ReactionChip {
+                    emoji,
+                    reacted_by_me: true,
+                    ..
+                } if emoji == "✅"
+            )
+        });
+
+        assert_eq!(
+            app.actions,
+            vec![Action::Unreact {
+                emoji: "✅".to_string(),
+                index: Some(3),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn clicking_add_reaction_chip_prefills_targeted_command() {
+        let mut app = test_app("reaction-chip-add-new").await;
+        app.snapshot.comments = vec![comment(2, "alice", "Needs a reaction")];
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::ReactionAdd {
+                    target: ReactionTarget::Comment(2)
+                }
+            )
+        });
+
+        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.composer.buffer, "/reaction add  #2");
+        assert_eq!(app.ui.composer.cursor, "/reaction add ".len());
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
     async fn mouse_hover_changes_pointer_shape_for_links() {
         let mut app = test_app("link-hover").await;
         app.snapshot.threads[0].body = "https://openai.com".to_string();
@@ -784,7 +874,7 @@ mod cases {
             pinned_at: None,
             muted_until: None,
             saved_at: None,
-            reactions: String::new(),
+            reactions: Vec::new(),
         });
         app.snapshot.comments = (1..=12)
             .map(|idx| comment(idx, "alice", &format!("comment {idx}\nsecond line")))

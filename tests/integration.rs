@@ -822,8 +822,34 @@ async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
         .snapshot(&alice.id, Some(&engineering_id), Some(&thread_id), None)
         .await
         .expect("reacted snapshot");
-    assert!(reacted.threads[0].reactions.contains("👍"));
-    assert!(reacted.comments[0].reactions.contains("✅"));
+    assert!(
+        reacted.threads[0]
+            .reactions
+            .iter()
+            .any(|reaction| reaction.emoji == "👍"
+                && reaction.count == 1
+                && reaction.reacted_by_me)
+    );
+    assert!(
+        reacted.comments[0]
+            .reactions
+            .iter()
+            .any(|reaction| reaction.emoji == "✅"
+                && reaction.count == 1
+                && !reaction.reacted_by_me)
+    );
+    let owner_reacted = state
+        .snapshot(&owner.id, Some(&engineering_id), Some(&thread_id), None)
+        .await
+        .expect("owner reacted snapshot");
+    assert!(
+        owner_reacted.comments[0]
+            .reactions
+            .iter()
+            .any(|reaction| reaction.emoji == "✅"
+                && reaction.count == 1
+                && reaction.reacted_by_me)
+    );
 
     let dm_id = state
         .open_dm(owner.id.clone(), "alice".to_string())

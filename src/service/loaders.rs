@@ -1,4 +1,36 @@
 use super::*;
+
+const REACTION_RECORD_SEPARATOR: char = '\x1e';
+const REACTION_FIELD_SEPARATOR: char = '\x1f';
+
+fn parse_reaction_summaries(value: &str) -> Vec<ReactionSummary> {
+    value
+        .split(REACTION_RECORD_SEPARATOR)
+        .filter_map(|record| {
+            let mut fields = record.split(REACTION_FIELD_SEPARATOR);
+            let emoji = sanitize_single_line_text(fields.next().unwrap_or_default());
+            let count = fields.next()?.parse::<i64>().ok()?;
+            let reacted_by_me = fields.next() == Some("1");
+            if count <= 0 || !is_displayable_reaction_emoji(&emoji) {
+                return None;
+            }
+            Some(ReactionSummary {
+                emoji,
+                count,
+                reacted_by_me,
+            })
+        })
+        .collect()
+}
+
+fn is_displayable_reaction_emoji(emoji: &str) -> bool {
+    !emoji.is_empty()
+        && emoji.chars().count() <= 8
+        && !emoji
+            .chars()
+            .any(|ch| ch.is_ascii_alphanumeric() || ch.is_control())
+}
+
 pub(crate) async fn load_user_presence(
     pool: &Database,
     active_account_ids: &HashSet<String>,
@@ -145,9 +177,11 @@ pub(crate) async fn load_threads(
                 t.last_activity_at, t.created_at, t.edited_at, t.archived_at, t.pinned_at,
                 r.muted_until, r.saved_at,
                 COALESCE((
-                  SELECT group_concat(emoji || ' ' || count, ' ')
+                  SELECT group_concat(emoji || char(31) || count || char(31) || reacted_by_me, char(30))
                   FROM (
-                    SELECT emoji, COUNT(*) AS count
+                    SELECT emoji,
+                           COUNT(*) AS count,
+                           MAX(CASE WHEN account_id = ? THEN 1 ELSE 0 END) AS reacted_by_me
                     FROM reactions
                     WHERE source_kind = 'thread' AND source_id = t.id
                     GROUP BY emoji
@@ -162,6 +196,7 @@ pub(crate) async fn load_threads(
          LIMIT 200",
     )
     .bind(now())
+    .bind(account_id)
     .bind(account_id)
     .bind(channel_id)
     .fetch_all(pool)
@@ -184,13 +219,14 @@ pub(crate) async fn load_threads(
             pinned_at: row.get("pinned_at"),
             muted_until: row.get("muted_until"),
             saved_at: row.get("saved_at"),
-            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
+            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
         })
         .collect())
 }
 
 pub(crate) async fn load_comments(
     pool: &Database,
+    account_id: &str,
     thread_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<CommentItem>, bool)> {
@@ -200,9 +236,11 @@ pub(crate) async fn load_comments(
          FROM (
            SELECT c.id, a.username AS author, c.obj_index, c.body, c.created_at, c.edited_at,
                   COALESCE((
-                    SELECT group_concat(emoji || ' ' || count, ' ')
+                    SELECT group_concat(emoji || char(31) || count || char(31) || reacted_by_me, char(30))
                     FROM (
-                      SELECT emoji, COUNT(*) AS count
+                      SELECT emoji,
+                             COUNT(*) AS count,
+                             MAX(CASE WHEN account_id = ? THEN 1 ELSE 0 END) AS reacted_by_me
                       FROM reactions
                       WHERE source_kind = 'comment' AND source_id = c.id
                       GROUP BY emoji
@@ -215,8 +253,9 @@ pub(crate) async fn load_comments(
            ORDER BY c.obj_index DESC
            LIMIT ?
          ) recent
-         ORDER BY obj_index ASC",
+        ORDER BY obj_index ASC",
     )
+    .bind(account_id)
     .bind(thread_id)
     .bind(limit.saturating_add(1))
     .fetch_all(pool)
@@ -230,7 +269,7 @@ pub(crate) async fn load_comments(
             body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
-            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
+            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
         })
         .collect();
     let has_more = comments.len() > limit as usize;
@@ -372,6 +411,7 @@ pub(crate) async fn load_dm_sidebar(
 
 pub(crate) async fn load_conversation_messages(
     pool: &Database,
+    account_id: &str,
     conversation_id: &str,
     limit: i64,
 ) -> anyhow::Result<(Vec<ConversationMessage>, bool)> {
@@ -381,9 +421,11 @@ pub(crate) async fn load_conversation_messages(
          FROM (
            SELECT m.id, a.username AS author, m.obj_index, m.body, m.created_at, m.edited_at,
                   COALESCE((
-                    SELECT group_concat(emoji || ' ' || count, ' ')
+                    SELECT group_concat(emoji || char(31) || count || char(31) || reacted_by_me, char(30))
                     FROM (
-                      SELECT emoji, COUNT(*) AS count
+                      SELECT emoji,
+                             COUNT(*) AS count,
+                             MAX(CASE WHEN account_id = ? THEN 1 ELSE 0 END) AS reacted_by_me
                       FROM reactions
                       WHERE source_kind = 'dm' AND source_id = m.id
                       GROUP BY emoji
@@ -396,8 +438,9 @@ pub(crate) async fn load_conversation_messages(
            ORDER BY m.obj_index DESC
            LIMIT ?
          ) recent
-         ORDER BY obj_index ASC",
+        ORDER BY obj_index ASC",
     )
+    .bind(account_id)
     .bind(conversation_id)
     .bind(limit.saturating_add(1))
     .fetch_all(pool)
@@ -411,7 +454,7 @@ pub(crate) async fn load_conversation_messages(
             body: sanitize_stored_text(&row.get::<String>("body")),
             created_at: row.get("created_at"),
             edited_at: row.get("edited_at"),
-            reactions: sanitize_single_line_text(&row.get::<String>("reactions")),
+            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
         })
         .collect();
     let has_more = messages.len() > limit as usize;

@@ -172,9 +172,17 @@ pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String 
     }
     if !thread.reactions.is_empty() {
         out.push(' ');
-        out.push_str(&thread.reactions);
+        out.push_str(&compact_reaction_summary(&thread.reactions));
     }
     out
+}
+
+fn compact_reaction_summary(reactions: &[crate::service::ReactionSummary]) -> String {
+    reactions
+        .iter()
+        .map(|reaction| format!("{} {}", reaction.emoji, reaction.count))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::DmSidebarItem) -> String {

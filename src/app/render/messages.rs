@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::state::MessageSelectionRegion;
+use crate::service::ReactionSummary;
 use crate::time_format::format_human_timestamp;
 use ratatui::style::Color;
 
@@ -9,6 +10,7 @@ const MESSAGE_PREFIX_WIDTH: u16 = 0;
 pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
+    reactions: Vec<MessageReactionHit>,
     hit: Option<MessageCardHit>,
 }
 
@@ -35,6 +37,13 @@ pub(crate) struct MessageLinkHit {
 pub(crate) struct MessageCardHit {
     row: u16,
     height: u16,
+    target: HitTarget,
+}
+
+pub(crate) struct MessageReactionHit {
+    row: u16,
+    col: u16,
+    width: u16,
     target: HitTarget,
 }
 
@@ -77,7 +86,8 @@ pub(crate) fn message_card<'a>(
     author: &str,
     created_at: Option<&str>,
     edited_at: Option<&str>,
-    reactions: Option<&str>,
+    reactions: &[ReactionSummary],
+    reaction_target: Option<ReactionTarget>,
     body: &str,
     width: usize,
 ) -> MessageCard<'a> {
@@ -92,20 +102,13 @@ pub(crate) fn message_card<'a>(
         .collect();
     let mut lines = Vec::new();
     let mut links = Vec::new();
+    let mut reaction_hits = Vec::new();
     let mut row_idx: usize = 0;
 
     if matches!(header_mode, HeaderMode::Full) {
         lines.push(message_card_line(
             gutter,
-            header_spans(
-                kind,
-                author,
-                author_color,
-                created_at,
-                reactions,
-                surface,
-                width,
-            ),
+            header_spans(kind, author, author_color, created_at, surface, width),
         ));
         row_idx += 1;
     }
@@ -155,9 +158,26 @@ pub(crate) fn message_card<'a>(
         row_idx += 1;
     }
 
+    if let Some(target) = reaction_target {
+        for row in reaction_rows(reactions, target, surface, width) {
+            let hit_row = row_idx.min(u16::MAX as usize) as u16;
+            for hit in row.hits {
+                reaction_hits.push(MessageReactionHit {
+                    row: hit_row,
+                    col: hit.col,
+                    width: hit.width,
+                    target: hit.target,
+                });
+            }
+            lines.push(message_card_line(gutter, row.spans));
+            row_idx += 1;
+        }
+    }
+
     MessageCard {
         item: ListItem::new(lines).style(theme::message_card_on(surface)),
         links,
+        reactions: reaction_hits,
         hit: None,
     }
 }
@@ -170,7 +190,6 @@ fn header_spans<'a>(
     author: &str,
     author_color: Color,
     created_at: Option<&str>,
-    reactions: Option<&str>,
     surface: Color,
     width: usize,
 ) -> Vec<Span<'a>> {
@@ -183,9 +202,6 @@ fn header_spans<'a>(
     }
     if matches!(kind, MessageKind::ThreadRoot) {
         right_parts.push("thread root".to_string());
-    }
-    if let Some(reactions) = reactions.filter(|value| !value.is_empty()) {
-        right_parts.push(sanitize_terminal_visible_text(reactions));
     }
     let right = right_parts.join(" · ");
     let right_chars = right.chars().count();
@@ -210,6 +226,87 @@ fn header_spans<'a>(
         ));
     }
     spans
+}
+
+struct ReactionRow<'a> {
+    spans: Vec<Span<'a>>,
+    hits: Vec<ReactionRowHit>,
+}
+
+struct ReactionRowHit {
+    col: u16,
+    width: u16,
+    target: HitTarget,
+}
+
+fn reaction_rows<'a>(
+    reactions: &[ReactionSummary],
+    target: ReactionTarget,
+    surface: Color,
+    width: usize,
+) -> Vec<ReactionRow<'a>> {
+    let mut rows = Vec::new();
+    let mut spans = Vec::new();
+    let mut hits = Vec::new();
+    let mut used = 0usize;
+    let gap = 1usize;
+
+    for chip in reaction_chips(reactions, target) {
+        let chip_width = chip.label.chars().count();
+        if used > 0 && used + gap + chip_width > width {
+            rows.push(ReactionRow { spans, hits });
+            spans = Vec::new();
+            hits = Vec::new();
+            used = 0;
+        }
+        if used > 0 {
+            spans.push(Span::styled(" ", theme::message_card_on(surface)));
+            used += gap;
+        }
+        hits.push(ReactionRowHit {
+            col: used.min(u16::MAX as usize) as u16,
+            width: chip_width.min(u16::MAX as usize) as u16,
+            target: chip.target,
+        });
+        spans.push(Span::styled(chip.label, chip.style));
+        used = used.saturating_add(chip_width);
+    }
+
+    if !spans.is_empty() {
+        rows.push(ReactionRow { spans, hits });
+    }
+    rows
+}
+
+struct ReactionChip {
+    label: String,
+    style: Style,
+    target: HitTarget,
+}
+
+fn reaction_chips(reactions: &[ReactionSummary], target: ReactionTarget) -> Vec<ReactionChip> {
+    let mut chips = reactions
+        .iter()
+        .map(|reaction| ReactionChip {
+            label: format!(
+                " {} {} ",
+                sanitize_terminal_visible_text(&reaction.emoji),
+                reaction.count
+            ),
+            style: theme::reaction_chip(reaction.reacted_by_me),
+            target: HitTarget::ReactionChip {
+                target,
+                emoji: reaction.emoji.clone(),
+                reacted_by_me: reaction.reacted_by_me,
+            },
+        })
+        .collect::<Vec<_>>();
+    chips.push(ReactionChip {
+        label: " + ".to_string(),
+        style: theme::reaction_add_chip(),
+        target: HitTarget::ReactionAdd { target },
+    });
+    chips
 }
 
 fn message_surface(_body: &str) -> Color {
@@ -240,6 +337,7 @@ pub(crate) fn append_plain_item<'a>(
 pub(crate) fn append_message_card<'a>(
     items: &mut Vec<ListItem<'a>>,
     link_hits: &mut Vec<MessageLinkHit>,
+    reaction_hits: &mut Vec<MessageReactionHit>,
     card_hits: &mut Vec<MessageCardHit>,
     selection_hits: &mut Vec<MessageSelectionHit>,
     content_row: &mut u16,
@@ -249,6 +347,10 @@ pub(crate) fn append_message_card<'a>(
     for mut link in card.links {
         link.row = link.row.saturating_add(*content_row);
         link_hits.push(link);
+    }
+    for mut reaction in card.reactions {
+        reaction.row = reaction.row.saturating_add(*content_row);
+        reaction_hits.push(reaction);
     }
     if let Some(mut hit) = card.hit {
         hit.row = hit.row.saturating_add(*content_row);
@@ -279,6 +381,32 @@ pub(crate) fn register_card_hits(
         let height = clipped_bottom.saturating_sub(offset_y.max(hit.row));
         ui.hit_map
             .push(Rect::new(area.x, y, area.width, height), hit.target);
+    }
+}
+
+pub(crate) fn register_reaction_hits(
+    ui: &mut UiState,
+    area: Rect,
+    reaction_hits: Vec<MessageReactionHit>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for reaction in reaction_hits {
+        if reaction.row < offset_y || reaction.row >= bottom {
+            continue;
+        }
+        let Some(x) = area.x.checked_add(reaction.col) else {
+            continue;
+        };
+        let right = area.x.saturating_add(area.width);
+        if x >= right {
+            continue;
+        }
+        let width = reaction.width.min(right.saturating_sub(x));
+        ui.hit_map.push(
+            Rect::new(x, area.y + reaction.row.saturating_sub(offset_y), width, 1),
+            reaction.target,
+        );
     }
 }
 

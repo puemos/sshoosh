@@ -248,6 +248,22 @@ impl EditableMessageTarget {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReactionTarget {
+    ThreadRoot,
+    Comment(i64),
+    Dm(i64),
+}
+
+impl ReactionTarget {
+    pub fn index(self) -> Option<i64> {
+        match self {
+            Self::ThreadRoot => None,
+            Self::Comment(index) | Self::Dm(index) => Some(index),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HitTarget {
     WorkspaceScroll,
@@ -261,6 +277,14 @@ pub enum HitTarget {
     TopbarMentions,
     DetailScroll,
     EditableMessage(EditableMessageTarget),
+    ReactionChip {
+        target: ReactionTarget,
+        emoji: String,
+        reacted_by_me: bool,
+    },
+    ReactionAdd {
+        target: ReactionTarget,
+    },
     MessageLink(String),
     ComposerInput {
         scroll_y: u16,

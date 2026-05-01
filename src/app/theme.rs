@@ -194,6 +194,21 @@ pub fn message_card_on(bg: Color) -> Style {
     Style::default().fg(TEXT).bg(bg)
 }
 
+pub fn reaction_chip(active: bool) -> Style {
+    let fg = if active { ACCENT_SOFT } else { TEXT };
+    Style::default()
+        .fg(fg)
+        .bg(KEYCAP)
+        .add_modifier(Modifier::BOLD)
+}
+
+pub fn reaction_add_chip() -> Style {
+    Style::default()
+        .fg(MUTED)
+        .bg(KEYCAP)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn message_separator() -> Style {
     Style::default().fg(MESSAGE_SEPARATOR).bg(PANEL)
 }

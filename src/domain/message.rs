@@ -1,6 +1,13 @@
 use super::{Channel, NotificationSummary, PresenceState, SearchResult, UserPresence};
 
 #[derive(Clone, Debug)]
+pub struct ReactionSummary {
+    pub emoji: String,
+    pub count: i64,
+    pub reacted_by_me: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct ThreadItem {
     pub id: String,
     pub channel_id: String,
@@ -17,7 +24,7 @@ pub struct ThreadItem {
     pub pinned_at: Option<String>,
     pub muted_until: Option<String>,
     pub saved_at: Option<String>,
-    pub reactions: String,
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,7 +35,7 @@ pub struct CommentItem {
     pub body: String,
     pub created_at: String,
     pub edited_at: Option<String>,
-    pub reactions: String,
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +85,7 @@ pub struct ConversationMessage {
     pub body: String,
     pub created_at: String,
     pub edited_at: Option<String>,
-    pub reactions: String,
+    pub reactions: Vec<ReactionSummary>,
 }
 
 #[derive(Clone, Debug, Default)]

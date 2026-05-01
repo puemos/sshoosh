@@ -31,8 +31,8 @@ use self::{
     input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
     state::{
         ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
-        EditableMessageTarget, HitRegion, HitTarget, PaletteState, Route, SelectionAnchor,
-        SelectionRange, UiMode, UiState,
+        EditableMessageTarget, HitRegion, HitTarget, PaletteState, ReactionTarget, Route,
+        SelectionAnchor, SelectionRange, UiMode, UiState,
     },
 };
 

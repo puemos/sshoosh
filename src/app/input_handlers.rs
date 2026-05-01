@@ -121,6 +121,8 @@ impl App {
             Some(HitRegion {
                 target:
                     HitTarget::MessageLink(_)
+                    | HitTarget::ReactionChip { .. }
+                    | HitTarget::ReactionAdd { .. }
                     | HitTarget::TopbarNotifications
                     | HitTarget::TopbarMentions
                     | HitTarget::ListModalRow(_),
@@ -136,9 +138,11 @@ impl App {
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
-            HitTarget::DetailScroll | HitTarget::EditableMessage(_) | HitTarget::MessageLink(_) => {
-                self.move_detail(delta);
-            }
+            HitTarget::DetailScroll
+            | HitTarget::EditableMessage(_)
+            | HitTarget::ReactionChip { .. }
+            | HitTarget::ReactionAdd { .. }
+            | HitTarget::MessageLink(_) => self.move_detail(delta),
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
                 for _ in 0..steps {
@@ -264,6 +268,23 @@ impl App {
             HitTarget::WorkspaceScroll => self.ui.active_pane = ActivePane::Rail,
             HitTarget::DetailScroll => self.ui.active_pane = ActivePane::Detail,
             HitTarget::EditableMessage(_) => self.ui.active_pane = ActivePane::Detail,
+            HitTarget::ReactionChip {
+                target,
+                emoji,
+                reacted_by_me,
+            } => {
+                self.ui.active_pane = ActivePane::Detail;
+                let index = target.index();
+                if reacted_by_me {
+                    self.actions.push(Action::Unreact { emoji, index });
+                } else {
+                    self.actions.push(Action::React { emoji, index });
+                }
+            }
+            HitTarget::ReactionAdd { target } => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.prefill_reaction_add(target);
+            }
             HitTarget::MessageLink(url) => {
                 self.ui.active_pane = ActivePane::Detail;
                 self.pending_link_open = Some(url);
@@ -569,7 +590,10 @@ impl App {
             let hit = self.ui.hit_map.hit(mouse.column, mouse.row)?;
             if !matches!(
                 hit.target,
-                HitTarget::DetailScroll | HitTarget::MessageLink(_)
+                HitTarget::DetailScroll
+                    | HitTarget::MessageLink(_)
+                    | HitTarget::ReactionChip { .. }
+                    | HitTarget::ReactionAdd { .. }
             ) {
                 return None;
             }
@@ -640,6 +664,25 @@ impl App {
         self.close_comment_overlays();
         self.ui.mode = UiMode::Compose;
         self.ui.composer = ComposerState::from(command.as_str());
+        self.update_completions();
+    }
+
+    pub(crate) fn prefill_reaction_add(&mut self, target: ReactionTarget) {
+        self.close_comment_overlays();
+        self.ui.mode = UiMode::Compose;
+        let prefix = "/reaction add ";
+        let suffix = match target {
+            ReactionTarget::ThreadRoot => "",
+            ReactionTarget::Comment(index) | ReactionTarget::Dm(index) => {
+                return self.prefill_reaction_add_with_suffix(prefix, &format!(" #{index}"));
+            }
+        };
+        self.prefill_reaction_add_with_suffix(prefix, suffix);
+    }
+
+    fn prefill_reaction_add_with_suffix(&mut self, prefix: &str, suffix: &str) {
+        self.ui.composer = ComposerState::from(format!("{prefix}{suffix}").as_str());
+        self.ui.composer.cursor = prefix.len();
         self.update_completions();
     }
 

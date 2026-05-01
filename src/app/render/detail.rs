@@ -79,6 +79,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     draw_thread_header(frame, area, channel_slug, title, header_meta.as_deref(), ui);
     let messages_area = pane_scroll_area(area);
     let mut link_hits = Vec::new();
+    let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
     let mut content_row = 0u16;
@@ -107,13 +108,15 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &thread.author,
                 Some(&thread.created_at),
                 thread.edited_at.as_deref(),
-                Some(&thread.reactions),
+                &thread.reactions,
+                Some(ReactionTarget::ThreadRoot),
                 &thread.body,
                 message_width,
             );
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
                 &mut content_row,
@@ -162,7 +165,8 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &comment.author,
                 Some(&comment.created_at),
                 comment.edited_at.as_deref(),
-                Some(&comment.reactions),
+                &comment.reactions,
+                Some(ReactionTarget::Comment(comment.obj_index)),
                 &comment.body,
                 message_width,
             );
@@ -173,6 +177,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
                 &mut content_row,
@@ -196,6 +201,12 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
+    register_reaction_hits(
+        ui,
+        messages_area,
+        reaction_hits,
+        ui.detail_scroll.offset().y,
+    );
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
         ui,
@@ -445,6 +456,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let message_width = message_content_width(area);
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
+    let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
     let mut content_row = 0u16;
@@ -496,7 +508,8 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 &message.author,
                 Some(&message.created_at),
                 message.edited_at.as_deref(),
-                Some(&message.reactions),
+                &message.reactions,
+                Some(ReactionTarget::Dm(message.obj_index)),
                 &message.body,
                 message_width,
             );
@@ -507,6 +520,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
                 &mut content_row,
@@ -520,6 +534,12 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, messages_area, card_hits, ui.detail_scroll.offset().y);
+    register_reaction_hits(
+        ui,
+        messages_area,
+        reaction_hits,
+        ui.detail_scroll.offset().y,
+    );
     register_link_hits(ui, messages_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
         ui,

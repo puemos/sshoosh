@@ -13,8 +13,8 @@ mod cases {
     use crate::{
         app::state,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, Role,
-            SearchKind, SearchResult, ThreadItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
+            ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
         },
     };
 
@@ -213,14 +213,19 @@ mod cases {
             "owner",
             Some("2020-01-02T03:04:00Z"),
             Some("2020-01-02T03:05:00Z"),
-            Some("👍 2"),
+            &[ReactionSummary {
+                emoji: "👍".to_string(),
+                count: 2,
+                reacted_by_me: false,
+            }],
+            Some(ReactionTarget::Comment(1)),
             "abcdefghij",
             4,
         );
 
-        // header + 3 body rows (abcd, efgh, ij). Reactions are on header;
-        // edited is inline or dropped if width is too tight.
-        assert_eq!(card.height(), 4);
+        // header + 3 body rows (abcd, efgh, ij) + wrapped reaction/add rows.
+        // Edited is inline or dropped if width is too tight.
+        assert_eq!(card.height(), 6);
         assert_eq!(card.link_count(), 0);
     }
 
@@ -325,7 +330,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -671,7 +676,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             comments_has_more: true,
             selected_channel_id: Some("general".to_string()),
@@ -976,7 +981,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -1034,7 +1039,7 @@ mod cases {
                     body: "Hello owner".to_string(),
                     created_at: "2020-01-02T03:04:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
                 ConversationMessage {
                     id: "m2".to_string(),
@@ -1043,7 +1048,7 @@ mod cases {
                     body: "Hi Alice".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
             ],
             selected_conversation_id: Some("dm".to_string()),
@@ -1100,7 +1105,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             comments: vec![CommentItem {
                 id: "comment".to_string(),
@@ -1109,7 +1114,7 @@ mod cases {
                 body: "Looks good".to_string(),
                 created_at: "2020-01-02T03:05:00Z".to_string(),
                 edited_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             selected_channel_id: Some("channel".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -1167,7 +1172,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             comments: vec![
                 CommentItem {
@@ -1177,7 +1182,11 @@ mod cases {
                     body: "Looks good https://example.com".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: Some("2020-01-02T03:06:00Z".to_string()),
-                    reactions: "ok 2".to_string(),
+                    reactions: vec![ReactionSummary {
+                        emoji: "👍".to_string(),
+                        count: 2,
+                        reacted_by_me: true,
+                    }],
                 },
                 CommentItem {
                     id: "comment-3".to_string(),
@@ -1186,7 +1195,7 @@ mod cases {
                     body: "I would keep normal comments quieter.".to_string(),
                     created_at: "2020-01-02T03:07:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
                 CommentItem {
                     id: "comment-4".to_string(),
@@ -1195,7 +1204,7 @@ mod cases {
                     body: "Error from provider: 13 request validation errors".to_string(),
                     created_at: "2020-01-02T03:08:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
             ],
             selected_channel_id: Some("general".to_string()),
@@ -1251,9 +1260,21 @@ mod cases {
             theme::PANEL
         );
         // (edited) renders inline at end of the last body line; reactions sit
-        // right-aligned in the header line directly above the body.
+        // in boxed chips directly below the body.
         assert!(row_text(buffer, width, alice_y).contains("(edited)"));
-        assert!(row_text(buffer, width, alice_y.saturating_sub(1)).contains("ok 2"));
+        assert!(!row_text(buffer, width, alice_y.saturating_sub(1)).contains("👍 2"));
+        assert!(row_text(buffer, width, alice_y + 1).contains("👍"));
+        assert!(row_text(buffer, width, alice_y + 1).contains("2"));
+        let (reaction_x, reaction_y) =
+            position_for_text(buffer, width, height, "👍").expect("reaction chip");
+        assert_eq!(reaction_y, alice_y + 1);
+        assert_eq!(
+            buffer
+                .cell((reaction_x, reaction_y))
+                .expect("reaction chip")
+                .bg,
+            theme::KEYCAP
+        );
 
         let (owner_x, owner_y) =
             position_for_text(buffer, width, height, "I would").expect("owner body");
@@ -1272,6 +1293,14 @@ mod cases {
         assert!(ui.hit_map.entries().iter().any(|region| matches!(
             region.target,
             HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
+        )));
+        assert!(ui.hit_map.entries().iter().any(|region| matches!(
+            &region.target,
+            HitTarget::ReactionChip {
+                target: ReactionTarget::Comment(2),
+                emoji,
+                reacted_by_me: true,
+            } if emoji == "👍"
         )));
         let link_region = ui
             .hit_map
@@ -1325,7 +1354,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: None,
@@ -1388,7 +1417,7 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: String::new(),
+                reactions: Vec::new(),
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -1905,7 +1934,7 @@ mod cases {
                     body: "First message".to_string(),
                     created_at: "2020-01-02T03:04:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
                 ConversationMessage {
                     id: "m2".to_string(),
@@ -1914,7 +1943,7 @@ mod cases {
                     body: "Second message".to_string(),
                     created_at: "2020-01-02T03:05:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
                 ConversationMessage {
                     id: "m3".to_string(),
@@ -1923,7 +1952,7 @@ mod cases {
                     body: "Third message".to_string(),
                     created_at: "2020-01-02T03:06:00Z".to_string(),
                     edited_at: None,
-                    reactions: String::new(),
+                    reactions: Vec::new(),
                 },
             ],
             selected_conversation_id: Some("dm".to_string()),

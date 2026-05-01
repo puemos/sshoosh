@@ -14,7 +14,7 @@ use super::{
     commands::{CommandSpec, SubcommandSpec, subcommands_for},
     state::{
         ActivePane, Banner, BannerPresentation, BottomBarAction, EditableMessageTarget, HitTarget,
-        LinkOverlay, ListModal, Route, SelectionRange, UiMode, UiState,
+        LinkOverlay, ListModal, ReactionTarget, Route, SelectionRange, UiMode, UiState,
     },
     theme,
 };
