@@ -61,10 +61,10 @@ pub async fn run_with_listener(
             match russh::server::run_stream(ssh_config, tcp, handler).await {
                 Ok(session) => {
                     if let Err(err) = session.await {
-                        tracing::debug!(error = ?err, "ssh session ended with error");
+                        tracing::warn!(error = ?err, "ssh session ended with error");
                     }
                 }
-                Err(err) => tracing::debug!(error = ?err, "failed to start ssh session"),
+                Err(err) => tracing::warn!(error = ?err, "failed to start ssh session"),
             }
         });
     }

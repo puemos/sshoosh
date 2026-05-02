@@ -23,10 +23,24 @@ impl russh::server::Handler for ClientHandler {
         let public_key = key
             .to_openssh()
             .unwrap_or_else(|_| format!("{:?}", key.fingerprint(keys::HashAlg::Sha256)));
-        let account = self
+        let account = match self
             .state
             .ensure_account_for_key(user, &fingerprint, &public_key)
-            .await?;
+            .await
+        {
+            Ok(account) => account,
+            Err(err) => {
+                tracing::error!(
+                    peer = ?self.peer_addr,
+                    error = ?err,
+                    "auth failed: could not load or create account"
+                );
+                return Ok(Auth::Reject {
+                    proceed_with_methods: None,
+                    partial_success: false,
+                });
+            }
+        };
         tracing::info!(
             peer = ?self.peer_addr,
             username = %account.username,

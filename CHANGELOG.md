@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-05-02
+
+### Fixed
+- Corrected a duplicate bind parameter in DM sidebar loading that could return incorrect rows.
+- Upgraded SSH session startup failure logs from debug to warn for better operational visibility.
+- Made SSH authentication robust to account bootstrap/load failures by returning a clear rejection and preventing session failures.
+
 ## [0.1.0] - 2026-05-02
 
 ### Added
@@ -34,3 +41,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Prevented account takeover and sensitive data leaks
 - Prevented private data exposure and unsafe key storage
 - Enforced SSH admission limits and hardened key creation
+
+## [0.1.1] - 2026-05-02
+
+### Fixed
+- Corrected a duplicate bind parameter in DM sidebar loading that could return incorrect rows.
+- Upgraded SSH session startup failure logs from debug to warn for better operational visibility.
+- Made SSH authentication robust to account bootstrap/load failures by returning a clear rejection and preventing session failures.

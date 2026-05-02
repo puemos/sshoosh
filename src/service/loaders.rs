@@ -390,7 +390,6 @@ pub(crate) async fn load_dm_sidebar(
     .bind(now())
     .bind(account_id)
     .bind(account_id)
-    .bind(account_id)
     .fetch_all(pool)
     .await?;
     tracing::trace!(
