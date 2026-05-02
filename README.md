@@ -1,5 +1,19 @@
 <p align="center">
-  <img src="docs/public/assets/sshoosh-logo-light.svg" alt="sshoosh logo" width="420">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="docs/public/assets/sshoosh-logo.svg"
+    >
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="docs/public/assets/sshoosh-logo-light.svg"
+    >
+    <img
+      src="docs/public/assets/sshoosh-logo-light.svg"
+      alt="sshoosh logo"
+      width="420"
+    >
+  </picture>
 </p>
 
 # sshoosh
@@ -115,13 +129,13 @@ Use `--owner <username>` to choose the account explicitly.
 
 `sshoosh` is a raw SSH/TCP server, not an HTTP app. Deploy on a host that can run a long-lived process and expose TCP on the `sshoosh serve` port.
 
-| Target | Good fit | Setup notes |
-| --- | --- | --- |
-| Local or LAN | Testing, homelab, private network use | Bind `0.0.0.0:2222`, open firewall if needed, and connect by host name or LAN IP. |
-| Local plus expose | Temporary sharing from laptop or workstation | Use raw TCP tunnel (`ngrok`, Cloudflare Tunnel arbitrary TCP, Tailscale, SSH reverse tunnel). |
-| VPS with systemd | Recommended production path | Install release binary, store state under `/var/lib/sshoosh`, and use [`packaging/sshoosh.service`](packaging/sshoosh.service). |
-| PaaS or container host | Works only with raw TCP + persistent storage | Railway TCP Proxy and Fly public TCP services can work. HTTP-only hosts are not suitable. |
-| Static or serverless hosts | Usually not a fit | `sshoosh` needs inbound SSH/TCP and persistent process state. |
+| Target                     | Good fit                                     | Setup notes                                                                                                                     |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Local or LAN               | Testing, homelab, private network use        | Bind `0.0.0.0:2222`, open firewall if needed, and connect by host name or LAN IP.                                               |
+| Local plus expose          | Temporary sharing from laptop or workstation | Use raw TCP tunnel (`ngrok`, Cloudflare Tunnel arbitrary TCP, Tailscale, SSH reverse tunnel).                                   |
+| VPS with systemd           | Recommended production path                  | Install release binary, store state under `/var/lib/sshoosh`, and use [`packaging/sshoosh.service`](packaging/sshoosh.service). |
+| PaaS or container host     | Works only with raw TCP + persistent storage | Railway TCP Proxy and Fly public TCP services can work. HTTP-only hosts are not suitable.                                       |
+| Static or serverless hosts | Usually not a fit                            | `sshoosh` needs inbound SSH/TCP and persistent process state.                                                                   |
 
 ### Local or LAN
 
@@ -329,60 +343,60 @@ Protected CLI commands require `--actor <username>` to attribute an action to an
 
 ### Core commands
 
-| Command | Purpose |
-| --- | --- |
-| `sshoosh serve` | Start the SSH/TUI server |
-| `sshoosh bootstrap-token` | Create bootstrap token for first-time owner setup |
-| `sshoosh doctor` | Run server health checks |
-| `sshoosh doctor --repair-search` | Rebuild search metadata |
-| `sshoosh invite --role member --ttl-hours 24` | Generate an invite with explicit expiry |
-| `sshoosh backup /path/to/backup.sqlite` | Create a local backup copy |
-| `sshoosh master status` | Inspect current master lease owner |
-| `sshoosh encrypt migrate` | Migrate plaintext DB content to encrypted format |
+| Command                                       | Purpose                                           |
+| --------------------------------------------- | ------------------------------------------------- |
+| `sshoosh serve`                               | Start the SSH/TUI server                          |
+| `sshoosh bootstrap-token`                     | Create bootstrap token for first-time owner setup |
+| `sshoosh doctor`                              | Run server health checks                          |
+| `sshoosh doctor --repair-search`              | Rebuild search metadata                           |
+| `sshoosh invite --role member --ttl-hours 24` | Generate an invite with explicit expiry           |
+| `sshoosh backup /path/to/backup.sqlite`       | Create a local backup copy                        |
+| `sshoosh master status`                       | Inspect current master lease owner                |
+| `sshoosh encrypt migrate`                     | Migrate plaintext DB content to encrypted format  |
 
 ### Users and access control
 
-| Command | Purpose |
-| --- | --- |
-| `sshoosh users list` | List users |
-| `sshoosh users rename alice alice-prod` | Rename a user |
-| `sshoosh users display-name alice "Alice Lee"` | Set display name |
-| `sshoosh users disable alice` | Disable a user |
-| `sshoosh users role alice admin` | Set user role |
-| `sshoosh keys list` | List SSH keys |
-| `sshoosh keys add "ssh-ed25519 AAAA..." --username alice --label laptop` | Add SSH key |
-| `sshoosh keys label <key-id-or-fingerprint> desktop` | Label SSH key |
-| `sshoosh keys revoke <key-id-or-fingerprint>` | Revoke SSH key |
-| `sshoosh invites list` | List invites |
-| `sshoosh invites create --role admin --ttl-hours 2` | Create invite |
-| `sshoosh invites revoke <invite-id>` | Revoke invite |
+| Command                                                                  | Purpose          |
+| ------------------------------------------------------------------------ | ---------------- |
+| `sshoosh users list`                                                     | List users       |
+| `sshoosh users rename alice alice-prod`                                  | Rename a user    |
+| `sshoosh users display-name alice "Alice Lee"`                           | Set display name |
+| `sshoosh users disable alice`                                            | Disable a user   |
+| `sshoosh users role alice admin`                                         | Set user role    |
+| `sshoosh keys list`                                                      | List SSH keys    |
+| `sshoosh keys add "ssh-ed25519 AAAA..." --username alice --label laptop` | Add SSH key      |
+| `sshoosh keys label <key-id-or-fingerprint> desktop`                     | Label SSH key    |
+| `sshoosh keys revoke <key-id-or-fingerprint>`                            | Revoke SSH key   |
+| `sshoosh invites list`                                                   | List invites     |
+| `sshoosh invites create --role admin --ttl-hours 2`                      | Create invite    |
+| `sshoosh invites revoke <invite-id>`                                     | Revoke invite    |
 
 ### Channels and workspace operations
 
-| Command | Purpose |
-| --- | --- |
-| `sshoosh channels list` | List channels |
-| `sshoosh channels create engineering` | Create public channel |
-| `sshoosh channels create ops-secret --private` | Create private channel |
-| `sshoosh channels join engineering --actor alice` | Join channel |
-| `sshoosh channels leave engineering --actor alice` | Leave channel |
-| `sshoosh channels rename engineering eng` | Rename channel |
-| `sshoosh channels topic eng "Build and release coordination"` | Set channel topic |
-| `sshoosh channels archive eng` | Archive channel |
-| `sshoosh channels unarchive eng` | Restore archived channel |
-| `sshoosh channels members ops-secret` | List channel members |
-| `sshoosh channels add-member ops-secret alice` | Add member to private/public channel |
-| `sshoosh channels remove-member ops-secret alice` | Remove member from channel |
+| Command                                                       | Purpose                              |
+| ------------------------------------------------------------- | ------------------------------------ |
+| `sshoosh channels list`                                       | List channels                        |
+| `sshoosh channels create engineering`                         | Create public channel                |
+| `sshoosh channels create ops-secret --private`                | Create private channel               |
+| `sshoosh channels join engineering --actor alice`             | Join channel                         |
+| `sshoosh channels leave engineering --actor alice`            | Leave channel                        |
+| `sshoosh channels rename engineering eng`                     | Rename channel                       |
+| `sshoosh channels topic eng "Build and release coordination"` | Set channel topic                    |
+| `sshoosh channels archive eng`                                | Archive channel                      |
+| `sshoosh channels unarchive eng`                              | Restore archived channel             |
+| `sshoosh channels members ops-secret`                         | List channel members                 |
+| `sshoosh channels add-member ops-secret alice`                | Add member to private/public channel |
+| `sshoosh channels remove-member ops-secret alice`             | Remove member from channel           |
 
 ### Operational tooling
 
-| Command | Purpose |
-| --- | --- |
-| `sshoosh notifications list --actor alice` | List notifications |
-| `sshoosh notifications mark-read --actor alice` | Mark notifications read |
-| `sshoosh audit list --limit 100` | Show audit events |
-| `sshoosh export --format json --out /path/to/export.json --include-audit` | Export JSON archive |
-| `sshoosh export --format markdown --out /path/to/export.md` | Export Markdown archive |
+| Command                                                                   | Purpose                 |
+| ------------------------------------------------------------------------- | ----------------------- |
+| `sshoosh notifications list --actor alice`                                | List notifications      |
+| `sshoosh notifications mark-read --actor alice`                           | Mark notifications read |
+| `sshoosh audit list --limit 100`                                          | Show audit events       |
+| `sshoosh export --format json --out /path/to/export.json --include-audit` | Export JSON archive     |
+| `sshoosh export --format markdown --out /path/to/export.md`               | Export Markdown archive |
 
 ### TUI Commands
 
@@ -390,65 +404,65 @@ Public channels use explicit membership. Use `channels list` to discover availab
 
 #### Common commands
 
-| Command | Purpose |
-| --- | --- |
-| `/invite new [member|admin] [ttl-hours]` | Create invitation |
-| `/invite list` | List invites |
-| `/invite revoke invite-id` | Revoke invite |
-| `/channel new name` | Create public channel |
-| `/channel private name` | Create private channel |
-| `/channel list` | List channels |
-| `/channel join #channel` | Join channel |
-| `/channel leave [#channel]` | Leave channel |
-| `/channel topic [#channel] topic` | Set channel topic |
-| `/channel rename [#channel] name` | Rename channel |
-| `/channel archive [#channel]` | Archive channel |
-| `/channel unarchive #channel` | Unarchive channel |
-| `/thread new title` | Create thread |
-| `/thread rename title` | Rename thread |
-| `/search query` | Search content |
-| `/save index` | Save message/comment |
-| `/unsave index` | Unsave message/comment |
-| `/more` | Load older content in list |
-| `/older` | Load previous page |
+| Command                           | Purpose                    |
+| --------------------------------- | -------------------------- | ----------------- |
+| `/invite new [member              | admin] [ttl-hours]`        | Create invitation |
+| `/invite list`                    | List invites               |
+| `/invite revoke invite-id`        | Revoke invite              |
+| `/channel new name`               | Create public channel      |
+| `/channel private name`           | Create private channel     |
+| `/channel list`                   | List channels              |
+| `/channel join #channel`          | Join channel               |
+| `/channel leave [#channel]`       | Leave channel              |
+| `/channel topic [#channel] topic` | Set channel topic          |
+| `/channel rename [#channel] name` | Rename channel             |
+| `/channel archive [#channel]`     | Archive channel            |
+| `/channel unarchive #channel`     | Unarchive channel          |
+| `/thread new title`               | Create thread              |
+| `/thread rename title`            | Rename thread              |
+| `/search query`                   | Search content             |
+| `/save index`                     | Save message/comment       |
+| `/unsave index`                   | Unsave message/comment     |
+| `/more`                           | Load older content in list |
+| `/older`                          | Load previous page         |
 
 #### User, key, and membership commands
 
-| Command | Purpose |
-| --- | --- |
-| `/user list` | List users |
-| `/user profile display-name` | Show profile display name |
-| `/user username username` | View/set username |
-| `/user disable @user` | Disable user |
-| `/user enable @user` | Enable user |
-| `/user role @user owner|admin|member` | Set user role |
-| `/key list` | List your keys |
-| `/key my` | Show current key info |
-| `/key add ssh-ed25519... [| label]` | Add SSH key |
-| `/key label key-id label` | Label SSH key |
-| `/key revoke key-id-or-fingerprint` | Revoke SSH key |
-| `/channel members #channel` | List channel members |
-| `/channel add #channel @user` | Add member |
-| `/channel remove #channel @user` | Remove member |
+| Command                             | Purpose                   |
+| ----------------------------------- | ------------------------- | ----------- | ------------- |
+| `/user list`                        | List users                |
+| `/user profile display-name`        | Show profile display name |
+| `/user username username`           | View/set username         |
+| `/user disable @user`               | Disable user              |
+| `/user enable @user`                | Enable user               |
+| `/user role @user owner             | admin                     | member`     | Set user role |
+| `/key list`                         | List your keys            |
+| `/key my`                           | Show current key info     |
+| `/key add ssh-ed25519... [          | label]`                   | Add SSH key |
+| `/key label key-id label`           | Label SSH key             |
+| `/key revoke key-id-or-fingerprint` | Revoke SSH key            |
+| `/channel members #channel`         | List channel members      |
+| `/channel add #channel @user`       | Add member                |
+| `/channel remove #channel @user`    | Remove member             |
 
 #### Message and thread lifecycle commands
 
-| Command | Purpose |
-| --- | --- |
-| `/comment edit index body` | Edit comment |
-| `/comment delete index` | Delete comment |
-| `/dm open @user` | Open DM conversation |
-| `/dm edit index body` | Edit DM message |
-| `/dm delete index` | Delete DM message |
-| `/thread delete` | Delete thread |
-| `/thread archive` | Archive thread |
-| `/thread unarchive` | Unarchive thread |
-| `/thread pin` | Pin thread |
-| `/thread unpin` | Unpin thread |
-| `/thread mute [hours]` | Mute thread |
-| `/thread unmute` | Unmute thread |
-| `/reaction add emoji [comment-or-message-index]` | Add reaction |
-| `/reaction remove emoji [comment-or-message-index]` | Remove reaction |
+| Command                                             | Purpose              |
+| --------------------------------------------------- | -------------------- |
+| `/comment edit index body`                          | Edit comment         |
+| `/comment delete index`                             | Delete comment       |
+| `/dm open @user`                                    | Open DM conversation |
+| `/dm edit index body`                               | Edit DM message      |
+| `/dm delete index`                                  | Delete DM message    |
+| `/thread delete`                                    | Delete thread        |
+| `/thread archive`                                   | Archive thread       |
+| `/thread unarchive`                                 | Unarchive thread     |
+| `/thread pin`                                       | Pin thread           |
+| `/thread unpin`                                     | Unpin thread         |
+| `/thread mute [hours]`                              | Mute thread          |
+| `/thread unmute`                                    | Unmute thread        |
+| `/reaction add emoji [comment-or-message-index]`    | Add reaction         |
+| `/reaction remove emoji [comment-or-message-index]` | Remove reaction      |
 
 Threads and DMs are marked read when opened in detail view.
 Manual unread remains until the item is opened again or explicitly marked read.
@@ -520,7 +534,7 @@ sshoosh serve --host 0.0.0.0 --port 2222
 ```
 
 2. SSH connect with token and confirm:
-`#general` auto-created, user activated, explicit membership behavior works.
+   `#general` auto-created, user activated, explicit membership behavior works.
 
 3. Run admin path checks:
 
