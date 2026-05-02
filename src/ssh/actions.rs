@@ -661,15 +661,17 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                         Err(err) => Err(err),
                     }
                 } else {
-                    app.lock().await.increase_history_limit();
-                    app.lock().await.force_full_repaint();
                     Ok(ActionResult::silent())
                 }
             }
         }
         Action::LoadOlder => {
-            app.lock().await.increase_history_limit();
-            app.lock().await.force_full_repaint();
+            let mut app = app.lock().await;
+            if app.can_load_older_history() {
+                app.prepare_older_history_anchor();
+                app.increase_history_limit();
+                app.force_full_repaint();
+            }
             Ok(ActionResult::silent())
         }
     };

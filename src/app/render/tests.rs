@@ -2273,6 +2273,34 @@ mod cases {
     }
 
     #[test]
+    fn render_scroll_items_handles_large_row_offsets() {
+        let width = 32;
+        let height = 6;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let items = (0..1_000)
+            .map(|index| ListItem::new(format!("row-{index:04}")))
+            .collect::<Vec<_>>();
+        let mut state = ScrollViewState::with_offset(Position { x: 0, y: 995 });
+        let mut metrics = None;
+
+        terminal
+            .draw(|frame| {
+                metrics = Some(render_scroll_items(frame, frame.area(), items, &mut state));
+            })
+            .expect("render large list");
+        let metrics = metrics.expect("scroll metrics");
+
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("row-0994"));
+        assert!(rendered.contains("row-0999"));
+        assert!(!rendered.contains("row-0000"));
+        assert_eq!(state.offset().y, 994);
+        assert_eq!(metrics.viewport_height, height);
+        assert_eq!(metrics.max_y_offset, 994);
+    }
+
+    #[test]
     fn render_dm_detail_keeps_metadata_before_scrollbar() {
         let width = 50;
         let height = 8;

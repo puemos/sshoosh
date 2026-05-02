@@ -10,9 +10,9 @@ mod cases {
     use crate::{
         db::Database,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
-            NotificationSummary, ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind,
-            SearchResult, ServerState, Snapshot, ThreadItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
+            DmSidebarItem, NotificationSummary, ReactionSummary, SavedMessageItem,
+            SavedMessageKind, SearchKind, SearchResult, ServerState, Snapshot, ThreadItem,
         },
     };
 
@@ -135,6 +135,25 @@ mod cases {
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             read_at: None,
+        }
+    }
+
+    fn saved_message(index: i64) -> SavedMessageItem {
+        SavedMessageItem {
+            kind: SavedMessageKind::Comment,
+            source_id: format!("comment-{index}"),
+            source_obj_index: index,
+            author: "alice".to_string(),
+            body: format!("Saved note {index}"),
+            source_label: "#general · Deploy notes".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("Deploy notes".to_string()),
+            dm_peer_username: None,
+            saved_at: "2020-01-03T03:04:00Z".to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
         }
     }
 
@@ -612,6 +631,10 @@ mod cases {
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
         assert!(app.ui.detail_scroll.offset().y > 0);
+        assert_eq!(
+            app.ui.detail_scroll.offset().y,
+            app.ui.detail_scroll_metrics.max_y_offset
+        );
     }
 
     #[tokio::test]
@@ -627,9 +650,14 @@ mod cases {
 
         app.render().expect("render");
         app.handle_input(b"\r");
+        app.render().expect("render opened thread");
 
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
         assert!(app.ui.detail_scroll.offset().y > 0);
+        assert_eq!(
+            app.ui.detail_scroll.offset().y,
+            app.ui.detail_scroll_metrics.max_y_offset
+        );
     }
 
     #[tokio::test]
@@ -1524,6 +1552,151 @@ mod cases {
 
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
+    }
+
+    #[tokio::test]
+    async fn loading_older_history_keeps_visible_comment_anchored() {
+        let mut app = test_app("older-history-anchor").await;
+        app.resize(100, 12).expect("resize");
+        app.snapshot.threads[0].body.clear();
+        app.snapshot.comments = (201..=260)
+            .map(|idx| comment(idx, "alice", &format!("body-{idx:04}")))
+            .collect();
+        app.snapshot.comments_has_more = true;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render initial history");
+
+        app.prepare_older_history_anchor();
+        let mut comments = (1..=200)
+            .map(|idx| comment(idx, "alice", &format!("body-{idx:04}")))
+            .collect::<Vec<_>>();
+        comments.extend(app.snapshot.comments.clone());
+        app.snapshot.comments = comments;
+        app.force_full_repaint();
+        let rendered =
+            String::from_utf8_lossy(&app.render().expect("render expanded history")).into_owned();
+
+        assert!(rendered.contains("body-0201"), "{rendered:?}");
+        assert!(!rendered.contains("body-0001"), "{rendered:?}");
+        assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn thread_scroll_up_at_top_queues_older_history_once() {
+        let mut app = test_app("thread-top-loads-older").await;
+        app.snapshot.comments = (1..=12)
+            .map(|idx| comment(idx, "alice", &format!("comment {idx}")))
+            .collect();
+        app.snapshot.comments_has_more = true;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+
+        app.handle_input(b"\x1b[A");
+        app.handle_input(b"\x1b[A");
+
+        assert_eq!(app.actions, vec![Action::LoadOlder]);
+    }
+
+    #[tokio::test]
+    async fn saved_and_notifications_do_not_load_older_on_scroll_up() {
+        let mut app = test_app("result-lists-no-older").await;
+        app.snapshot.saved_messages = vec![saved_message(1)];
+        app.snapshot.saved_next_cursor = Some("saved-cursor".to_string());
+        app.snapshot.saved_has_more = true;
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render saved");
+
+        app.handle_input(b"\x1b[A");
+        assert!(app.actions.is_empty());
+
+        app.snapshot.notifications = vec![notification(1, "reply")];
+        app.snapshot.notifications_next_cursor = Some("notification-cursor".to_string());
+        app.ui.route = Route::Notifications;
+        app.ui.notifications_selected = 0;
+        app.render().expect("render notifications");
+
+        app.handle_input(b"\x1b[A");
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn result_lists_load_more_from_bottom_and_selection_end() {
+        let mut app = test_app("result-lists-load-more").await;
+        app.snapshot.saved_messages = vec![saved_message(1)];
+        app.snapshot.saved_next_cursor = Some("saved-cursor".to_string());
+        app.snapshot.saved_has_more = true;
+        app.ui.route = Route::Saved;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render saved");
+        let detail_region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::DetailScroll))
+            .cloned()
+            .expect("detail region");
+
+        scroll_down_at(&mut app, detail_region.rect.x, detail_region.rect.y);
+        assert_eq!(app.actions, vec![Action::LoadMore]);
+
+        app.actions.clear();
+        app.snapshot.notifications = vec![notification(1, "reply")];
+        app.snapshot.notifications_next_cursor = Some("notification-cursor".to_string());
+        app.ui.route = Route::Notifications;
+        app.ui.notifications_selected = 0;
+        app.render().expect("render notifications");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.actions, vec![Action::LoadMore]);
+    }
+
+    #[tokio::test]
+    async fn thread_scroll_down_at_bottom_does_not_load_result_pages() {
+        let mut app = test_app("thread-bottom-no-more").await;
+        app.snapshot.comments = (1..=12)
+            .map(|idx| comment(idx, "alice", &format!("comment {idx}\nsecond line")))
+            .collect();
+        app.snapshot.comments_has_more = true;
+        app.ui.active_pane = ActivePane::Detail;
+        app.scroll_detail_to_bottom();
+        app.render().expect("render");
+        let detail_region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(region.target, HitTarget::DetailScroll))
+            .cloned()
+            .expect("detail region");
+
+        scroll_down_at(&mut app, detail_region.rect.x, detail_region.rect.y);
+
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_more_does_not_expand_history_but_load_older_does() {
+        let mut app = test_app("load-more-vs-older-history").await;
+        app.snapshot.comments_has_more = true;
+        let app = Arc::new(Mutex::new(app));
+
+        crate::ssh::process_action(&app, Action::LoadMore)
+            .await
+            .expect("process load more");
+        assert_eq!(app.lock().await.history_limit, DEFAULT_HISTORY_LIMIT);
+
+        {
+            let mut app = app.lock().await;
+            app.snapshot = snapshot();
+            app.snapshot.comments_has_more = true;
+            app.ui.route = Route::Channel("general".to_string());
+        }
+        crate::ssh::process_action(&app, Action::LoadOlder)
+            .await
+            .expect("process load older");
+        assert_eq!(app.lock().await.history_limit, DEFAULT_HISTORY_LIMIT * 2);
     }
 
     #[tokio::test]

@@ -210,6 +210,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
         }
     } else {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
         render_empty_state(
             frame,
             messages_area,
@@ -227,7 +228,8 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             Some(SourceFocus::ThreadRoot | SourceFocus::Comment(_))
         ) && snapshot.comments_has_more,
     );
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
@@ -258,6 +260,7 @@ pub(crate) fn draw_search_detail(
     let mut row_hits = Vec::new();
     if snapshot.search_results.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
         render_empty_state(
             frame,
             messages_area,
@@ -303,7 +306,8 @@ pub(crate) fn draw_search_detail(
             items.push(history_prompt("More results available. Use /more."));
         }
     }
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
         ui,
         messages_area,
@@ -337,6 +341,7 @@ pub(crate) fn draw_saved_detail(
     let mut selected_row = None;
     if snapshot.saved_messages.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
         render_empty_state(
             frame,
             messages_area,
@@ -383,7 +388,8 @@ pub(crate) fn draw_saved_detail(
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
         ui.detail_selection_scroll_pending = false;
     }
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
         ui,
         messages_area,
@@ -409,6 +415,7 @@ pub(crate) fn draw_notifications_detail(
     let visible_indices = visible_notification_indices_for_filter(snapshot, ui.notification_filter);
     if visible_indices.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
         let (title, detail) = match ui.notification_filter {
             NotificationFilter::All => {
                 ("No notifications", "Mentions and replies will show up here")
@@ -458,7 +465,8 @@ pub(crate) fn draw_notifications_detail(
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
         ui.detail_selection_scroll_pending = false;
     }
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_scroll_hits(
         ui,
         messages_area,
@@ -946,26 +954,82 @@ pub(crate) fn render_scroll_items(
     area: Rect,
     items: Vec<ListItem>,
     state: &mut ScrollViewState,
-) {
+) -> DetailScrollMetrics {
     if area.is_empty() {
-        return;
+        return DetailScrollMetrics::default();
     }
-    let content_height = items
-        .iter()
-        .map(ListItem::height)
-        .sum::<usize>()
-        .max(1)
-        .min(u16::MAX as usize) as u16;
-    let mut scroll_view = ScrollView::new(Size::new(area.width, content_height))
-        .vertical_scrollbar_visibility(ScrollbarVisibility::Automatic)
-        .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
-    scroll_view.render_widget(
-        List::new(items)
-            .style(theme::panel())
-            .highlight_style(theme::panel()),
-        Rect::new(0, 0, area.width, content_height),
-    );
-    frame.render_stateful_widget(scroll_view, area, state);
+    frame.render_widget(Block::default().style(theme::panel()), area);
+    let total_height = items.iter().map(ListItem::height).sum::<usize>().max(1);
+    let content_height = total_height.min(u16::MAX as usize) as u16;
+    let max_y_offset = content_height.saturating_sub(area.height);
+    let offset_y = state.offset().y.min(max_y_offset);
+    state.set_offset(Position { x: 0, y: offset_y });
+
+    let show_vertical_scrollbar = content_height > area.height;
+    let content_area = if show_vertical_scrollbar {
+        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+    } else {
+        area
+    };
+    let viewport_bottom = offset_y as usize + area.height as usize;
+    let mut cursor = 0usize;
+    let mut top_trim = 0u16;
+    let mut visible_height = 0usize;
+    let mut visible_items = Vec::new();
+    for item in items {
+        let item_height = item.height();
+        let item_bottom = cursor.saturating_add(item_height);
+        if item_bottom <= offset_y as usize {
+            cursor = item_bottom;
+            continue;
+        }
+        if cursor >= viewport_bottom {
+            break;
+        }
+        if visible_items.is_empty() {
+            top_trim = (offset_y as usize)
+                .saturating_sub(cursor)
+                .min(u16::MAX as usize) as u16;
+        }
+        visible_height = visible_height.saturating_add(item_height);
+        visible_items.push(item);
+        cursor = item_bottom;
+    }
+
+    if !visible_items.is_empty() && !content_area.is_empty() {
+        let visible_content_height = visible_height
+            .max(top_trim as usize + area.height as usize)
+            .min(u16::MAX as usize) as u16;
+        let mut visible_state = ScrollViewState::with_offset(Position { x: 0, y: top_trim });
+        let mut scroll_view =
+            ScrollView::new(Size::new(content_area.width, visible_content_height))
+                .vertical_scrollbar_visibility(ScrollbarVisibility::Never)
+                .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
+        scroll_view.render_widget(
+            List::new(visible_items)
+                .style(theme::panel())
+                .highlight_style(theme::panel()),
+            Rect::new(0, 0, content_area.width, visible_content_height),
+        );
+        frame.render_stateful_widget(scroll_view, content_area, &mut visible_state);
+    }
+
+    if show_vertical_scrollbar {
+        let mut scrollbar_state =
+            ScrollbarState::new(content_height.saturating_sub(area.height) as usize)
+                .position(offset_y as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut scrollbar_state,
+        );
+    }
+
+    DetailScrollMetrics {
+        offset_y,
+        max_y_offset,
+        viewport_height: area.height,
+    }
 }
 
 pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
@@ -1013,6 +1077,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     }
     if snapshot.conversation_messages.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
         render_empty_state(
             frame,
             messages_area,
@@ -1082,7 +1147,8 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         matches!(ui.pending_source_focus, Some(SourceFocus::Dm(_)))
             && snapshot.conversation_messages_has_more,
     );
-    render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);

@@ -515,10 +515,10 @@ impl App {
             Key::Down | Key::Char('j') => self.move_selection(1),
             Key::Up | Key::Char('k') => self.move_selection(-1),
             Key::PageDown if self.ui.active_pane == ActivePane::Detail => {
-                self.ui.detail_scroll.scroll_page_down();
+                self.page_detail(true);
             }
             Key::PageUp if self.ui.active_pane == ActivePane::Detail => {
-                self.ui.detail_scroll.scroll_page_up();
+                self.page_detail(false);
             }
             Key::PageDown => self.move_selection(8),
             Key::PageUp => self.move_selection(-8),

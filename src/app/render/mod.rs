@@ -4,7 +4,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Position, Rect, Size},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{
+        Block, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
@@ -13,9 +16,9 @@ use crate::service::{Account, NotificationSummary, SearchKind, Snapshot};
 use super::{
     commands::{CommandSpec, SubcommandSpec, subcommands_for},
     state::{
-        ActivePane, Banner, BannerPresentation, BottomBarAction, EditableMessageTarget, HitTarget,
-        LinkOverlay, ListModal, NotificationFilter, ReactionTarget, Route, SelectionRange, UiMode,
-        UiState,
+        ActivePane, Banner, BannerPresentation, BottomBarAction, DetailScrollMetrics,
+        EditableMessageTarget, HitTarget, LinkOverlay, ListModal, NotificationFilter,
+        ReactionTarget, Route, SelectionRange, UiMode, UiState,
     },
     theme,
 };

@@ -65,6 +65,19 @@ impl NotificationFilter {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DetailScrollMetrics {
+    pub offset_y: u16,
+    pub max_y_offset: u16,
+    pub viewport_height: u16,
+}
+
+impl DetailScrollMetrics {
+    pub fn at_bottom(self) -> bool {
+        self.offset_y >= self.max_y_offset
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct UiState {
     pub mode: UiMode,
@@ -73,6 +86,7 @@ pub struct UiState {
     pub threads_collapsed: bool,
     pub workspace_scroll: ScrollViewState,
     pub detail_scroll: ScrollViewState,
+    pub detail_scroll_metrics: DetailScrollMetrics,
     pub help_scroll: ScrollViewState,
     pub composer: ComposerState,
     pub palette: PaletteState,
@@ -101,6 +115,7 @@ impl Default for UiState {
             threads_collapsed: false,
             workspace_scroll: ScrollViewState::default(),
             detail_scroll: ScrollViewState::default(),
+            detail_scroll_metrics: DetailScrollMetrics::default(),
             help_scroll: ScrollViewState::default(),
             composer: ComposerState::default(),
             palette: PaletteState::default(),

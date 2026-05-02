@@ -1,6 +1,6 @@
 use super::*;
 
-pub const DEFAULT_HISTORY_LIMIT: i64 = 500;
+pub const DEFAULT_HISTORY_LIMIT: i64 = 200;
 pub const MAX_HISTORY_LIMIT: i64 = 5_000;
 pub(crate) const PRESENCE_SESSION_TTL_SECONDS: i64 = 120;
 

@@ -24,6 +24,9 @@ impl App {
         if self.ui.active_pane == ActivePane::Detail {
             if end {
                 self.ui.detail_scroll.scroll_to_bottom();
+                self.queue_result_list_page_if_available();
+            } else if self.detail_at_top() {
+                self.queue_older_history_if_available();
             } else {
                 self.ui.detail_scroll.scroll_to_top();
             }
@@ -35,13 +38,47 @@ impl App {
 
     pub(crate) fn move_detail(&mut self, delta: isize) {
         if delta < 0 {
+            if self.detail_at_top() {
+                self.queue_older_history_if_available();
+            }
             for _ in 0..delta.unsigned_abs() {
                 self.ui.detail_scroll.scroll_up();
             }
         } else {
+            if self.detail_at_bottom() {
+                self.queue_result_list_page_if_available();
+            }
             for _ in 0..delta as usize {
                 self.ui.detail_scroll.scroll_down();
             }
+        }
+    }
+
+    pub(crate) fn page_detail(&mut self, down: bool) {
+        let step = self
+            .ui
+            .detail_scroll_metrics
+            .viewport_height
+            .saturating_sub(1)
+            .max(1);
+        let offset = self.ui.detail_scroll.offset();
+        let max_y = self.ui.detail_scroll_metrics.max_y_offset;
+        if down {
+            if self.detail_at_bottom() {
+                self.queue_result_list_page_if_available();
+            }
+            self.ui.detail_scroll.set_offset(Position {
+                x: 0,
+                y: offset.y.saturating_add(step).min(max_y),
+            });
+        } else {
+            if self.detail_at_top() {
+                self.queue_older_history_if_available();
+            }
+            self.ui.detail_scroll.set_offset(Position {
+                x: 0,
+                y: offset.y.saturating_sub(step),
+            });
         }
     }
 
@@ -62,6 +99,8 @@ impl App {
         if next != self.ui.saved_selected {
             self.ui.saved_selected = next;
             self.ui.detail_selection_scroll_pending = true;
+        } else if delta > 0 && self.ui.saved_selected == len.saturating_sub(1) {
+            self.queue_result_list_page_if_available();
         }
     }
 
@@ -74,6 +113,115 @@ impl App {
         if next != self.ui.notifications_selected {
             self.ui.notifications_selected = next;
             self.ui.detail_selection_scroll_pending = true;
+        } else if delta > 0 && self.ui.notifications_selected == len.saturating_sub(1) {
+            self.queue_result_list_page_if_available();
+        }
+    }
+
+    pub(crate) fn can_load_older_history(&self) -> bool {
+        self.history_limit < MAX_HISTORY_LIMIT
+            && match self.ui.route {
+                Route::Channel(_) => {
+                    self.snapshot.selected_thread_id.is_some() && self.snapshot.comments_has_more
+                }
+                Route::Dms => {
+                    self.snapshot.selected_conversation_id.is_some()
+                        && self.snapshot.conversation_messages_has_more
+                }
+                Route::Search | Route::Saved | Route::Notifications => false,
+            }
+    }
+
+    pub(crate) fn prepare_older_history_anchor(&mut self) {
+        if let Some(focus) = self.first_visible_message_focus() {
+            self.ui.pending_source_focus = Some(focus);
+            return;
+        }
+        self.ui.pending_source_focus = match self.ui.route {
+            Route::Channel(_) => self
+                .snapshot
+                .comments
+                .first()
+                .map(|comment| SourceFocus::Comment(comment.obj_index))
+                .or(Some(SourceFocus::ThreadRoot)),
+            Route::Dms => self
+                .snapshot
+                .conversation_messages
+                .first()
+                .map(|message| SourceFocus::Dm(message.obj_index)),
+            Route::Search | Route::Saved | Route::Notifications => None,
+        };
+    }
+
+    fn first_visible_message_focus(&self) -> Option<SourceFocus> {
+        let viewport_height = self.ui.detail_scroll_metrics.viewport_height.max(1);
+        let top = (0..u16::MAX).find(|row| {
+            self.ui
+                .hit_map
+                .hit_row_matching(*row, |target| matches!(target, HitTarget::DetailScroll))
+                .is_some()
+        })?;
+        let bottom = top.saturating_add(viewport_height);
+        for row in top..bottom {
+            let Some(region) = self.ui.hit_map.hit_row_matching(row, |target| {
+                matches!(target, HitTarget::EditableMessage(_))
+            }) else {
+                continue;
+            };
+            match region.target {
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(index))
+                    if matches!(self.ui.route, Route::Channel(_)) =>
+                {
+                    return Some(SourceFocus::Comment(index));
+                }
+                HitTarget::EditableMessage(EditableMessageTarget::Dm(index))
+                    if matches!(self.ui.route, Route::Dms) =>
+                {
+                    return Some(SourceFocus::Dm(index));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn can_load_more_result_list(&self) -> bool {
+        match self.ui.route {
+            Route::Saved => self.snapshot.saved_next_cursor.is_some(),
+            Route::Notifications => self.snapshot.notifications_next_cursor.is_some(),
+            Route::Channel(_) | Route::Dms | Route::Search => false,
+        }
+    }
+
+    fn detail_at_top(&self) -> bool {
+        self.ui.detail_scroll.offset().y == 0
+    }
+
+    fn detail_at_bottom(&self) -> bool {
+        let mut metrics = self.ui.detail_scroll_metrics;
+        metrics.offset_y = self.ui.detail_scroll.offset().y;
+        metrics.at_bottom()
+    }
+
+    fn queue_older_history_if_available(&mut self) {
+        if self.can_load_older_history()
+            && !self
+                .actions
+                .iter()
+                .any(|action| matches!(action, Action::LoadOlder))
+        {
+            self.actions.push(Action::LoadOlder);
+        }
+    }
+
+    fn queue_result_list_page_if_available(&mut self) {
+        if self.can_load_more_result_list()
+            && !self
+                .actions
+                .iter()
+                .any(|action| matches!(action, Action::LoadMore))
+        {
+            self.actions.push(Action::LoadMore);
         }
     }
 
@@ -83,6 +231,7 @@ impl App {
 
     pub(crate) fn reset_detail_scroll(&mut self) {
         self.ui.detail_scroll.scroll_to_top();
+        self.ui.detail_scroll_metrics = Default::default();
         self.ui.detail_selection_scroll_pending = false;
     }
 
