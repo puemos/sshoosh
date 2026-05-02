@@ -372,7 +372,7 @@ pub(crate) fn autocomplete_arguments_with_empty_enter(
             })
         })
         .collect();
-    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.sort_by_key(|b| std::cmp::Reverse(b.0));
     AutocompleteState {
         open: !items.is_empty(),
         items: items.into_iter().map(|(_, item)| item).take(8).collect(),
