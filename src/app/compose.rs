@@ -51,7 +51,7 @@ impl App {
                 self.snapshot.selected_thread_id = None;
                 self.snapshot.threads.clear();
                 self.snapshot.comments.clear();
-                self.reset_detail_scroll();
+                self.reset_detail_scroll_to_bottom();
                 self.ui.active_pane = ActivePane::List;
                 self.ui.route = Route::Channel(id);
                 self.ui.threads_collapsed = false;
@@ -68,7 +68,7 @@ impl App {
             CommandExecutor::SwitchThread(id) => {
                 self.snapshot.selected_thread_id = Some(id);
                 self.snapshot.comments.clear();
-                self.reset_detail_scroll();
+                self.reset_detail_scroll_to_bottom();
                 self.ui.active_pane = ActivePane::Detail;
                 self.ui.threads_collapsed = false;
                 self.refresh_requested = true;

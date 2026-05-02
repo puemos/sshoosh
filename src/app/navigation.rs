@@ -235,6 +235,11 @@ impl App {
         self.ui.detail_selection_scroll_pending = false;
     }
 
+    pub(crate) fn reset_detail_scroll_to_bottom(&mut self) {
+        self.reset_detail_scroll();
+        self.scroll_detail_to_bottom();
+    }
+
     pub(crate) fn scroll_detail_to_bottom(&mut self) {
         self.ui
             .detail_scroll
@@ -352,7 +357,7 @@ impl App {
                     self.snapshot.selected_thread_id = None;
                     self.snapshot.threads.clear();
                     self.snapshot.comments.clear();
-                    self.reset_detail_scroll();
+                    self.reset_detail_scroll_to_bottom();
                     self.ui.threads_collapsed = false;
                     self.refresh_requested = true;
                 }
@@ -364,7 +369,7 @@ impl App {
                 self.snapshot.selected_conversation_id = None;
                 self.snapshot.comments.clear();
                 if changed {
-                    self.reset_detail_scroll();
+                    self.reset_detail_scroll_to_bottom();
                 }
                 self.ui.active_pane = ActivePane::List;
                 self.ui.threads_collapsed = false;
@@ -446,7 +451,7 @@ impl App {
                         self.snapshot.selected_thread_id.as_deref() != Some(thread_id.as_str());
                     self.snapshot.selected_thread_id = Some(thread_id);
                     if changed {
-                        self.reset_detail_scroll();
+                        self.reset_detail_scroll_to_bottom();
                     }
                     self.ui.active_pane = ActivePane::List;
                 } else {
@@ -595,7 +600,7 @@ impl App {
                         self.snapshot.selected_thread_id.as_deref() != Some(thread_id.as_str());
                     self.snapshot.selected_thread_id = Some(thread_id);
                     if changed {
-                        self.reset_detail_scroll();
+                        self.reset_detail_scroll_to_bottom();
                     }
                     self.ui.active_pane = ActivePane::List;
                 }
@@ -625,7 +630,7 @@ impl App {
             && let Some(thread) = self.snapshot.threads.first()
         {
             self.snapshot.selected_thread_id = Some(thread.id.clone());
-            self.reset_detail_scroll();
+            self.reset_detail_scroll_to_bottom();
         }
         if self.snapshot.selected_thread_id.is_some() {
             self.ui.active_pane = ActivePane::Detail;

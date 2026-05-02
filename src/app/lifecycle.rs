@@ -264,7 +264,7 @@ impl App {
         self.snapshot.threads.clear();
         self.snapshot.comments.clear();
         self.ui.pending_source_focus = None;
-        self.reset_detail_scroll();
+        self.reset_detail_scroll_to_bottom();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::List;
         self.ui.threads_collapsed = false;
@@ -277,8 +277,7 @@ impl App {
         self.snapshot.selected_thread_id = Some(thread_id);
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
-        self.reset_detail_scroll();
-        self.scroll_detail_to_bottom();
+        self.reset_detail_scroll_to_bottom();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::Detail;
         self.ui.threads_collapsed = false;

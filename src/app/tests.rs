@@ -679,6 +679,53 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn command_open_large_thread_scrolls_to_bottom() {
+        let mut app = test_app("thread-command-open-scroll-bottom").await;
+        app.resize(80, 8).expect("resize");
+
+        app.run_command_executor(CommandExecutor::SwitchThread("thread".to_string()));
+        app.snapshot.comments = (1..=80)
+            .map(|index| comment(index, "alice", &format!("comment {index}")))
+            .collect();
+        app.snapshot.comments_has_more = true;
+
+        app.render().expect("render opened large thread");
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.ui.detail_scroll.offset().y > 0);
+        assert_eq!(
+            app.ui.detail_scroll.offset().y,
+            app.ui.detail_scroll_metrics.max_y_offset
+        );
+    }
+
+    #[tokio::test]
+    async fn keyboard_select_large_thread_starts_preview_at_bottom() {
+        let mut app = test_app("thread-list-select-scroll-bottom").await;
+        app.resize(80, 8).expect("resize");
+        let mut second_thread = app.snapshot.threads[0].clone();
+        second_thread.id = "thread-2".to_string();
+        second_thread.title = "Large thread".to_string();
+        app.snapshot.threads.push(second_thread);
+        app.ui.active_pane = ActivePane::List;
+        app.render().expect("render list");
+
+        app.handle_input(b"\x1b[B");
+        app.snapshot.comments = (1..=80)
+            .map(|index| comment(index, "alice", &format!("comment {index}")))
+            .collect();
+        app.snapshot.comments_has_more = true;
+
+        app.render().expect("render selected large thread");
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
+        assert!(app.ui.detail_scroll.offset().y > 0);
+        assert_eq!(
+            app.ui.detail_scroll.offset().y,
+            app.ui.detail_scroll_metrics.max_y_offset
+        );
+    }
+
+    #[tokio::test]
     async fn mouse_clicks_saved_workspace_row_as_screen() {
         let mut app = test_app("workspace-clicks-saved").await;
         app.ui.active_pane = ActivePane::Rail;
@@ -1605,6 +1652,7 @@ mod cases {
         app.ui.detail_scroll.scroll_to_top();
         app.ui.active_pane = ActivePane::List;
         app.handle_input(b"\x1b[B");
+        app.render().expect("render selected thread");
 
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
