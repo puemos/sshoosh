@@ -228,6 +228,12 @@ async fn bootstrap_and_create_thread(addr: SocketAddr, bootstrap_token: String) 
     ));
 
     let mut channel = open_shell(&mut session).await;
+    let onboarding = read_until(&mut channel, "Choose the username").await;
+    assert!(onboarding.contains("Choose the username"), "{onboarding:?}");
+    session
+        .data(channel.id(), b"\r".to_vec())
+        .await
+        .expect("confirm onboarding username");
     let first = read_until(&mut channel, "Channels").await;
     assert!(first.contains("Channels"), "{first:?}");
     session
