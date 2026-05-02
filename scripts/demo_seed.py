@@ -138,6 +138,10 @@ COMMENT_SNIPPETS = [
     "Let's keep the scope narrow and avoid dragging another migration into it.",
 ]
 
+LARGE_THREAD_WEEK = 0
+LARGE_THREAD_LANE = 0
+LARGE_THREAD_COMMENT_COUNT = 2500
+
 DM_TOPICS = [
     "Can you take the first pass on the customer-facing note?",
     "I want a cleaner summary before the review thread starts drifting.",
@@ -396,7 +400,8 @@ def seed_demo_data(conn: sqlite3.Connection, anchor: Account) -> dict[str, int]:
             topic_title, topic_body = THREAD_TOPICS[(week * 2 + lane) % len(THREAD_TOPICS)]
             creator = members[(week + lane) % len(members)]
             created_at = start + timedelta(days=week * 7 + lane * 2)
-            comment_count = 4 + ((week + lane) % 4)
+            is_big_thread = week == LARGE_THREAD_WEEK and lane == LARGE_THREAD_LANE
+            comment_count = LARGE_THREAD_COMMENT_COUNT if is_big_thread else 4 + ((week + lane) % 4)
             last_activity = created_at + timedelta(hours=comment_count + 1)
             thread_id = f"demo-thread-{summary['threads']:03d}"
             title = topic_title
