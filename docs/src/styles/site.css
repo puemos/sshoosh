@@ -235,6 +235,15 @@ h3 {
   padding-left: 18px;
 }
 
+.demo-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .command-card,
 .doc-article pre {
   max-width: 100%;

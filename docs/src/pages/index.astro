@@ -27,6 +27,24 @@ const codeThemes = {
     </p>
 
     <section class="block">
+      <h2>Demo</h2>
+      <video
+        class="demo-video"
+        controls
+        muted
+        playsinline
+        preload="metadata"
+        poster={href('assets/demo-poster.jpg')}
+        width="1280"
+        height="720"
+      >
+        <source src={href('assets/demo.webm')} type="video/webm" />
+        <source src={href('assets/demo.mp4')} type="video/mp4" />
+        <a href={href('assets/demo.mp4')}>watch the demo</a>
+      </video>
+    </section>
+
+    <section class="block">
       <h2>Start</h2>
       <Code
         code={startCommand}
