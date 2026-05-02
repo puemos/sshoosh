@@ -162,7 +162,7 @@ impl Default for CommandRegistry {
                 CommandSpec {
                     name: "more",
                     aliases: &[],
-                    description: "Refresh loaded history",
+                    description: "Load more list results",
                     args: "",
                     shortcut: None,
                     category: "Search",
@@ -170,7 +170,7 @@ impl Default for CommandRegistry {
                 CommandSpec {
                     name: "older",
                     aliases: &[],
-                    description: "Refresh older history",
+                    description: "Load older message history",
                     args: "",
                     shortcut: None,
                     category: "Search",

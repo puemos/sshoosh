@@ -277,6 +277,8 @@ sshoosh dev-db-bench --users 50 --channels 50 --threads 1000 --comments 100000 -
 
 Command aliases are available in the TUI: `/chan` (`/channel`), `/t` (`/thread`), `/d` (`/dm`), `/msg` (`/dm`), and `/q` (`/quit`).
 
+Use `/older` to load older thread or DM message history. Use `/more` to load additional search, saved, and notification rows.
+
 ### Readability note
 
 `/audit` is shorthand for `/audit list`.
