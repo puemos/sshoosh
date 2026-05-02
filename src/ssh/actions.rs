@@ -57,8 +57,8 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
             .create_invite_with_options(&account_id, role, ttl_hours)
             .await
             .map(|code| ActionResult::message(format!("Invite code: {code}"))),
-        Action::AcceptInvite { code, username } => session
-            .accept_invite(account_id, code, username)
+        Action::CompleteOnboarding { username } => session
+            .complete_onboarding(&account_id, &username)
             .await
             .map(|_| ActionResult::message("Setup complete")),
         Action::CreateChannel { name, private } => {

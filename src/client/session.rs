@@ -66,6 +66,14 @@ impl ClientSession {
         self.state.accept_invite(account_id, code, username).await
     }
 
+    pub async fn complete_onboarding(
+        &self,
+        account_id: &str,
+        username: &str,
+    ) -> anyhow::Result<Account> {
+        self.state.complete_onboarding(account_id, username).await
+    }
+
     pub async fn create_channel(
         &self,
         actor_id: String,

@@ -62,10 +62,14 @@ async fn bootstrap_owner(state: &ServerState, fingerprint: &str, public_key: &st
         .create_bootstrap_token()
         .await
         .expect("bootstrap token");
-    state
+    let pending = state
         .redeem_token_for_key("owner", &token, fingerprint, public_key)
         .await
-        .expect("owner")
+        .expect("owner");
+    state
+        .complete_onboarding(&pending.id, "owner")
+        .await
+        .expect("complete owner")
 }
 
 async fn accept_invite_key(
@@ -75,10 +79,14 @@ async fn accept_invite_key(
     public_key: &str,
     invite: String,
 ) -> Account {
-    state
+    let pending = state
         .redeem_token_for_key(username, &invite, fingerprint, public_key)
         .await
-        .expect("invite key")
+        .expect("invite key");
+    state
+        .complete_onboarding(&pending.id, username)
+        .await
+        .expect("complete invite")
 }
 
 #[tokio::test]
@@ -1443,10 +1451,18 @@ async fn lookup_active_account_for_key_finds_known_key() {
 async fn redeem_token_for_key_creates_owner_and_consumes_bootstrap_token() {
     let (_config, state) = test_state("redeem-bootstrap").await;
     let token = state.create_bootstrap_token().await.expect("token");
-    let owner = state
+    let pending_owner = state
         .redeem_token_for_key("owner", &token, "SHA256:redeem-owner", "ssh-ed25519 owner")
         .await
         .expect("redeem owner");
+    assert!(!pending_owner.activated);
+    assert_eq!(pending_owner.pending_username.as_deref(), Some("owner"));
+    assert!(pending_owner.username.starts_with("pending-"));
+    let owner = state
+        .complete_onboarding(&pending_owner.id, "owner")
+        .await
+        .expect("complete owner");
+    assert!(owner.activated);
     assert_eq!(owner.role, sshoosh::service::Role::Owner);
     let reused = state
         .redeem_token_for_key(
@@ -1457,6 +1473,40 @@ async fn redeem_token_for_key_creates_owner_and_consumes_bootstrap_token() {
         )
         .await;
     assert!(reused.is_err(), "{reused:?}");
+}
+
+#[tokio::test]
+async fn redeem_token_for_key_rejects_invalid_token_without_writes() {
+    let (_config, state) = test_state("redeem-invalid-token").await;
+    let _token = state.create_bootstrap_token().await.expect("token");
+    let rejected = state
+        .redeem_token_for_key(
+            "owner",
+            "not-the-token",
+            "SHA256:invalid-token",
+            "ssh-ed25519 invalid",
+        )
+        .await;
+    assert!(rejected.is_err(), "{rejected:?}");
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    let used_count: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM bootstrap_tokens
+         WHERE used_at IS NOT NULL",
+    )
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("bootstrap used count");
+    assert_eq!(account_count, 0);
+    assert_eq!(key_count, 0);
+    assert_eq!(used_count, 0);
 }
 
 #[tokio::test]
@@ -1505,7 +1555,7 @@ async fn unknown_ssh_key_flood_does_not_create_pending_rows() {
 }
 
 #[tokio::test]
-async fn inactive_ssh_key_rows_are_rejected() {
+async fn inactive_ssh_key_rows_cannot_activate_without_accepted_token() {
     let (_config, state) = test_state("inactive-key-rejected").await;
     let token = state.create_bootstrap_token().await.expect("token");
     let account_id = Uuid::now_v7().to_string();
@@ -1535,13 +1585,9 @@ async fn inactive_ssh_key_rows_are_rejected() {
     let login = state
         .lookup_active_account_for_key("SHA256:inactive-alice")
         .await
-        .expect_err("inactive key must not be accepted");
-    assert!(
-        login
-            .to_string()
-            .contains("Pending SSH keys are not supported"),
-        "{login:?}"
-    );
+        .expect("inactive key lookup")
+        .expect("pending account");
+    assert!(!login.activated);
     let activate = state
         .accept_invite(account_id.clone(), token, "alice".to_string())
         .await
@@ -1549,7 +1595,7 @@ async fn inactive_ssh_key_rows_are_rejected() {
     assert!(
         activate
             .to_string()
-            .contains("Invite tokens must be used during SSH login"),
+            .contains("Pending account has no accepted login token"),
         "{activate:?}"
     );
     assert!(
@@ -1565,7 +1611,7 @@ async fn inactive_ssh_key_rows_are_rejected() {
 async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
     let (_config, state) = test_state("bootstrap-token").await;
     let token = state.create_bootstrap_token().await.expect("token");
-    let owner = state
+    let pending_owner = state
         .redeem_token_for_key(
             "owner",
             &token,
@@ -1574,6 +1620,11 @@ async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
         )
         .await
         .expect("owner");
+    assert!(!pending_owner.activated);
+    let owner = state
+        .complete_onboarding(&pending_owner.id, "owner")
+        .await
+        .expect("complete owner");
     assert_eq!(owner.role, sshoosh::service::Role::Owner);
     let reused = state
         .redeem_token_for_key(
@@ -1615,6 +1666,44 @@ async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
         .await
         .expect("bob count");
     assert_eq!(bob_count, 0);
+}
+
+#[tokio::test]
+async fn complete_onboarding_rejects_duplicate_usernames() {
+    let (_config, state) = test_state("complete-duplicate-username").await;
+    let owner = bootstrap_owner(
+        &state,
+        "SHA256:duplicate-username-owner",
+        "ssh-ed25519 owner",
+    )
+    .await;
+    let invite = state.create_invite(owner.id).await.expect("invite");
+    let pending_alice = state
+        .redeem_token_for_key(
+            "owner",
+            &invite,
+            "SHA256:duplicate-username-alice",
+            "ssh-ed25519 alice",
+        )
+        .await
+        .expect("pending alice");
+    assert!(!pending_alice.activated);
+    assert_eq!(pending_alice.pending_username, None);
+
+    let rejected = state
+        .complete_onboarding(&pending_alice.id, "owner")
+        .await
+        .expect_err("duplicate username should reject");
+    assert!(
+        rejected.to_string().contains("Username is already taken"),
+        "{rejected:?}"
+    );
+    let pending = state
+        .reload_account(&pending_alice.id)
+        .await
+        .expect("reload pending");
+    assert!(!pending.activated);
+    assert!(pending.username.starts_with("pending-"));
 }
 
 #[tokio::test]
@@ -1774,12 +1863,13 @@ async fn expired_device_link_token_does_not_add_or_consume_key() {
         .fetch_one(state.db.read_pool())
         .await
         .expect("key count");
-    let consumed_count: i64 =
-        query_scalar("SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL")
-            .bind(&owner.id)
-            .fetch_one(state.db.read_pool())
-            .await
-            .expect("consumed token count");
+    let consumed_count: i64 = query_scalar(
+        "SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL",
+    )
+    .bind(&owner.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("consumed token count");
     assert_eq!(key_count, 1);
     assert_eq!(consumed_count, 0);
 }
@@ -1808,12 +1898,13 @@ async fn device_link_token_duplicate_fingerprint_rolls_back_token_use() {
         .fetch_one(state.db.read_pool())
         .await
         .expect("key count");
-    let consumed_count: i64 =
-        query_scalar("SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL")
-            .bind(&owner.id)
-            .fetch_one(state.db.read_pool())
-            .await
-            .expect("consumed token count");
+    let consumed_count: i64 = query_scalar(
+        "SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL",
+    )
+    .bind(&owner.id)
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("consumed token count");
     assert_eq!(key_count, 1);
     assert_eq!(consumed_count, 0);
 }
@@ -2308,13 +2399,19 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
 
     let (mut session, priv_key, _) = connect_with_random_key(addr).await;
     let pubkey_attempt = session
-        .authenticate_publickey("owner", priv_key)
+        .authenticate_publickey(
+            "ssh-protocol-user-name-that-is-too-long-for-sshoosh",
+            priv_key,
+        )
         .await
         .expect("publickey attempt");
     assert!(!pubkey_attempt.success(), "unknown key must defer to KI");
 
     match session
-        .authenticate_keyboard_interactive_start("owner", None)
+        .authenticate_keyboard_interactive_start(
+            "ssh-protocol-user-name-that-is-too-long-for-sshoosh",
+            None,
+        )
         .await
         .expect("ki start")
     {
@@ -2337,12 +2434,31 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("pty");
     channel.request_shell(true).await.expect("shell");
 
+    let onboarding = read_until(&mut channel, "username>").await;
+    assert!(
+        onboarding.contains("Your access token was accepted."),
+        "{onboarding:?}"
+    );
+    assert!(onboarding.contains("\x1b[?1000h"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1002h"), "{onboarding:?}");
+    assert!(onboarding.contains("\x1b[?1006h"), "{onboarding:?}");
+    assert!(!onboarding.contains("\x1b[?1003h"), "{onboarding:?}");
+    session
+        .data(channel.id(), b"\r".to_vec())
+        .await
+        .expect("submit empty username");
+    let username_error = read_until(&mut channel, "Username is required").await;
+    assert!(
+        username_error.contains("Username is required"),
+        "{username_error:?}"
+    );
+    session
+        .data(channel.id(), b"owner\r".to_vec())
+        .await
+        .expect("submit owner username");
+
     let first = read_until(&mut channel, "Channels").await;
     assert!(first.contains("Channels"), "{first:?}");
-    assert!(first.contains("\x1b[?1000h"), "{first:?}");
-    assert!(first.contains("\x1b[?1002h"), "{first:?}");
-    assert!(first.contains("\x1b[?1006h"), "{first:?}");
-    assert!(!first.contains("\x1b[?1003h"), "{first:?}");
 
     session
         .data(channel.id(), sgr_drag((2, 5), (9, 5)))
@@ -2473,19 +2589,7 @@ async fn connect_with_random_key(
 #[tokio::test]
 async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
     let (config, state) = test_state("ssh-ki-redeem").await;
-    let bootstrap_token = state
-        .create_bootstrap_token()
-        .await
-        .expect("bootstrap token");
-    let _owner = state
-        .redeem_token_for_key(
-            "owner",
-            &bootstrap_token,
-            "SHA256:ki-owner",
-            "ssh-ed25519 owner",
-        )
-        .await
-        .expect("seed owner");
+    let _owner = bootstrap_owner(&state, "SHA256:ki-owner", "ssh-ed25519 owner").await;
     let invite = state
         .create_invite(
             query_scalar::<String>("SELECT id FROM accounts WHERE username = 'owner'")
@@ -2506,7 +2610,7 @@ async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
     let (mut session, priv_key, _) = connect_with_random_key(addr).await;
 
     let pubkey_attempt = session
-        .authenticate_publickey("alice", priv_key)
+        .authenticate_publickey("not-the-final-username-because-modal-chooses-it", priv_key)
         .await
         .expect("publickey attempt");
     assert!(
@@ -2515,7 +2619,10 @@ async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
     );
 
     let info = match session
-        .authenticate_keyboard_interactive_start("alice", None)
+        .authenticate_keyboard_interactive_start(
+            "not-the-final-username-because-modal-chooses-it",
+            None,
+        )
         .await
         .expect("start ki")
     {
@@ -2537,6 +2644,34 @@ async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
         ),
         "expected success, got {outcome:?}"
     );
+
+    let pending_count: i64 = query_scalar(
+        "SELECT COUNT(*)
+         FROM accounts
+         WHERE username LIKE 'pending-%' AND activated_at IS NULL",
+    )
+    .fetch_one(state_for_assert.db.read_pool())
+    .await
+    .expect("pending count");
+    assert_eq!(pending_count, 1);
+
+    let mut channel = session.channel_open_session().await.expect("channel");
+    channel
+        .request_pty(true, "xterm-256color", 100, 32, 0, 0, &[])
+        .await
+        .expect("pty");
+    channel.request_shell(true).await.expect("shell");
+    let onboarding = read_until(&mut channel, "username>").await;
+    assert!(
+        onboarding.contains("Your access token was accepted."),
+        "{onboarding:?}"
+    );
+    session
+        .data(channel.id(), b"alice\r".to_vec())
+        .await
+        .expect("submit alice username");
+    let activated = read_until(&mut channel, "Channels").await;
+    assert!(activated.contains("Channels"), "{activated:?}");
 
     let alice_id: String = query_scalar("SELECT id FROM accounts WHERE username = 'alice'")
         .fetch_one(state_for_assert.db.read_pool())

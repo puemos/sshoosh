@@ -140,24 +140,13 @@ impl App {
     }
 
     pub(crate) fn submit_onboarding(&mut self) {
-        let body = self.ui.composer.buffer.trim().to_string();
+        let username = self.ui.composer.buffer.trim().to_string();
         self.ui.composer.reset_input();
-        if body.is_empty() {
+        if username.is_empty() {
+            self.set_banner_err("Username is required");
             return;
         }
-        let mut parts = body.split_whitespace();
-        let code = match parts.next() {
-            Some("/join") => parts.next().unwrap_or_default().to_string(),
-            Some(value) => value.to_string(),
-            None => String::new(),
-        };
-        let suggested_username = self
-            .account
-            .pending_username
-            .as_deref()
-            .unwrap_or(&self.account.username);
-        let username = parts.next().unwrap_or(suggested_username).to_string();
-        self.actions.push(Action::AcceptInvite { code, username });
+        self.actions.push(Action::CompleteOnboarding { username });
     }
 
     pub(crate) fn submit_composer(&mut self) {

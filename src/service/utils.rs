@@ -352,6 +352,12 @@ pub(crate) fn id() -> String {
     Uuid::now_v7().to_string()
 }
 
+pub(crate) fn pending_account_username(account_id: &str) -> String {
+    let compact = account_id.replace('-', "");
+    let suffix = compact.get(..20).unwrap_or(&compact);
+    format!("pending-{suffix}")
+}
+
 pub(crate) fn now() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
