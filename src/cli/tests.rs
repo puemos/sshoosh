@@ -157,6 +157,67 @@ mod cases {
     }
 
     #[test]
+    fn daemon_commands_parse_backend_and_lifecycle_flags() {
+        let cli = Cli::try_parse_from([
+            "sshoosh",
+            "daemon",
+            "install",
+            "--backend",
+            "systemd",
+            "--name",
+            "sshoosh-prod",
+            "--binary",
+            "/usr/local/bin/sshoosh",
+            "--dry-run",
+            "--force",
+            "--no-start",
+            "--no-enable",
+            "--no-create-user",
+        ])
+        .expect("parse daemon install");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Daemon {
+                command: DaemonCommand::Install {
+                    backend: DaemonBackend::Systemd,
+                    name,
+                    binary: Some(binary),
+                    dry_run: true,
+                    force: true,
+                    no_start: true,
+                    no_enable: true,
+                    no_create_user: true,
+                }
+            }) if name == "sshoosh-prod" && binary == Path::new("/usr/local/bin/sshoosh")
+        ));
+
+        let cli = Cli::try_parse_from([
+            "sshoosh",
+            "daemon",
+            "uninstall",
+            "--backend",
+            "launchd",
+            "--purge-data",
+            "--remove-user",
+        ])
+        .expect("parse daemon uninstall");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Daemon {
+                command: DaemonCommand::Uninstall {
+                    backend: DaemonBackend::Launchd,
+                    name,
+                    purge_data: true,
+                    remove_user: true,
+                    ..
+                }
+            }) if name == "sshoosh"
+        ));
+    }
+
+    #[test]
     fn list_commands_accept_pagination_flags() {
         let cli = Cli::try_parse_from([
             "sshoosh", "users", "list", "--limit", "7", "--cursor", "abc",

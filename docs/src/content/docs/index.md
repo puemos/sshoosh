@@ -39,7 +39,7 @@ The `Invite token:` prompt is delivered over SSH keyboard-interactive auth (RFC 
 | --- | --- | --- |
 | Local or LAN | Testing, homelab, private network use | Bind `0.0.0.0:2222`, open the firewall if needed, and connect by host name or LAN IP. |
 | Local plus expose | Temporary sharing from a laptop or workstation | Use a raw TCP tunnel such as [ngrok TCP](https://ngrok.com/docs/universal-gateway/tcp), [Cloudflare Tunnel arbitrary TCP](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/non-http/cloudflared-authentication/arbitrary-tcp/), Tailscale, or an SSH reverse tunnel. |
-| VPS with systemd | Recommended production path | Install the release binary, store state under `/var/lib/sshoosh`, then use `packaging/sshoosh.service`. |
+| VPS with systemd | Recommended production path | Install the release binary, then run `sudo sshoosh daemon install` to create the service user, state directory, env file, and service unit. |
 | Docker | Lightweight container path | Use `ghcr.io/puemos/sshoosh`, publish raw TCP port 2222, and keep `/data` on persistent storage. |
 | PaaS or container host | Works only with raw TCP and persistent storage | Railway TCP Proxy and Fly public TCP services can fit. HTTP-only app hosts need a raw TCP feature. |
 | Static or serverless hosts | Usually not a fit | `sshoosh` needs inbound SSH/TCP and process state, not request/response HTTP execution. |
@@ -83,16 +83,12 @@ ssh -N -R <public-port>:localhost:2222 user@bastion.example.com
 ssh -p <public-port> "$USER@bastion.example.com"
 ```
 
-For a VPS, bootstrap against the same production paths the service will use, then enable the systemd service below:
+For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and service manager files:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sudo sh -s -- --dir /usr/local/bin
-sudo useradd --system --home /var/lib/sshoosh --shell /usr/sbin/nologin sshoosh 2>/dev/null || true
-sudo install -d -o sshoosh -g sshoosh /var/lib/sshoosh
-sudo -u sshoosh env \
-  SSHOOSH_DB=/var/lib/sshoosh/sshoosh.sqlite \
-  SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519 \
-  /usr/local/bin/sshoosh bootstrap-token
+sudo /usr/local/bin/sshoosh daemon install --binary /usr/local/bin/sshoosh
+sudo sh -c 'set -a; . /etc/sshoosh/sshoosh.env; set +a; exec sudo -E -u sshoosh /usr/local/bin/sshoosh bootstrap-token'
 ```
 
 Docker:
@@ -177,6 +173,8 @@ sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
 sshoosh master status
 sshoosh encrypt migrate
+sshoosh daemon install
+sshoosh daemon uninstall
 sshoosh audit list --limit 100
 sshoosh notifications list --actor alice
 sshoosh notifications mark-read --actor alice
@@ -193,6 +191,7 @@ Protected CLI commands require `--actor <owner-or-admin>` to attribute the actio
 | Notifications | `sshoosh notifications list --actor alice`, `sshoosh notifications mark-read --actor alice` |
 | Encryption | `sshoosh encrypt migrate` |
 | Master | `sshoosh master status` |
+| Daemon | `sshoosh daemon install`, `sshoosh daemon uninstall --purge-data`, `sshoosh daemon install --backend systemd --dry-run` |
 | Audit | `sshoosh audit list --limit 100` |
 | Export | `sshoosh export --format json --out export.json --include-audit`, `sshoosh export --format markdown --out export.md` |
 | Backup | `sshoosh backup /path/to/backup.sqlite` |
@@ -304,7 +303,7 @@ Notification and mention lists include a source column for the originating chann
 
 Terminal system notifications are opt-in per account. Use `/notification terminal on`, `/notification terminal off`, or `/notification terminal status` in the TUI. sshoosh sends terminal notification escape sequences to the SSH client and falls back to the terminal bell where desktop notifications are unsupported.
 
-## Backup, Export, And systemd
+## Backup, Export, And Daemons
 
 Use SQLite backups for operational recovery and exports for portable archives:
 
@@ -320,13 +319,14 @@ For remote libSQL/Turso, set `SSHOOSH_DATABASE_URL` and `SSHOOSH_DATABASE_AUTH_T
 
 Set `SSHOOSH_ENCRYPTION_KEY` to a base64url 32-byte key to encrypt source content fields. Run `sshoosh encrypt migrate` once for existing plaintext rows. Search index columns intentionally remain plaintext so FTS works, which means search data remains sensitive at rest.
 
-For systemd deployments, copy `packaging/sshoosh.service` to `/etc/systemd/system/sshoosh.service`, adjust the binary path if needed, then:
+For production daemon deployments, prefer the built-in service manager installer:
 
 ```sh
-sudo install -d -o sshoosh -g sshoosh /var/lib/sshoosh
-sudo systemctl daemon-reload
-sudo systemctl enable --now sshoosh
+sudo sshoosh daemon install --binary /usr/local/bin/sshoosh
+sudo sshoosh daemon uninstall
 ```
+
+On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
 
 ## Development
 

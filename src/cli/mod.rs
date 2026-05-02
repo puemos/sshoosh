@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use sshoosh::{
     config,
     db::{self, query_scalar},
@@ -21,10 +21,11 @@ const DEV_WATCH_PATHS: &[&str] = &["Cargo.toml", "Cargo.lock", "src"];
 const DEV_SSH_RECONNECT_DELAY: Duration = Duration::from_millis(500);
 
 mod args;
+mod daemon;
 mod dev;
 mod run;
 mod tests;
 
 pub use run::run;
 
-pub(crate) use self::{args::*, dev::*};
+pub(crate) use self::{args::*, daemon::*, dev::*};

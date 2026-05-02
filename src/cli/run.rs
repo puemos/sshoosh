@@ -45,6 +45,7 @@ pub async fn run() -> anyhow::Result<()> {
             dms,
             iterations,
         } => return run_dev_db_bench(users, channels, threads, comments, dms, iterations).await,
+        Command::Daemon { command } => return run_daemon_command(cfg, command),
         command => command,
     };
 
@@ -88,7 +89,10 @@ pub async fn run() -> anyhow::Result<()> {
             let state = service::ServerState::new(db).await?;
             ssh::run(cfg, state).await
         }
-        Command::Dev | Command::DevSsh { .. } | Command::DevDbBench { .. } => {
+        Command::Dev
+        | Command::DevSsh { .. }
+        | Command::DevDbBench { .. }
+        | Command::Daemon { .. } => {
             unreachable!("dev commands return before opening the database")
         }
         Command::Invite { role, ttl_hours } => {

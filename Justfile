@@ -16,6 +16,10 @@ lint:
 test:
   cargo test
 
+# Run the Linux container daemon install/uninstall e2e.
+daemon-e2e:
+  SSHOOSH_RUN_DAEMON_E2E=1 cargo test --test daemon_e2e -- --nocapture
+
 # Build a release artifact.
 build:
   cargo build --release

@@ -115,6 +115,10 @@ pub(crate) enum Command {
         #[arg(long, default_value_t = 25)]
         iterations: usize,
     },
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
     Invite {
         #[arg(long, default_value = "member")]
         role: String,
@@ -180,6 +184,51 @@ pub(crate) enum EncryptCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum MasterCommand {
     Status,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum DaemonBackend {
+    Auto,
+    Systemd,
+    Launchd,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum DaemonCommand {
+    Install {
+        #[arg(long, value_enum, default_value_t = DaemonBackend::Auto)]
+        backend: DaemonBackend,
+        #[arg(long, default_value = "sshoosh")]
+        name: String,
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        no_start: bool,
+        #[arg(long)]
+        no_enable: bool,
+        #[arg(long)]
+        no_create_user: bool,
+    },
+    Uninstall {
+        #[arg(long, value_enum, default_value_t = DaemonBackend::Auto)]
+        backend: DaemonBackend,
+        #[arg(long, default_value = "sshoosh")]
+        name: String,
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        purge_data: bool,
+        #[arg(long)]
+        remove_user: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
