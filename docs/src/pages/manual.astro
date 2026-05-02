@@ -1,0 +1,57 @@
+---
+import { getEntry, render } from 'astro:content';
+import SiteChrome from '../components/SiteChrome.astro';
+
+const entry = await getEntry('docs', 'manual');
+
+if (!entry) {
+  throw new Error('Missing manual content');
+}
+
+const { Content } = await render(entry);
+---
+
+<SiteChrome
+  title={`${entry.data.title} | sshoosh`}
+  description={entry.data.description ?? 'sshoosh user manual'}
+  current="manual"
+>
+  <main class="docs-layout">
+    <aside class="sidebar" aria-label="Manual navigation">
+      <a class="sidebar-title" href="#start-here">
+        <span>sshoosh manual</span>
+      </a>
+      <section class="nav-section">
+        <h2>Start</h2>
+        <a href="#start-here">Start here</a>
+        <a href="#join-a-workspace">Join a workspace</a>
+        <a href="#using-the-app">Using the app</a>
+      </section>
+      <section class="nav-section">
+        <h2>Use</h2>
+        <a href="#daily-use">Daily use</a>
+        <a href="#messages-and-actions">Messages and actions</a>
+        <a href="#account-and-ssh-keys">Account and keys</a>
+      </section>
+      <section class="nav-section">
+        <h2>Run</h2>
+        <a href="#admin-guide">Admin guide</a>
+        <a href="#operator-guide">Operator guide</a>
+        <a href="#recovery-and-resilience">Recovery</a>
+      </section>
+    </aside>
+
+    <section class="doc-main">
+      <p class="doc-kicker"><span class="prompt">$</span> man sshoosh</p>
+      <h1>{entry.data.title}</h1>
+      {
+        entry.data.description && (
+          <p class="doc-description">{entry.data.description}</p>
+        )
+      }
+      <article class="doc-article manual-article">
+        <Content />
+      </article>
+    </section>
+  </main>
+</SiteChrome>
