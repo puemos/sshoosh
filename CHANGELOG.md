@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+## [0.1.3] - 2026-05-03
+
+### Added
+- Link additional SSH devices to an existing account.
+- Open threads at the latest message by default.
+- Production daemon install paths set up systemd services reliably.
+
+### Changed
+- Decoupled SSH login from the protocol username so the in-app username is independent of the SSH user field.
+- Setup logo now matches the splash screen.
+- `/older` and `/more` command behavior clarified in docs.
+- Expose the published Homebrew install path in the quick start docs.
+
+### Fixed
+- Preserve newest comments when opening large threads.
+- Keep long thread scrolling responsive.
+
 ## [0.1.2] - 2026-05-02
 
 ### Changed
