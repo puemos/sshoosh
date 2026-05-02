@@ -21,7 +21,7 @@ ssh -p 2222 "$USER@127.0.0.1"
 
 The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
 
-After the first tagged release publishes the Homebrew formula, Homebrew installs the same executable-only package:
+Homebrew also installs the same executable-only package:
 
 ```sh
 brew install puemos/tap/sshoosh

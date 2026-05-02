@@ -30,15 +30,15 @@
 
 1. Install the release binary.
 
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sh
-   ```
+```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sh
+```
 
-   After the first tagged release publishes the Homebrew formula, you can also use Homebrew.
+Or install with Homebrew:
 
-   ```sh
-   brew install puemos/tap/sshoosh
-   ```
+```sh
+brew install puemos/tap/sshoosh
+```
 
 2. Generate an owner bootstrap token.
 
