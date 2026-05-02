@@ -15,7 +15,8 @@ sshoosh bootstrap-token
 SSHOOSH_DB=./sshoosh.sqlite \
 SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
 sshoosh serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER+TOKEN@127.0.0.1"
+ssh -p 2222 "$USER@127.0.0.1"
+# Paste the bootstrap token at the "Invite token:" prompt.
 ```
 
 The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
@@ -26,7 +27,9 @@ After the first tagged release publishes the Homebrew formula, Homebrew installs
 brew install puemos/tap/sshoosh
 ```
 
-Connect as `username+TOKEN@host` with the one-time bootstrap token to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys must also connect as `username+invite-token@host`, or an owner/admin can add a key directly to an existing account. Unknown keys without a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+Connect as `username@host` and paste the one-time bootstrap token at the `Invite token:` prompt to create the first owner, create `#general`, and auto-join the owner to it. New users invited later follow the same flow with their invite token. Owners and admins can also pre-register a key with `sshoosh keys add`, in which case no prompt appears. Unknown keys that do not redeem a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+
+The `Invite token:` prompt is delivered over SSH keyboard-interactive auth (RFC 4256) with input masking, so the token never appears in the SSH user field, `ps`, sshd logs, terminal scrollback, or shell history.
 
 ## Quick Deploy
 
@@ -102,7 +105,8 @@ docker run -d --name sshoosh --restart unless-stopped \
   -v sshoosh-data:/data \
   ghcr.io/puemos/sshoosh:latest
 
-ssh -p 2222 "$USER+TOKEN@127.0.0.1"
+ssh -p 2222 "$USER@127.0.0.1"
+# Paste the bootstrap token at the "Invite token:" prompt.
 ```
 
 The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`.

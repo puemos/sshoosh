@@ -188,6 +188,11 @@ impl RenderSignal {
     }
 }
 
+pub(crate) struct PendingKeyAuth {
+    pub(crate) fingerprint: String,
+    pub(crate) public_key: String,
+}
+
 pub(crate) struct ClientHandler {
     pub(crate) state: ServerState,
     pub(crate) mouse_enabled: bool,
@@ -199,6 +204,7 @@ pub(crate) struct ClientHandler {
     pub(crate) input_rx: Option<mpsc::Receiver<Vec<u8>>>,
     pub(crate) render_signal: Option<Arc<RenderSignal>>,
     pub(crate) terminal_active: bool,
+    pub(crate) pending_key_auth: Option<PendingKeyAuth>,
 }
 
 impl ClientHandler {
@@ -218,6 +224,7 @@ impl ClientHandler {
             input_rx: None,
             render_signal: None,
             terminal_active: false,
+            pending_key_auth: None,
         }
     }
 }

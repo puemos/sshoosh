@@ -63,7 +63,7 @@ async fn bootstrap_owner(state: &ServerState, fingerprint: &str, public_key: &st
         .await
         .expect("bootstrap token");
     state
-        .ensure_account_for_key(&format!("owner+{token}"), fingerprint, public_key)
+        .redeem_token_for_key("owner", &token, fingerprint, public_key)
         .await
         .expect("owner")
 }
@@ -76,7 +76,7 @@ async fn accept_invite_key(
     invite: String,
 ) -> Account {
     state
-        .ensure_account_for_key(&format!("{username}+{invite}"), fingerprint, public_key)
+        .redeem_token_for_key(username, &invite, fingerprint, public_key)
         .await
         .expect("invite key")
 }
@@ -1412,16 +1412,61 @@ async fn service_pair(state: &ServerState) -> ServerState {
 }
 
 #[tokio::test]
-async fn unknown_ssh_key_requires_invite_token_without_writing_pending_account() {
-    let (_config, state) = test_state("unknown-key").await;
-    let error = state
-        .ensure_account_for_key("Alice", "SHA256:unknown", "ssh-ed25519 unknown")
+async fn lookup_active_account_for_key_returns_none_for_unknown_fingerprint() {
+    let (_config, state) = test_state("lookup-unknown").await;
+    let result = state
+        .lookup_active_account_for_key("SHA256:never-seen")
         .await
-        .expect_err("unknown key without token");
-    assert!(
-        error.to_string().contains("Invite token required"),
-        "{error:?}"
-    );
+        .expect("lookup");
+    assert!(result.is_none());
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    assert_eq!(account_count, 0, "lookup must not create rows");
+}
+
+#[tokio::test]
+async fn lookup_active_account_for_key_finds_known_key() {
+    let (_config, state) = test_state("lookup-known").await;
+    let owner = bootstrap_owner(&state, "SHA256:lookup-owner", "ssh-ed25519 owner").await;
+    let account = state
+        .lookup_active_account_for_key("SHA256:lookup-owner")
+        .await
+        .expect("lookup")
+        .expect("known key");
+    assert_eq!(account.id, owner.id);
+    assert_eq!(account.username, "owner");
+}
+
+#[tokio::test]
+async fn redeem_token_for_key_creates_owner_and_consumes_bootstrap_token() {
+    let (_config, state) = test_state("redeem-bootstrap").await;
+    let token = state.create_bootstrap_token().await.expect("token");
+    let owner = state
+        .redeem_token_for_key("owner", &token, "SHA256:redeem-owner", "ssh-ed25519 owner")
+        .await
+        .expect("redeem owner");
+    assert_eq!(owner.role, sshoosh::service::Role::Owner);
+    let reused = state
+        .redeem_token_for_key(
+            "second",
+            &token,
+            "SHA256:redeem-second",
+            "ssh-ed25519 second",
+        )
+        .await;
+    assert!(reused.is_err(), "{reused:?}");
+}
+
+#[tokio::test]
+async fn unknown_ssh_key_lookup_returns_none_without_writing_pending_account() {
+    let (_config, state) = test_state("unknown-key").await;
+    let result = state
+        .lookup_active_account_for_key("SHA256:unknown")
+        .await
+        .expect("lookup unknown");
+    assert!(result.is_none());
 
     let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(state.db.read_pool())
@@ -1439,14 +1484,12 @@ async fn unknown_ssh_key_requires_invite_token_without_writing_pending_account()
 async fn unknown_ssh_key_flood_does_not_create_pending_rows() {
     let (_config, state) = test_state("pending-cap").await;
     for idx in 0..96 {
-        let username = format!("pending{idx}");
         let fingerprint = format!("SHA256:cap-{idx}");
-        let public_key = format!("ssh-ed25519 cap-{idx}");
-        let err = state
-            .ensure_account_for_key(&username, &fingerprint, &public_key)
+        let result = state
+            .lookup_active_account_for_key(&fingerprint)
             .await
-            .expect_err("unknown key requires token");
-        assert!(err.to_string().contains("Invite token required"), "{err:?}");
+            .expect("lookup unknown");
+        assert!(result.is_none());
     }
 
     let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
@@ -1490,11 +1533,7 @@ async fn inactive_ssh_key_rows_are_rejected() {
     .expect("insert inactive key");
 
     let login = state
-        .ensure_account_for_key(
-            &format!("alice+{token}"),
-            "SHA256:inactive-alice",
-            "ssh-ed25519 inactive",
-        )
+        .lookup_active_account_for_key("SHA256:inactive-alice")
         .await
         .expect_err("inactive key must not be accepted");
     assert!(
@@ -1527,8 +1566,9 @@ async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
     let (_config, state) = test_state("bootstrap-token").await;
     let token = state.create_bootstrap_token().await.expect("token");
     let owner = state
-        .ensure_account_for_key(
-            &format!("owner+{token}"),
+        .redeem_token_for_key(
+            "owner",
+            &token,
             "SHA256:bootstrap-owner",
             "ssh-ed25519 owner",
         )
@@ -1536,8 +1576,9 @@ async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
         .expect("owner");
     assert_eq!(owner.role, sshoosh::service::Role::Owner);
     let reused = state
-        .ensure_account_for_key(
-            &format!("second+{token}"),
+        .redeem_token_for_key(
+            "second",
+            &token,
             "SHA256:bootstrap-second",
             "ssh-ed25519 second",
         )
@@ -1566,11 +1607,7 @@ async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
     assert!(alice.activated);
     assert_eq!(alice.role, sshoosh::service::Role::Member);
     let reused = state
-        .ensure_account_for_key(
-            &format!("bob+{invite}"),
-            "SHA256:invite-bob",
-            "ssh-ed25519 bob",
-        )
+        .redeem_token_for_key("bob", &invite, "SHA256:invite-bob", "ssh-ed25519 bob")
         .await;
     assert!(reused.is_err(), "{reused:?}");
     let bob_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'bob'")
@@ -1586,11 +1623,7 @@ async fn server_state_new_starts_no_live_event_tasks() {
     let mut live_rx = state.subscribe();
     let token = state.create_bootstrap_token().await.expect("token");
     state
-        .ensure_account_for_key(
-            &format!("owner+{token}"),
-            "SHA256:inert-owner",
-            "ssh-ed25519 owner",
-        )
+        .redeem_token_for_key("owner", &token, "SHA256:inert-owner", "ssh-ed25519 owner")
         .await
         .expect("owner");
     let result = timeout(Duration::from_millis(200), live_rx.recv()).await;
@@ -2072,31 +2105,29 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         let _ = run_with_listener(listener, config, state).await;
     });
 
-    let key = Arc::new(
-        PrivateKey::random(
-            &mut UnwrapErr(SysRng),
-            russh::keys::ssh_key::Algorithm::Ed25519,
-        )
-        .expect("client key"),
-    );
-    let mut session = client::connect(Arc::new(client::Config::default()), addr, TestClient)
+    let (mut session, priv_key, _) = connect_with_random_key(addr).await;
+    let pubkey_attempt = session
+        .authenticate_publickey("owner", priv_key)
         .await
-        .expect("connect");
+        .expect("publickey attempt");
+    assert!(!pubkey_attempt.success(), "unknown key must defer to KI");
+
+    match session
+        .authenticate_keyboard_interactive_start("owner", None)
+        .await
+        .expect("ki start")
+    {
+        russh::client::KeyboardInteractiveAuthResponse::InfoRequest { .. } => {}
+        other => panic!("expected info request, got {other:?}"),
+    }
     let auth = session
-        .authenticate_publickey(
-            format!("owner+{bootstrap_token}"),
-            PrivateKeyWithHashAlg::new(
-                key,
-                session
-                    .best_supported_rsa_hash()
-                    .await
-                    .expect("rsa hash")
-                    .flatten(),
-            ),
-        )
+        .authenticate_keyboard_interactive_respond(vec![bootstrap_token])
         .await
-        .expect("auth");
-    assert!(auth.success());
+        .expect("ki respond");
+    assert!(matches!(
+        auth,
+        russh::client::KeyboardInteractiveAuthResponse::Success
+    ));
 
     let mut channel = session.channel_open_session().await.expect("channel");
     channel
@@ -2208,4 +2239,247 @@ async fn read_until(channel: &mut russh::Channel<russh::client::Msg>, needle: &s
         );
     }
     String::from_utf8_lossy(&output).into_owned()
+}
+
+async fn connect_with_random_key(
+    addr: SocketAddr,
+) -> (
+    russh::client::Handle<TestClient>,
+    PrivateKeyWithHashAlg,
+    Arc<PrivateKey>,
+) {
+    let key = Arc::new(
+        PrivateKey::random(
+            &mut UnwrapErr(SysRng),
+            russh::keys::ssh_key::Algorithm::Ed25519,
+        )
+        .expect("client key"),
+    );
+    let session = client::connect(Arc::new(client::Config::default()), addr, TestClient)
+        .await
+        .expect("connect");
+    let priv_with_hash = PrivateKeyWithHashAlg::new(
+        key.clone(),
+        session
+            .best_supported_rsa_hash()
+            .await
+            .expect("rsa hash")
+            .flatten(),
+    );
+    (session, priv_with_hash, key)
+}
+
+#[tokio::test]
+async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
+    let (config, state) = test_state("ssh-ki-redeem").await;
+    let bootstrap_token = state
+        .create_bootstrap_token()
+        .await
+        .expect("bootstrap token");
+    let _owner = state
+        .redeem_token_for_key(
+            "owner",
+            &bootstrap_token,
+            "SHA256:ki-owner",
+            "ssh-ed25519 owner",
+        )
+        .await
+        .expect("seed owner");
+    let invite = state
+        .create_invite(
+            query_scalar::<String>("SELECT id FROM accounts WHERE username = 'owner'")
+                .fetch_one(state.db.read_pool())
+                .await
+                .expect("owner id"),
+        )
+        .await
+        .expect("invite");
+
+    let state_for_assert = state.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let (mut session, priv_key, _) = connect_with_random_key(addr).await;
+
+    let pubkey_attempt = session
+        .authenticate_publickey("alice", priv_key)
+        .await
+        .expect("publickey attempt");
+    assert!(
+        !pubkey_attempt.success(),
+        "unknown key must not auto-succeed"
+    );
+
+    let info = match session
+        .authenticate_keyboard_interactive_start("alice", None)
+        .await
+        .expect("start ki")
+    {
+        russh::client::KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => prompts,
+        other => panic!("expected info request, got {other:?}"),
+    };
+    assert_eq!(info.len(), 1, "{info:?}");
+    assert!(
+        info[0].prompt.to_lowercase().contains("invite"),
+        "{:?}",
+        info[0].prompt
+    );
+    assert!(!info[0].echo, "invite token prompt must mask input");
+
+    let outcome = session
+        .authenticate_keyboard_interactive_respond(vec![invite.clone()])
+        .await
+        .expect("ki respond");
+    assert!(
+        matches!(
+            outcome,
+            russh::client::KeyboardInteractiveAuthResponse::Success
+        ),
+        "expected success, got {outcome:?}"
+    );
+
+    let alice_id: String = query_scalar("SELECT id FROM accounts WHERE username = 'alice'")
+        .fetch_one(state_for_assert.db.read_pool())
+        .await
+        .expect("alice id");
+    assert!(!alice_id.is_empty());
+    let alice_keys: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ?")
+        .bind(&alice_id)
+        .fetch_one(state_for_assert.db.read_pool())
+        .await
+        .expect("alice keys");
+    assert_eq!(alice_keys, 1);
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn ssh_keyboard_interactive_rejects_invalid_token() {
+    let (config, state) = test_state("ssh-ki-reject").await;
+    let _owner = bootstrap_owner(&state, "SHA256:ki-reject-owner", "ssh-ed25519 owner").await;
+
+    let state_for_assert = state.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let (mut session, priv_key, _) = connect_with_random_key(addr).await;
+
+    let pubkey_attempt = session
+        .authenticate_publickey("mallory", priv_key)
+        .await
+        .expect("publickey attempt");
+    assert!(!pubkey_attempt.success());
+
+    match session
+        .authenticate_keyboard_interactive_start("mallory", None)
+        .await
+        .expect("start ki")
+    {
+        russh::client::KeyboardInteractiveAuthResponse::InfoRequest { .. } => {}
+        other => panic!("expected info request, got {other:?}"),
+    }
+
+    let outcome = session
+        .authenticate_keyboard_interactive_respond(vec!["not-a-real-token".to_string()])
+        .await
+        .expect("ki respond");
+    assert!(
+        matches!(
+            outcome,
+            russh::client::KeyboardInteractiveAuthResponse::Failure { .. }
+        ),
+        "expected failure, got {outcome:?}"
+    );
+
+    let mallory_count: i64 =
+        query_scalar("SELECT COUNT(*) FROM accounts WHERE username = 'mallory'")
+            .fetch_one(state_for_assert.db.read_pool())
+            .await
+            .expect("mallory count");
+    assert_eq!(
+        mallory_count, 0,
+        "rejected token must not create an account row"
+    );
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn ssh_keyboard_interactive_without_pubkey_is_rejected() {
+    let (config, state) = test_state("ssh-ki-bare").await;
+    let _owner = bootstrap_owner(&state, "SHA256:ki-bare-owner", "ssh-ed25519 owner").await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let mut session = client::connect(Arc::new(client::Config::default()), addr, TestClient)
+        .await
+        .expect("connect");
+    let outcome = session
+        .authenticate_keyboard_interactive_start("attacker", None)
+        .await
+        .expect("start ki");
+    assert!(
+        matches!(
+            outcome,
+            russh::client::KeyboardInteractiveAuthResponse::Failure { .. }
+        ),
+        "keyboard-interactive without pubkey must be rejected, got {outcome:?}"
+    );
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn ssh_legacy_username_plus_token_no_longer_works() {
+    let (config, state) = test_state("ssh-no-legacy").await;
+    let bootstrap_token = state
+        .create_bootstrap_token()
+        .await
+        .expect("bootstrap token");
+    let state_for_assert = state.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let (mut session, priv_key, _) = connect_with_random_key(addr).await;
+    let outcome = session
+        .authenticate_publickey(format!("owner+{bootstrap_token}"), priv_key)
+        .await
+        .expect("publickey attempt");
+    assert!(
+        !outcome.success(),
+        "username+token in the SSH user field must no longer authenticate"
+    );
+
+    let owner_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state_for_assert.db.read_pool())
+        .await
+        .expect("account count");
+    assert_eq!(owner_count, 0, "rejected attempt must not create accounts");
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
 }

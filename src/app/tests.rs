@@ -32,8 +32,9 @@ mod cases {
             .await
             .expect("bootstrap token");
         let account = state
-            .ensure_account_for_key(
-                &format!("owner+{token}"),
+            .redeem_token_for_key(
+                "owner",
+                &token,
                 &format!("SHA256:{name}"),
                 &format!("ssh-ed25519 {name}"),
             )
@@ -1092,8 +1093,9 @@ mod cases {
             .await
             .expect("bootstrap token");
         let account = state
-            .ensure_account_for_key(
-                &format!("owner+{token}"),
+            .redeem_token_for_key(
+                "owner",
+                &token,
                 &format!("SHA256:{name}"),
                 &format!("ssh-ed25519 {name}"),
             )
@@ -2065,8 +2067,9 @@ mod cases {
             .await
             .expect("bootstrap token");
         let owner = state
-            .ensure_account_for_key(
-                &format!("owner+{token}"),
+            .redeem_token_for_key(
+                "owner",
+                &token,
                 "SHA256:terminal-owner",
                 "ssh-ed25519 terminal-owner",
             )
@@ -2074,8 +2077,9 @@ mod cases {
             .expect("owner");
         let invite = state.create_invite(owner.id.clone()).await.expect("invite");
         let alice = state
-            .ensure_account_for_key(
-                &format!("alice+{invite}"),
+            .redeem_token_for_key(
+                "alice",
+                &invite,
                 "SHA256:terminal-alice",
                 "ssh-ed25519 terminal-alice",
             )

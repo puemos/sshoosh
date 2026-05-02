@@ -54,11 +54,16 @@
    sshoosh serve --host 0.0.0.0 --port 2222
    ```
 
-4. Connect with SSH.
+4. Connect with SSH and paste the token at the `Invite token:` prompt.
 
    ```sh
-   ssh -p 2222 "$USER+TOKEN@127.0.0.1"
+   ssh -p 2222 "$USER@127.0.0.1"
    ```
+
+   Your SSH key is registered the first time you redeem a bootstrap or invite
+   token. The token is requested over keyboard-interactive auth so it never
+   appears in the SSH user field, `ps`, sshd logs, or shell history.
+   Once your key is bound, future connections skip the prompt.
 
 ## Docs and reference
 

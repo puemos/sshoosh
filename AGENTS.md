@@ -45,7 +45,7 @@ The runtime should stay small and operator-friendly: one Rust binary, one SQLite
 
 ## Product And Security Invariants
 
-- Unknown SSH keys must require `username+token`; do not reintroduce pending account/key rows for unauthenticated unknown keys.
+- Unknown SSH keys must redeem a bootstrap or invite token via the SSH keyboard-interactive prompt before any account or key row is written. Tokens must never be parsed out of the SSH user field, sent over `auth_password`, or stored in plaintext in logs.
 - The first activated account is bootstrapped with a one-time bootstrap token and becomes owner.
 - `#general` is mandatory for activated users and must not become private, leaveable, archived, or deleted.
 - Public channels are discoverable, but content visibility and searchability depend on explicit membership.

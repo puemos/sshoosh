@@ -5,8 +5,10 @@ import SiteChrome from '../components/SiteChrome.astro';
 const base = import.meta.env.BASE_URL;
 const href = (path: string) => `${base}${path}`;
 const startCommand = `curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sh
+sshoosh bootstrap-token
 sshoosh serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER@127.0.0.1"`;
+ssh -p 2222 "$USER@127.0.0.1"
+# Paste the bootstrap token at the "Invite token:" prompt.`;
 const codeThemes = {
   light: 'github-light',
   dark: 'github-dark',

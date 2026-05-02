@@ -18,16 +18,16 @@ impl ServerState {
         self.db.is_master()
     }
 
-    pub async fn ensure_account_for_key(
+    /// Look up an activated account by SSH key fingerprint. Returns `Ok(None)` when
+    /// the fingerprint is not registered. Returns an error if the fingerprint is
+    /// registered but the account has not been activated yet (legacy pending rows).
+    pub async fn lookup_active_account_for_key(
         &self,
-        login_username: &str,
         fingerprint: &str,
-        public_key: &str,
-    ) -> anyhow::Result<Account> {
+    ) -> anyhow::Result<Option<Account>> {
         let mut tx = self.db.write_pool().begin().await?;
         let now = now();
-
-        if let Some(row) = query(
+        let Some(row) = query(
             "SELECT a.id, a.username, a.display_name, a.role, a.activated_at, a.pending_username
              FROM ssh_keys k
              JOIN accounts a ON a.id = k.account_id
@@ -38,34 +38,43 @@ impl ServerState {
         .bind(fingerprint)
         .fetch_optional(&mut tx)
         .await?
-        {
-            let account_id: String = row.get("id")?;
-            let activated = row.get::<Option<String>>("activated_at")?.is_some();
-            anyhow::ensure!(
-                activated,
-                "Pending SSH keys are not supported; reconnect as username+<token> or ask an owner/admin to add your key"
-            );
-            query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&now)
-                .bind(&account_id)
-                .execute(&mut tx)
-                .await?;
-            query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
-                .bind(&now)
-                .bind(fingerprint)
-                .execute(&mut tx)
-                .await?;
+        else {
             tx.commit().await?;
-            return account_from_row(row);
-        }
-
-        let Some((desired_username, token)) = login_username.split_once('+') else {
-            let username = normalize_username(login_username)?;
-            bail!(
-                "Invite token required for unknown SSH keys; connect as {username}+<token> or ask an owner/admin to add your key"
-            );
+            return Ok(None);
         };
+        let activated = row.get::<Option<String>>("activated_at")?.is_some();
+        anyhow::ensure!(
+            activated,
+            "Pending SSH keys are not supported; reconnect and supply the invite token at the prompt, or ask an owner/admin to add your key"
+        );
+        let account_id: String = row.get("id")?;
+        query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(&now)
+            .bind(&account_id)
+            .execute(&mut tx)
+            .await?;
+        query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
+            .bind(&now)
+            .bind(fingerprint)
+            .execute(&mut tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Some(account_from_row(row)?))
+    }
+
+    /// Redeem a bootstrap or invite token to create a new account and bind the
+    /// supplied SSH key. Used by the SSH keyboard-interactive flow and the legacy
+    /// `username+token` connection string.
+    pub async fn redeem_token_for_key(
+        &self,
+        desired_username: &str,
+        token: &str,
+        fingerprint: &str,
+        public_key: &str,
+    ) -> anyhow::Result<Account> {
+        let mut tx = self.db.write_pool().begin().await?;
+        let now = now();
         let username = normalize_username(desired_username)?;
         let token_hash = code_hash(token);
         let active_count: i64 = query_scalar(

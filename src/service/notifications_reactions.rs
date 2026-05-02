@@ -278,8 +278,9 @@ mod terminal_notification_settings_tests {
             .await
             .expect("bootstrap token");
         let account = state
-            .ensure_account_for_key(
-                &format!("owner+{token}"),
+            .redeem_token_for_key(
+                "owner",
+                &token,
                 "SHA256:terminal-settings",
                 "ssh-ed25519 terminal-settings",
             )

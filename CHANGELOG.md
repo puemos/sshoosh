@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+### Removed
+
+## [0.1.2] - 2026-05-02
+
+### Changed
+- Bootstrap and invite tokens are now redeemed at an SSH keyboard-interactive `Invite token:` prompt instead of being mashed into the SSH user field. Tokens no longer appear in `ps`, sshd auth logs, terminal scrollback, or shell history.
+
+### Removed
+- Removed the legacy `username+TOKEN@host` connection string. New SSH keys must redeem their token at the keyboard-interactive prompt.
+
 ## [0.1.1] - 2026-05-02
 
 ### Fixed

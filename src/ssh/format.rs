@@ -21,6 +21,17 @@ pub(crate) fn reject_publickey_only() -> Auth {
     }
 }
 
+pub(crate) fn invite_token_prompt() -> Auth {
+    use std::borrow::Cow;
+    Auth::Partial {
+        name: Cow::Borrowed("sshoosh invite"),
+        instructions: Cow::Borrowed(
+            "Your SSH key is not registered. Paste a bootstrap or invite token to claim an account.",
+        ),
+        prompts: Cow::Owned(vec![(Cow::Borrowed("Invite token: "), false)]),
+    }
+}
+
 pub(crate) fn mute_message(ttl_hours: Option<i64>, label: &str) -> String {
     match ttl_hours {
         Some(hours) => format!("{label} muted for {hours}h"),

@@ -23,32 +23,49 @@ impl russh::server::Handler for ClientHandler {
         let public_key = key
             .to_openssh()
             .unwrap_or_else(|_| format!("{:?}", key.fingerprint(keys::HashAlg::Sha256)));
-        let account = match self
-            .state
-            .ensure_account_for_key(user, &fingerprint, &public_key)
-            .await
-        {
-            Ok(account) => account,
+
+        match self.state.lookup_active_account_for_key(&fingerprint).await {
+            Ok(Some(account)) => {
+                tracing::info!(
+                    peer = ?self.peer_addr,
+                    username = %account.username,
+                    activated = account.activated,
+                    "public key auth accepted (known key)"
+                );
+                self.account = Some(account);
+                self.pending_key_auth = None;
+                return Ok(Auth::Accept);
+            }
+            Ok(None) => {}
             Err(err) => {
-                tracing::error!(
+                tracing::warn!(
                     peer = ?self.peer_addr,
                     error = ?err,
-                    "auth failed: could not load or create account"
+                    "public key rejected: account lookup failed"
                 );
+                self.pending_key_auth = None;
                 return Ok(Auth::Reject {
                     proceed_with_methods: None,
                     partial_success: false,
                 });
             }
-        };
+        }
+
+        self.pending_key_auth = Some(PendingKeyAuth {
+            fingerprint,
+            public_key,
+        });
         tracing::info!(
             peer = ?self.peer_addr,
-            username = %account.username,
-            activated = account.activated,
-            "public key auth accepted"
+            username = %user,
+            "unknown public key; requesting invite token via keyboard-interactive"
         );
-        self.account = Some(account);
-        Ok(Auth::Accept)
+        Ok(Auth::Reject {
+            proceed_with_methods: Some(russh::MethodSet::from(
+                &[russh::MethodKind::KeyboardInteractive][..],
+            )),
+            partial_success: false,
+        })
     }
 
     async fn auth_password(&mut self, _user: &str, _password: &str) -> Result<Auth, Self::Error> {
@@ -57,11 +74,64 @@ impl russh::server::Handler for ClientHandler {
 
     async fn auth_keyboard_interactive(
         &mut self,
-        _user: &str,
+        user: &str,
         _submethods: &str,
-        _response: Option<russh::server::Response<'_>>,
+        response: Option<russh::server::Response<'_>>,
     ) -> Result<Auth, Self::Error> {
-        Ok(reject_publickey_only())
+        if self.pending_key_auth.is_none() {
+            tracing::warn!(
+                peer = ?self.peer_addr,
+                "keyboard-interactive without prior public key offer"
+            );
+            return Ok(reject_publickey_only());
+        }
+
+        let Some(mut response) = response else {
+            return Ok(invite_token_prompt());
+        };
+
+        let Some(answer) = response.next() else {
+            tracing::warn!(
+                peer = ?self.peer_addr,
+                "keyboard-interactive responded without a token"
+            );
+            self.pending_key_auth = None;
+            return Ok(reject_publickey_only());
+        };
+        let token = String::from_utf8_lossy(&answer).trim().to_string();
+        if token.is_empty() {
+            tracing::warn!(peer = ?self.peer_addr, "empty invite token submitted");
+            self.pending_key_auth = None;
+            return Ok(reject_publickey_only());
+        }
+
+        let pending = self
+            .pending_key_auth
+            .take()
+            .expect("pending_key_auth checked above");
+        match self
+            .state
+            .redeem_token_for_key(user, &token, &pending.fingerprint, &pending.public_key)
+            .await
+        {
+            Ok(account) => {
+                tracing::info!(
+                    peer = ?self.peer_addr,
+                    username = %account.username,
+                    "keyboard-interactive token redemption accepted"
+                );
+                self.account = Some(account);
+                Ok(Auth::Accept)
+            }
+            Err(err) => {
+                tracing::warn!(
+                    peer = ?self.peer_addr,
+                    error = ?err,
+                    "keyboard-interactive token redemption rejected"
+                );
+                Ok(reject_publickey_only())
+            }
+        }
     }
 
     async fn channel_open_session(
