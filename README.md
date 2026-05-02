@@ -57,12 +57,14 @@ brew install puemos/tap/sshoosh
 4. Connect with SSH and paste the token at the masked `Token:` prompt.
 
    ```sh
-   ssh -p 2222 "$USER@127.0.0.1"
+   ssh -p 2222 127.0.0.1
    ```
 
    Your SSH key is registered the first time you redeem a bootstrap, invite,
    or device link token. The token is requested over keyboard-interactive auth so it never
    appears in the SSH user field, `ps`, sshd logs, or shell history.
+   For bootstrap and invite tokens, sshoosh then asks you to choose your
+   username in the TUI. Device link tokens sign in to the existing account.
    Once your key is bound, future connections skip the prompt.
 
 ## Docs and reference

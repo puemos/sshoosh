@@ -277,7 +277,7 @@ mod terminal_notification_settings_tests {
             .create_bootstrap_token()
             .await
             .expect("bootstrap token");
-        let account = state
+        let pending = state
             .redeem_token_for_key(
                 "owner",
                 &token,
@@ -286,6 +286,10 @@ mod terminal_notification_settings_tests {
             )
             .await
             .expect("account");
+        let account = state
+            .complete_onboarding(&pending.id, "owner")
+            .await
+            .expect("complete account");
 
         assert!(
             !state

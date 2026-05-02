@@ -2409,6 +2409,33 @@ mod cases {
     }
 
     #[test]
+    fn onboarding_modal_asks_for_username_only() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "pending".to_string(),
+            username: "pending-123".to_string(),
+            display_name: "pending".to_string(),
+            role: Role::Member,
+            activated: false,
+            pending_username: Some("alice".to_string()),
+        };
+        let mut ui = UiState::default();
+        ui.composer.start("alice");
+
+        terminal
+            .draw(|frame| draw(frame, &account, &Snapshot::default(), &mut ui, &[]))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("Your access token was accepted."));
+        assert!(rendered.contains("Choose the username"));
+        assert!(rendered.contains("username> alice"));
+        assert!(!rendered.contains("/join SECRET username"));
+        assert!(!rendered.contains("bootstrap, invite, or device link token"));
+    }
+
+    #[test]
     fn render_multiline_composer_input() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();

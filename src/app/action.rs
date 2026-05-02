@@ -23,8 +23,7 @@ pub enum Action {
         role: Role,
         ttl_hours: Option<i64>,
     },
-    AcceptInvite {
-        code: String,
+    CompleteOnboarding {
         username: String,
     },
     CreateChannel {

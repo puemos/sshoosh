@@ -31,7 +31,7 @@ mod cases {
             .create_bootstrap_token()
             .await
             .expect("bootstrap token");
-        let account = state
+        let pending = state
             .redeem_token_for_key(
                 "owner",
                 &token,
@@ -40,6 +40,10 @@ mod cases {
             )
             .await
             .expect("account");
+        let account = state
+            .complete_onboarding(&pending.id, "owner")
+            .await
+            .expect("complete account");
         let mut app = App::new(account, state, 100, 30).await.expect("app");
         app.ui.dismiss_startup_splash();
         app.snapshot = snapshot();
@@ -1173,7 +1177,7 @@ mod cases {
             .create_bootstrap_token()
             .await
             .expect("bootstrap token");
-        let account = state
+        let pending = state
             .redeem_token_for_key(
                 "owner",
                 &token,
@@ -1182,10 +1186,48 @@ mod cases {
             )
             .await
             .expect("account");
+        let account = state
+            .complete_onboarding(&pending.id, "owner")
+            .await
+            .expect("complete account");
         let app = App::new(account, state, 100, 30).await.expect("app");
 
         assert_eq!(app.ui.route, Route::Notifications);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn pending_sessions_prefill_and_submit_username_onboarding() {
+        let name = "pending-username-onboarding";
+        let db_path = temp_path(name).with_extension("sqlite");
+        let db = Database::connect(&db_path).await.expect("connect db");
+        db.init().await.expect("init db");
+        let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
+        let pending = state
+            .redeem_token_for_key(
+                "owner",
+                &token,
+                &format!("SHA256:{name}"),
+                &format!("ssh-ed25519 {name}"),
+            )
+            .await
+            .expect("pending account");
+        let mut app = App::new(pending, state, 100, 30).await.expect("app");
+
+        assert!(!app.account.activated);
+        assert_eq!(app.ui.composer.buffer, "owner");
+        app.submit_onboarding();
+
+        assert_eq!(
+            app.actions,
+            vec![Action::CompleteOnboarding {
+                username: "owner".to_string()
+            }]
+        );
     }
 
     #[tokio::test]
@@ -2292,7 +2334,7 @@ mod cases {
             .create_bootstrap_token()
             .await
             .expect("bootstrap token");
-        let owner = state
+        let pending_owner = state
             .redeem_token_for_key(
                 "owner",
                 &token,
@@ -2301,8 +2343,12 @@ mod cases {
             )
             .await
             .expect("owner");
+        let owner = state
+            .complete_onboarding(&pending_owner.id, "owner")
+            .await
+            .expect("complete owner");
         let invite = state.create_invite(owner.id.clone()).await.expect("invite");
-        let alice = state
+        let pending_alice = state
             .redeem_token_for_key(
                 "alice",
                 &invite,
@@ -2311,6 +2357,10 @@ mod cases {
             )
             .await
             .expect("alice");
+        let alice = state
+            .complete_onboarding(&pending_alice.id, "alice")
+            .await
+            .expect("complete alice");
         let general_id = state
             .snapshot(&owner.id, None, None, None)
             .await

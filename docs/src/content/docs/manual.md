@@ -21,10 +21,10 @@ Use this page based on what you are trying to do right now.
 
 You need an SSH client, an SSH key, the server host and port, and either a one-time invite token or a key that an owner/admin already registered for you.
 
-Connect with the username you want to use in sshoosh:
+Connect to the sshoosh host:
 
 ```sh
-ssh -p 2222 alice@sshoosh.example.com
+ssh -p 2222 sshoosh.example.com
 ```
 
 Use a terminal with UTF-8 support. Mouse support is optional; everything important is available from the keyboard. If your terminal has trouble with mouse reporting, the operator can run the server with `--no-mouse` or `SSHOOSH_NO_MOUSE=true`.
@@ -35,16 +35,17 @@ The first account on a new server is created with a bootstrap token:
 
 ```sh
 sshoosh bootstrap-token
-ssh -p 2222 owner@sshoosh.example.com
+ssh -p 2222 sshoosh.example.com
 ```
 
-Paste the token at the `Invite token:` prompt. The prompt uses SSH keyboard-interactive auth with input masking, so the token does not need to be placed in the username, shell history, or command line. The first activated account becomes the owner and is joined to `#general`.
+Paste the token at the `Token:` prompt. The prompt uses SSH keyboard-interactive auth with input masking, so the token does not need to be placed in the username, shell history, or command line. After the token is accepted, choose your sshoosh username in the setup modal. The first activated account becomes the owner and is joined to `#general`.
 
 New users follow the same flow with an invite token:
 
 ```sh
-ssh -p 2222 alice@sshoosh.example.com
-# Paste the invite token at the "Invite token:" prompt.
+ssh -p 2222 sshoosh.example.com
+# Paste the invite token at the "Token:" prompt,
+# then choose your username in the TUI.
 ```
 
 Future logins with the same SSH key go straight into the TUI. If an owner/admin pre-registers your public key with `sshoosh keys add`, you will not see the invite prompt.
@@ -364,7 +365,6 @@ For laptops, tunnels, and unstable networks, configure OpenSSH keepalives:
 Host sshoosh
   HostName sshoosh.example.com
   Port 2222
-  User alice
   ServerAliveInterval 30
   ServerAliveCountMax 10
   TCPKeepAlive no

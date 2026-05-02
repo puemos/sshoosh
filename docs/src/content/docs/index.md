@@ -15,8 +15,9 @@ sshoosh bootstrap-token
 SSHOOSH_DB=./sshoosh.sqlite \
 SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
 sshoosh serve --host 0.0.0.0 --port 2222
-ssh -p 2222 "$USER@127.0.0.1"
-# Paste the bootstrap token at the "Token:" prompt.
+ssh -p 2222 127.0.0.1
+# Paste the bootstrap token at the "Token:" prompt,
+# then choose your username in the TUI.
 ```
 
 The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
@@ -27,7 +28,7 @@ Homebrew also installs the same executable-only package:
 brew install puemos/tap/sshoosh
 ```
 
-Connect as `username@host` and paste the one-time bootstrap token at the masked `Token:` prompt to create the first owner, create `#general`, and auto-join the owner to it. New users invited later follow the same flow with their invite token. Already signed-in users can run `/key link [label]` to create a 10-minute device link token for a new SSH key on the same account. Owners and admins can also pre-register a key with `sshoosh keys add`, in which case no prompt appears. Unknown keys that do not redeem a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+Connect to the host and paste the one-time bootstrap token at the masked `Token:` prompt. After the token is accepted, sshoosh opens a setup modal where you choose the first owner's username, then creates `#general` and auto-joins the owner to it. New users invited later follow the same flow with their invite token and choose their username in the TUI. Already signed-in users can run `/key link [label]` to create a 10-minute device link token for a new SSH key on the same account. Owners and admins can also pre-register a key with `sshoosh keys add`, in which case no prompt appears. Unknown keys that do not redeem a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
 The `Token:` prompt is delivered over SSH keyboard-interactive auth (RFC 4256) with input masking, so bootstrap, invite, and device link tokens never appear in the SSH user field, `ps`, sshd logs, terminal scrollback, or shell history.
 
@@ -42,7 +43,7 @@ Each account can have multiple SSH keys. If you are already signed in on one dev
 The optional label is stored on the new key so `/key my` stays readable. Copy the token from the modal, then connect from the new device with the SSH key you want to add:
 
 ```sh
-ssh -p 2222 username@host
+ssh -p 2222 host
 ```
 
 Paste the device link token at the masked `Token:` prompt. `sshoosh` links the offered SSH public key to your existing account, marks the token used, and signs you in as the same user. The SSH username is not used to choose the account during device linking; the token owner is.
@@ -69,14 +70,14 @@ SSHOOSH_DB=./sshoosh.sqlite \
 SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
 sshoosh serve --host 0.0.0.0 --port 2222
 
-ssh -p 2222 "$USER@<host-or-lan-ip>"
+ssh -p 2222 <host-or-lan-ip>
 ```
 
 Expose a local server with ngrok TCP:
 
 ```sh
 ngrok tcp 2222
-ssh -p <ngrok-port> "$USER@<ngrok-host>"
+ssh -p <ngrok-port> <ngrok-host>
 ```
 
 Expose through Cloudflare Tunnel TCP. The server keeps an outbound tunnel open; clients run `cloudflared access tcp` locally and then SSH to the local forwarded port:
@@ -84,13 +85,13 @@ Expose through Cloudflare Tunnel TCP. The server keeps an outbound tunnel open; 
 ```sh
 cloudflared tunnel --hostname sshoosh.example.com --url tcp://localhost:2222
 cloudflared access tcp --hostname sshoosh.example.com --url localhost:9222
-ssh -p 9222 "$USER@127.0.0.1"
+ssh -p 9222 127.0.0.1
 ```
 
 For Tailscale, prefer private tailnet access to the machine running `sshoosh`. Tailscale Funnel can be used only when its allowed public TCP ports and TLS behavior fit your client path:
 
 ```sh
-ssh -p 2222 "$USER@<tailscale-machine-name-or-ip>"
+ssh -p 2222 <tailscale-machine-name-or-ip>
 tailscale funnel --tcp=<allowed-funnel-port> tcp://localhost:2222
 ```
 
@@ -98,7 +99,7 @@ An SSH reverse tunnel is useful when you control a relay host that allows remote
 
 ```sh
 ssh -N -R <public-port>:localhost:2222 user@bastion.example.com
-ssh -p <public-port> "$USER@bastion.example.com"
+ssh -p <public-port> bastion.example.com
 ```
 
 For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and service manager files:
@@ -119,8 +120,9 @@ docker run -d --name sshoosh --restart unless-stopped \
   -v sshoosh-data:/data \
   ghcr.io/puemos/sshoosh:latest
 
-ssh -p 2222 "$USER@127.0.0.1"
-# Paste the bootstrap token at the "Token:" prompt.
+ssh -p 2222 127.0.0.1
+# Paste the bootstrap token at the "Token:" prompt,
+# then choose your username in the TUI.
 ```
 
 The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`.
@@ -137,7 +139,6 @@ For laptops, mobile hotspots, tunnels, or NATs that briefly stop passing traffic
 Host sshoosh
   HostName sshoosh.example.com
   Port 2222
-  User alice
   ServerAliveInterval 30
   ServerAliveCountMax 10
   TCPKeepAlive no
@@ -152,7 +153,7 @@ autossh -M 0 \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
   -o TCPKeepAlive=no \
-  -p 2222 alice@sshoosh.example.com
+  -p 2222 sshoosh.example.com
 ```
 
 Mosh is not a direct fit for `sshoosh`: it bootstraps over SSH and then starts `mosh-server` in a normal remote shell, while `sshoosh` is the SSH application itself.

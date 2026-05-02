@@ -18,9 +18,9 @@ impl ServerState {
         self.db.is_master()
     }
 
-    /// Look up an activated account by SSH key fingerprint. Returns `Ok(None)` when
-    /// the fingerprint is not registered. Returns an error if the fingerprint is
-    /// registered but the account has not been activated yet (legacy pending rows).
+    /// Look up an account by SSH key fingerprint. Returns `Ok(None)` when the
+    /// fingerprint is not registered. Pending accounts are allowed so a user who
+    /// already redeemed a token can reconnect and finish choosing a username.
     pub async fn lookup_active_account_for_key(
         &self,
         fingerprint: &str,
@@ -42,18 +42,16 @@ impl ServerState {
             tx.commit().await?;
             return Ok(None);
         };
-        let activated = row.get::<Option<String>>("activated_at")?.is_some();
-        anyhow::ensure!(
-            activated,
-            "Pending SSH keys are not supported; reconnect and supply the invite token at the prompt, or ask an owner/admin to add your key"
-        );
         let account_id: String = row.get("id")?;
-        query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(&now)
-            .bind(&account_id)
-            .execute(&mut tx)
-            .await?;
+        let activated = row.get::<Option<String>>("activated_at")?.is_some();
+        if activated {
+            query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(&now)
+                .bind(&account_id)
+                .execute(&mut tx)
+                .await?;
+        }
         query("UPDATE ssh_keys SET last_used_at = ? WHERE fingerprint = ?")
             .bind(&now)
             .bind(fingerprint)
@@ -65,7 +63,7 @@ impl ServerState {
 
     /// Redeem a device-link, bootstrap, or invite token for an SSH login.
     /// Device-link tokens bind the supplied key to an existing account; bootstrap
-    /// and invite tokens create a new account.
+    /// and invite tokens create a pending account that finishes setup in the TUI.
     pub async fn redeem_ssh_login_token_for_key(
         &self,
         desired_username: &str,
@@ -113,9 +111,11 @@ impl ServerState {
             "Device link token is invalid, expired, or already used"
         );
         let expires_at: String = row.get("expires_at")?;
-        let expires_at =
-            time::OffsetDateTime::parse(&expires_at, &time::format_description::well_known::Rfc3339)
-                .context("invalid device link token expiry")?;
+        let expires_at = time::OffsetDateTime::parse(
+            &expires_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .context("invalid device link token expiry")?;
         anyhow::ensure!(
             expires_at > time::OffsetDateTime::now_utc(),
             "Device link token is invalid, expired, or already used"
@@ -197,8 +197,9 @@ impl ServerState {
         Ok(Some(account))
     }
 
-    /// Redeem a bootstrap or invite token to create a new account and bind the
-    /// supplied SSH key. Used by compatibility tests and the login-token fallback.
+    /// Redeem a bootstrap or invite token to create a pending account and bind
+    /// the supplied SSH key. Username selection and activation happen inside the
+    /// TUI after SSH auth succeeds.
     pub async fn redeem_token_for_key(
         &self,
         desired_username: &str,
@@ -208,7 +209,21 @@ impl ServerState {
     ) -> anyhow::Result<Account> {
         let mut tx = self.db.write_pool().begin().await?;
         let now = now();
-        let username = normalize_username(desired_username)?;
+        let pending_username = match normalize_username(desired_username) {
+            Ok(username) => {
+                let existing: Option<String> =
+                    query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
+                        .bind(&username)
+                        .fetch_optional(&mut tx)
+                        .await?;
+                if existing.is_none() {
+                    Some(username)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        };
         let token_hash = code_hash(token);
         let active_count: i64 = query_scalar(
             "SELECT COUNT(*)
@@ -233,12 +248,6 @@ impl ServerState {
             let Some(token_id) = token_id else {
                 bail!("Bootstrap token is invalid or already used");
             };
-            let existing: Option<String> =
-                query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
-                    .bind(&username)
-                    .fetch_optional(&mut tx)
-                    .await?;
-            anyhow::ensure!(existing.is_none(), "Username is already taken");
             bootstrap_token_id = Some(token_id);
             Role::Owner
         } else {
@@ -258,20 +267,15 @@ impl ServerState {
             let Some(invite) = invite else {
                 bail!("Invite token is invalid, expired, or already used");
             };
-            let existing: Option<String> =
-                query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
-                    .bind(&username)
-                    .fetch_optional(&mut tx)
-                    .await?;
-            anyhow::ensure!(existing.is_none(), "Username is already taken");
             invite_id = Some(invite.get::<String>("id")?);
             Role::from_db(invite.get::<String>("role_on_accept")?.as_str())?
         };
 
+        let username = pending_account_username(&account_id);
         query(
             "INSERT INTO accounts
              (id, username, display_name, role, settings_json, created_at, updated_at, last_seen_at, activated_at, pending_username)
-             VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, NULL)",
+             VALUES (?, ?, ?, ?, '{}', ?, ?, NULL, NULL, ?)",
         )
         .bind(&account_id)
         .bind(&username)
@@ -279,8 +283,7 @@ impl ServerState {
         .bind(role.as_str())
         .bind(&now)
         .bind(&now)
-        .bind(&now)
-        .bind(&now)
+        .bind(pending_username.as_deref())
         .execute(&mut tx)
         .await?;
         query(
@@ -321,6 +324,109 @@ impl ServerState {
             .await?;
         }
 
+        tx.commit().await?;
+        Ok(Account {
+            id: account_id,
+            username,
+            display_name: pending_username
+                .clone()
+                .unwrap_or_else(|| "pending".to_string()),
+            role,
+            activated: false,
+            pending_username,
+        })
+    }
+
+    pub async fn complete_onboarding(
+        &self,
+        account_id: &str,
+        username: &str,
+    ) -> anyhow::Result<Account> {
+        let mut tx = self.db.write_pool().begin().await?;
+        let now = now();
+        let username = normalize_username(username)?;
+        let row = query(
+            "SELECT id, username, display_name, role, activated_at, pending_username
+             FROM accounts
+             WHERE id = ? AND disabled_at IS NULL",
+        )
+        .bind(account_id)
+        .fetch_one(&mut tx)
+        .await?;
+        let role = Role::from_db(row.get::<String>("role")?.as_str())?;
+        if row.get::<Option<String>>("activated_at")?.is_some() {
+            tx.commit().await?;
+            return account_from_row(row);
+        }
+        let existing: Option<String> =
+            query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
+                .bind(&username)
+                .bind(account_id)
+                .fetch_optional(&mut tx)
+                .await?;
+        anyhow::ensure!(existing.is_none(), "Username is already taken");
+        if role == Role::Owner {
+            let token_count: i64 = query_scalar(
+                "SELECT COUNT(*)
+                 FROM bootstrap_tokens
+                 WHERE used_by_account_id = ? AND used_at IS NOT NULL",
+            )
+            .bind(account_id)
+            .fetch_one(&mut tx)
+            .await?;
+            anyhow::ensure!(
+                token_count > 0,
+                "Pending account has no accepted login token"
+            );
+            let active_count: i64 = query_scalar(
+                "SELECT COUNT(*)
+                 FROM accounts
+                 WHERE activated_at IS NOT NULL AND disabled_at IS NULL",
+            )
+            .fetch_one(&mut tx)
+            .await?;
+            anyhow::ensure!(
+                active_count == 0,
+                "Bootstrap token is invalid or already used"
+            );
+        } else {
+            let token_count: i64 = query_scalar(
+                "SELECT COUNT(*)
+                 FROM invites
+                 WHERE accepted_by_account_id = ? AND accepted_at IS NOT NULL",
+            )
+            .bind(account_id)
+            .fetch_one(&mut tx)
+            .await?;
+            anyhow::ensure!(
+                token_count > 0,
+                "Pending account has no accepted login token"
+            );
+        }
+
+        query(
+            "UPDATE accounts
+             SET username = ?, display_name = ?, last_seen_at = ?, activated_at = ?, updated_at = ?, pending_username = NULL
+             WHERE id = ? AND activated_at IS NULL",
+        )
+        .bind(&username)
+        .bind(&username)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .bind(account_id)
+        .execute(&mut tx)
+        .await?;
+        query(
+            "UPDATE ssh_keys
+             SET last_used_at = ?
+             WHERE account_id = ? AND revoked_at IS NULL",
+        )
+        .bind(&now)
+        .bind(account_id)
+        .execute(&mut tx)
+        .await?;
+
         let general_id = if let Some(general_id) =
             query_scalar::<String>("SELECT id FROM channels WHERE slug = 'general'")
                 .fetch_optional(&mut tx)
@@ -335,7 +441,7 @@ impl ServerState {
                      VALUES (?, 'general', 'general', 'public', 'General discussion', ?, ?, ?)",
                 )
                 .bind(&channel_id)
-                .bind(&account_id)
+                .bind(account_id)
                 .bind(&now)
                 .bind(&now)
                 .execute(&mut tx)
@@ -357,7 +463,7 @@ impl ServerState {
              ON CONFLICT(channel_id, account_id) DO NOTHING",
         )
         .bind(&general_id)
-        .bind(&account_id)
+        .bind(account_id)
         .bind(if role == Role::Owner {
             "owner"
         } else {
@@ -391,7 +497,7 @@ impl ServerState {
 
         tx.commit().await?;
         Ok(Account {
-            id: account_id,
+            id: account_id.to_string(),
             username: username.clone(),
             display_name: username,
             role,
@@ -731,7 +837,9 @@ impl ServerState {
         code: String,
         username: String,
     ) -> anyhow::Result<()> {
-        accept_invite(self.db.write_pool(), &account_id, &code, &username).await
+        let _ = code;
+        self.complete_onboarding(&account_id, &username).await?;
+        Ok(())
     }
 
     pub async fn create_channel(

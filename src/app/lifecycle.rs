@@ -22,6 +22,8 @@ impl App {
         }
         if account.activated {
             ui.show_startup_splash(Duration::from_millis(2400));
+        } else if let Some(username) = account.pending_username.as_deref() {
+            ui.composer.start(username);
         }
         Ok(Self {
             running: true,
@@ -50,6 +52,7 @@ impl App {
     }
 
     pub async fn refresh(&mut self) -> anyhow::Result<()> {
+        let was_activated = self.account.activated;
         self.account = match self.client.refresh_account().await {
             Ok(account) => account,
             Err(err) => {
@@ -75,6 +78,12 @@ impl App {
                 self.history_limit,
             )
             .await?;
+        if !was_activated && self.account.activated {
+            self.ui.route = Route::Notifications;
+            self.ui.active_pane = ActivePane::Detail;
+            self.ui.composer.reset_input();
+            self.ui.show_startup_splash(Duration::from_millis(2400));
+        }
         let terminal_notifications_enabled = self
             .client
             .terminal_notifications_enabled(&self.account.id)

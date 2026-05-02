@@ -59,21 +59,6 @@ pub(crate) async fn create_invite_with_options(
     Ok(code)
 }
 
-pub(crate) async fn accept_invite(
-    pool: &Database,
-    account_id: &str,
-    _code: &str,
-    _username: &str,
-) -> anyhow::Result<()> {
-    let mut tx = begin(pool).await?;
-    let account = load_account_tx(&mut tx, account_id).await?;
-    if account.activated {
-        tx.commit().await?;
-        return Ok(());
-    }
-    bail!("Invite tokens must be used during SSH login as username+token")
-}
-
 pub(crate) async fn create_channel(
     pool: &Database,
     actor_id: &str,

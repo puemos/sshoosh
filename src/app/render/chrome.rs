@@ -13,34 +13,28 @@ pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
     input_lines.min(5) + 3
 }
 
-pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, ui: &mut UiState) {
+pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, _account: &Account, ui: &mut UiState) {
     let modal = centered(area, 76, 21);
     let inner = elevated_panel(frame, modal, "sshoosh setup");
-    let suggested_username = account
-        .pending_username
-        .as_deref()
-        .unwrap_or(&account.username);
     let mut text = sshoosh_logo_lines();
     text.extend([
         Line::from(""),
         Line::from(Span::styled(
-            "This SSH key is not activated yet.",
+            "Your access token was accepted.",
             theme::elevated_unread(),
         )),
         Line::from(""),
-    Line::from("Enter a bootstrap, invite, or device link token."),
-        Line::from("Type the secret and press Enter, or use: /join SECRET username"),
+        Line::from("Choose the username this SSH key will use in sshoosh."),
+        Line::from("Use 2-32 letters, numbers, dots, dashes, or underscores."),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Suggested username: ", theme::elevated_muted()),
-            Span::styled(
-                sanitize_terminal_visible_text(suggested_username),
-                theme::elevated_accent(),
-            ),
+            Span::styled("Press ", theme::elevated_muted()),
+            Span::styled("Enter", theme::elevated_accent()),
+            Span::styled(" to confirm.", theme::elevated_muted()),
         ]),
         Line::from(""),
         Line::from(format!(
-            "> {}",
+            "username> {}",
             sanitize_terminal_visible_text(&ui.composer.buffer)
         )),
     ]);
