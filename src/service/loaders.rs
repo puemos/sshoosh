@@ -43,8 +43,7 @@ pub(crate) async fn load_user_presence(
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             let account_id: String = row.get("id")?;
             Ok(UserPresence {
@@ -54,7 +53,7 @@ pub(crate) async fn load_user_presence(
                 last_seen_at: row.get("last_seen_at")?,
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()?)
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 pub(crate) async fn load_notifications_page(
@@ -157,8 +156,7 @@ pub(crate) async fn load_channels(
     .bind(account_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             Ok(Channel {
                 id: row.get("id")?,
@@ -171,7 +169,7 @@ pub(crate) async fn load_channels(
                 unread_count: row.get("unread_count")?,
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()?)
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 pub(crate) async fn load_threads(
@@ -213,8 +211,7 @@ pub(crate) async fn load_threads(
     .bind(channel_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             Ok(ThreadItem {
                 id: row.get("id")?,
@@ -235,7 +232,7 @@ pub(crate) async fn load_threads(
                 reactions: parse_reaction_summaries(&row.get::<String>("reactions")?),
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()?)
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 pub(crate) async fn load_comments(
@@ -334,8 +331,7 @@ pub(crate) async fn load_conversations(
     .bind(account_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             Ok(Conversation {
                 id: row.get("id")?,
@@ -350,7 +346,7 @@ pub(crate) async fn load_conversations(
                 saved_at: row.get("saved_at")?,
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()?)
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 pub(crate) async fn load_dm_sidebar(
@@ -403,8 +399,7 @@ pub(crate) async fn load_dm_sidebar(
         account_id = account_id,
         "load_dm_sidebar query",
     );
-    Ok(rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             Ok(DmSidebarItem {
                 conversation_id: row.get("conversation_id")?,
@@ -419,7 +414,7 @@ pub(crate) async fn load_dm_sidebar(
                 saved_at: row.get("saved_at")?,
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()?)
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 pub(crate) async fn load_conversation_messages(

@@ -139,20 +139,6 @@ pub(crate) fn malformed_event_payload_count() -> usize {
     MALFORMED_EVENT_PAYLOADS.load(Ordering::Acquire)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_event_payload_reports_json_errors() {
-        let before = malformed_event_payload_count();
-        let parsed = parse_event_payload("{\"ok\":true}", 1).expect("valid payload should parse");
-        assert_eq!(parsed["ok"].as_bool(), Some(true));
-        assert!(parse_event_payload("{invalid json", 2).is_none());
-        assert_eq!(malformed_event_payload_count(), before + 1);
-    }
-}
-
 fn start_master_lease_manager(db: Database) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(db.master_heartbeat());
@@ -169,4 +155,18 @@ fn start_master_lease_manager(db: Database) -> JoinHandle<()> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_event_payload_reports_json_errors() {
+        let before = malformed_event_payload_count();
+        let parsed = parse_event_payload("{\"ok\":true}", 1).expect("valid payload should parse");
+        assert_eq!(parsed["ok"].as_bool(), Some(true));
+        assert!(parse_event_payload("{invalid json", 2).is_none());
+        assert_eq!(malformed_event_payload_count(), before + 1);
+    }
 }

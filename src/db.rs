@@ -547,7 +547,7 @@ impl Database {
     }
 
     pub async fn master_status(&self) -> anyhow::Result<Option<MasterStatus>> {
-        Ok(query(
+        query(
             "SELECT node_id, fencing_token, lease_until, heartbeat_at
              FROM server_leases
              WHERE name = 'main'",
@@ -564,7 +564,7 @@ impl Database {
                 is_this_node: node_id == self.node_id(),
             })
         })
-        .transpose()?)
+        .transpose()
     }
 
     pub async fn try_acquire_or_renew_master(&self) -> anyhow::Result<bool> {
@@ -1151,9 +1151,7 @@ fn query_mutation(sql: &str) -> Option<QueryMutation> {
         },
         "update" => parse_update(tokens),
         "delete" => {
-            let Some(token) = tokens.next() else {
-                return None;
-            };
+            let token = tokens.next()?;
             if token == "from" {
                 tokens.next().map(|table| QueryMutation::Delete {
                     table: table.to_string(),
@@ -1260,7 +1258,7 @@ fn parse_schema_mutation<'a>(
     })
 }
 
-fn strip_schema_qualifier<'a>(token: &str, value: &'a str) -> String {
+fn strip_schema_qualifier(token: &str, value: &str) -> String {
     if token == "attach" || token == "detach" {
         value.to_string()
     } else {
@@ -1772,12 +1770,8 @@ fn locate_webhook_insert_indices(sql: &str) -> (Option<usize>, Option<usize>) {
 }
 
 fn parse_sql_column_index(columns: &str, target: &str) -> Option<usize> {
-    let Some((columns, _)) = columns.trim().split_once('(') else {
-        return None;
-    };
-    let Some((columns, _)) = columns.rsplit_once(')') else {
-        return None;
-    };
+    let (columns, _) = columns.trim().split_once('(')?;
+    let (columns, _) = columns.rsplit_once(')')?;
     columns
         .split(',')
         .map(str::trim)

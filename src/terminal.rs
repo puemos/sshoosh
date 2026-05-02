@@ -1,5 +1,5 @@
 use std::{
-    io::{self, ErrorKind, Write},
+    io::{self, Write},
     sync::{Arc, Mutex},
 };
 
@@ -30,8 +30,8 @@ impl SharedBuffer {
         let mut guard = self
             .inner
             .lock()
-            .map_err(|_| io::Error::new(ErrorKind::Other, "shared terminal buffer poisoned"))?;
-        let buffer: &mut Vec<u8> = &mut *guard;
+            .map_err(|_| io::Error::other("shared terminal buffer poisoned"))?;
+        let buffer: &mut Vec<u8> = &mut guard;
         Ok(std::mem::take(buffer))
     }
 }
@@ -41,7 +41,7 @@ impl Write for SharedBuffer {
         let mut guard = self
             .inner
             .lock()
-            .map_err(|_| io::Error::new(ErrorKind::Other, "shared terminal buffer poisoned"))?;
+            .map_err(|_| io::Error::other("shared terminal buffer poisoned"))?;
         guard.extend_from_slice(buf);
         Ok(buf.len())
     }
@@ -259,6 +259,7 @@ fn rgb_color(color: Color) -> Option<(u8, u8, u8)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
 
     #[test]
     fn alt_screen_sequences_toggle_minimal_mouse_reporting() {

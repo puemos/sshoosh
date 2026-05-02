@@ -25,19 +25,27 @@
 
 ## Quick start
 
-1. Generate an owner bootstrap token.
+1. Install the release binary.
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sh
+   ```
+
+2. Generate an owner bootstrap token.
 
    ```sh
    sshoosh bootstrap-token
    ```
 
-2. Start the server.
+3. Start the server.
 
    ```sh
-   cargo run -- serve --host 0.0.0.0 --port 2222
+   SSHOOSH_DB=./sshoosh.sqlite \
+   SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
+   sshoosh serve --host 0.0.0.0 --port 2222
    ```
 
-3. Connect with SSH.
+4. Connect with SSH.
 
    ```sh
    ssh -p 2222 "$USER+TOKEN@127.0.0.1"
@@ -58,7 +66,19 @@ If you need just the essentials, see the sections below.
 | Local or LAN          | `0.0.0.0:2222` on private network | Bind to your host IP and keep firewall rules tight. |
 | Temporary sharing     | Tunnel `sshoosh` TCP port   | Works with ngrok, Cloudflare Tunnel, Tailscale, or SSH reverse tunnels. |
 | Production            | VPS + systemd              | Use durable storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`. |
+| Docker                | GHCR image + persistent volume | Use `ghcr.io/puemos/sshoosh` and expose raw TCP port 2222. |
 | PaaS/container hosts  | Use only raw TCP paths       | Avoid HTTP-only hosts. |
+
+Docker quick start:
+
+```sh
+docker volume create sshoosh-data
+docker run --rm -v sshoosh-data:/data ghcr.io/puemos/sshoosh:latest bootstrap-token
+docker run -d --name sshoosh --restart unless-stopped \
+  -p 2222:2222 \
+  -v sshoosh-data:/data \
+  ghcr.io/puemos/sshoosh:latest
+```
 
 ## Core commands
 

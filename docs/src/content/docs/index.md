@@ -7,13 +7,18 @@ description: Install, run, and operate sshoosh, the SSH-native TUI workspace cha
 
 ## Quick Start
 
-Run the server and connect with any SSH client:
+Install the release binary, run the server, and connect with any SSH client:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sh
 sshoosh bootstrap-token
-cargo run -- serve --host 0.0.0.0 --port 2222
+SSHOOSH_DB=./sshoosh.sqlite \
+SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
+sshoosh serve --host 0.0.0.0 --port 2222
 ssh -p 2222 "$USER+TOKEN@127.0.0.1"
 ```
+
+The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
 
 Connect as `username+TOKEN@host` with the one-time bootstrap token to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys must also connect as `username+invite-token@host`, or an owner/admin can add a key directly to an existing account. Unknown keys without a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
@@ -26,6 +31,7 @@ Connect as `username+TOKEN@host` with the one-time bootstrap token to create the
 | Local or LAN | Testing, homelab, private network use | Bind `0.0.0.0:2222`, open the firewall if needed, and connect by host name or LAN IP. |
 | Local plus expose | Temporary sharing from a laptop or workstation | Use a raw TCP tunnel such as [ngrok TCP](https://ngrok.com/docs/universal-gateway/tcp), [Cloudflare Tunnel arbitrary TCP](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/non-http/cloudflared-authentication/arbitrary-tcp/), Tailscale, or an SSH reverse tunnel. |
 | VPS with systemd | Recommended production path | Install the release binary, store state under `/var/lib/sshoosh`, then use `packaging/sshoosh.service`. |
+| Docker | Lightweight container path | Use `ghcr.io/puemos/sshoosh`, publish raw TCP port 2222, and keep `/data` on persistent storage. |
 | PaaS or container host | Works only with raw TCP and persistent storage | Railway TCP Proxy and Fly public TCP services can fit. HTTP-only app hosts need a raw TCP feature. |
 | Static or serverless hosts | Usually not a fit | `sshoosh` needs inbound SSH/TCP and process state, not request/response HTTP execution. |
 
@@ -71,8 +77,7 @@ ssh -p <public-port> "$USER@bastion.example.com"
 For a VPS, bootstrap against the same production paths the service will use, then enable the systemd service below:
 
 ```sh
-cargo build --release
-sudo install -m 0755 target/release/sshoosh /usr/local/bin/sshoosh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sudo sh -s -- --dir /usr/local/bin
 sudo useradd --system --home /var/lib/sshoosh --shell /usr/sbin/nologin sshoosh 2>/dev/null || true
 sudo install -d -o sshoosh -g sshoosh /var/lib/sshoosh
 sudo -u sshoosh env \
@@ -80,6 +85,21 @@ sudo -u sshoosh env \
   SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519 \
   /usr/local/bin/sshoosh bootstrap-token
 ```
+
+Docker:
+
+```sh
+docker volume create sshoosh-data
+docker run --rm -v sshoosh-data:/data ghcr.io/puemos/sshoosh:latest bootstrap-token
+docker run -d --name sshoosh --restart unless-stopped \
+  -p 2222:2222 \
+  -v sshoosh-data:/data \
+  ghcr.io/puemos/sshoosh:latest
+
+ssh -p 2222 "$USER+TOKEN@127.0.0.1"
+```
+
+The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`.
 
 On Railway, set a fixed internal port such as `SSHOOSH_PORT=2222`, mount persistent storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`, then enable TCP Proxy to that port and connect to the generated proxy host and port. On Fly, use a persistent volume such as `/data`, set `SSHOOSH_DB=/data/sshoosh.sqlite` and `SSHOOSH_SERVER_KEY=/data/sshoosh_server_ed25519`, and configure a raw TCP pass-through service with no HTTP/TLS handlers or PROXY protocol in front of `sshoosh`.
 

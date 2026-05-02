@@ -1,0 +1,10 @@
+.git
+.github
+target
+docs/.astro
+docs/dist
+docs/node_modules
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+sshoosh_server_ed25519
