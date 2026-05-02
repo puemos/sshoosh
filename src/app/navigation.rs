@@ -306,6 +306,7 @@ impl App {
             }
             ActivePane::List => {
                 self.ui.active_pane = ActivePane::Detail;
+                self.scroll_detail_to_bottom();
                 self.actions.push(Action::MarkThreadRead);
             }
         }

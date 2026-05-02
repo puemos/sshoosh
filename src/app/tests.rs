@@ -594,6 +594,45 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn mouse_open_thread_scrolls_to_bottom() {
+        let mut app = test_app("thread-open-scroll-bottom").await;
+        app.resize(100, 30).expect("resize");
+        app.snapshot.comments = (1..=80)
+            .map(|index| comment(index, "alice", &format!("comment {index}")))
+            .collect();
+        app.ui.active_pane = ActivePane::Rail;
+        app.render().expect("render");
+
+        click_region(
+            &mut app,
+            |target| matches!(target, HitTarget::WorkspaceThread(id) if id == "thread"),
+        );
+
+        app.render().expect("render thread");
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.ui.detail_scroll.offset().y > 0);
+    }
+
+    #[tokio::test]
+    async fn keyboard_open_thread_scrolls_to_bottom() {
+        let mut app = test_app("thread-open-scroll-bottom-keyboard").await;
+        app.resize(80, 8).expect("resize");
+        app.snapshot.comments = (1..=80)
+            .map(|index| comment(index, "alice", &format!("comment {index}")))
+            .collect();
+        app.ui.route = Route::Channel("general".to_string());
+        app.snapshot.selected_thread_id = Some("thread".to_string());
+        app.ui.active_pane = ActivePane::List;
+
+        app.render().expect("render");
+        app.handle_input(b"\r");
+
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+        assert!(app.ui.detail_scroll.offset().y > 0);
+    }
+
+    #[tokio::test]
     async fn mouse_clicks_saved_workspace_row_as_screen() {
         let mut app = test_app("workspace-clicks-saved").await;
         app.ui.active_pane = ActivePane::Rail;
