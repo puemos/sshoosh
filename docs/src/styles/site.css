@@ -344,6 +344,11 @@ html[data-theme="dark"] .astro-code span {
   padding-top: 32px;
 }
 
+.manual-article > table:first-of-type td:first-child {
+  color: var(--fg);
+  font-weight: 700;
+}
+
 .sidebar {
   border: 1px solid var(--line);
   padding: 12px;
@@ -378,7 +383,7 @@ html[data-theme="dark"] .astro-code span {
 }
 
 .nav-section h2 {
-  grid-row: 1 / span 8;
+  grid-row: 1 / span 16;
   margin: 0;
   color: var(--faint);
   font-size: 0.82rem;
