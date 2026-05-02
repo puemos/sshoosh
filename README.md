@@ -20,22 +20,11 @@
 
 `sshoosh` is a self-hosted SSH/TUI workspace chat for small teams and operators who want real-time collaboration over SSH.
 
-- Who it is for: teams that want direct messages, mentions, reactions, unread state, search, and admin workflows without exposing an HTTP app.
-- What it is not: an HTTP service or web dashboard. `sshoosh` is a raw SSH/TCP server.
-
 ## Demo
 
 <p align="center">
-  <a href="docs/public/assets/demo.webm">
-    <img
-      src="docs/public/assets/demo-poster.jpg"
-      alt="sshoosh terminal chat demo"
-      width="760"
-    >
-  </a>
+  <video src="https://github.com/user-attachments/assets/ed13483e-90d0-4e4b-876c-a972eab8b4c0" width="420" controls loop autorun/>
 </p>
-
-Watch the demo as [WebM](docs/public/assets/demo.webm) or [MP4](docs/public/assets/demo.mp4).
 
 ## Quick start
 
@@ -67,11 +56,10 @@ Watch the demo as [WebM](docs/public/assets/demo.webm) or [MP4](docs/public/asse
 
 ## Docs and reference
 
-The README is intentionally compact. For complete deployment, configuration, and command details, use the docs site:
+For complete deployment, configuration, and command details, read the docs site:
 
 - https://puemos.github.io/sshoosh/
 
-If you need just the essentials, see the sections below.
 
 ## Deployment summary
 
@@ -117,8 +105,3 @@ SSHOOSH_PORT=2222
 ```
 
 For advanced configuration options and production tuning, see the docs site.
-
-## Notes
-
-- `#general` is mandatory for activated users.
-- Reconnect behavior is resilient by design with stable account identity in DB.
