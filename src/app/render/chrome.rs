@@ -14,10 +14,10 @@ pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
 }
 
 pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, _account: &Account, ui: &mut UiState) {
-    let modal = centered(area, 76, 21);
+    let modal = centered(area, 76, 23);
     let inner = elevated_panel(frame, modal, "sshoosh setup");
-    let mut text = sshoosh_logo_lines();
-    text.extend([
+    let logo = sshoosh_splash_logo_lines();
+    let setup_lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             "Your access token was accepted.",
@@ -37,14 +37,27 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, _account: &Account,
             "username> {}",
             sanitize_terminal_visible_text(&ui.composer.buffer)
         )),
-    ]);
+    ];
+    let logo_height = logo.len() as u16;
+    let setup_y = inner.y.saturating_add(logo_height);
+    let input_y = setup_y.saturating_add(setup_lines.len().saturating_sub(1) as u16);
+
     frame.render_widget(
-        Paragraph::new(text)
+        Paragraph::new(logo)
             .style(theme::elevated_panel())
-            .wrap(Wrap { trim: true }),
-        inner,
+            .alignment(Alignment::Center),
+        Rect::new(inner.x, inner.y, inner.width, logo_height.min(inner.height)),
     );
-    let input = Rect::new(inner.x, inner.y.saturating_add(14), inner.width, 1);
+    frame.render_widget(
+        Paragraph::new(setup_lines).style(theme::elevated_panel()),
+        Rect::new(
+            inner.x,
+            setup_y,
+            inner.width,
+            inner.height.saturating_sub(logo_height),
+        ),
+    );
+    let input = Rect::new(inner.x, input_y, inner.width, 1);
     ui.hit_map
         .push(input, HitTarget::ComposerInput { scroll_y: 0 });
 }
@@ -76,19 +89,6 @@ pub(crate) fn draw_startup_splash(frame: &mut Frame, area: Rect, ui: &mut UiStat
             .alignment(Alignment::Center),
         inner,
     );
-}
-
-pub(crate) fn sshoosh_logo_lines() -> Vec<Line<'static>> {
-    const LOGO: &[&str] = &[
-        "                    _##                           ###",
-        "                   _##^                          ###^",
-        "    _####################__######_#######_#############_",
-        "   _###____###____### ######^_###### _######____### ###^",
-        "   _######_######### #######_#######_###_######### ###^",
-        "  ######^######^###^_###^#####^^^#####^######^### _###",
-        "_#################^ ############################^ ##^",
-    ];
-    logo_lines(LOGO)
 }
 
 fn sshoosh_splash_logo_lines() -> Vec<Line<'static>> {

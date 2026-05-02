@@ -2428,6 +2428,7 @@ mod cases {
             .unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
+        assert!(rendered.contains("▗▄▄▖"));
         assert!(rendered.contains("Your access token was accepted."));
         assert!(rendered.contains("Choose the username"));
         assert!(rendered.contains("username> alice"));
