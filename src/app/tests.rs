@@ -544,7 +544,21 @@ mod cases {
 
         assert!(output.contains("\x1b]52;c;Y29weS1tZQ==\x07"), "{output:?}");
         assert!(output.contains("Invite code copied"), "{output:?}");
-        assert_eq!(app.active_invite_code(), None);
+        assert_eq!(app.active_modal_token(), None);
+    }
+
+    #[tokio::test]
+    async fn device_link_modal_c_copies_token_and_shows_toast() {
+        let mut app = test_app("device-link-copy").await;
+        app.set_banner_modal_ok("Device link token: copy-me");
+
+        app.handle_input(b"c");
+        let output = app.render().expect("render copy");
+        let output = String::from_utf8_lossy(&output);
+
+        assert!(output.contains("\x1b]52;c;Y29weS1tZQ==\x07"), "{output:?}");
+        assert!(output.contains("Device link token copied"), "{output:?}");
+        assert_eq!(app.active_modal_token(), None);
     }
 
     #[tokio::test]
@@ -555,7 +569,7 @@ mod cases {
 
         click_region(&mut app, |target| matches!(target, HitTarget::BannerModal));
 
-        assert_eq!(app.active_invite_code(), Some("stay-open"));
+        assert_eq!(app.active_modal_token(), Some(("Invite code", "stay-open")));
     }
 
     #[tokio::test]

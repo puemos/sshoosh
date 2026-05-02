@@ -268,6 +268,12 @@ pub(crate) const KEY_SUBCOMMANDS: &[SubcommandSpec] = &[
         args: "public-key [| label]",
     },
     SubcommandSpec {
+        name: "link",
+        aliases: &[],
+        description: "Create a device link token",
+        args: "[label]",
+    },
+    SubcommandSpec {
         name: "label",
         aliases: &[],
         description: "Rename an SSH key label",

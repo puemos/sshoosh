@@ -66,13 +66,23 @@ impl App {
         Ok(output)
     }
 
-    pub(crate) fn active_invite_code(&self) -> Option<&str> {
+    pub(crate) fn active_modal_token(&self) -> Option<(&'static str, &str)> {
         self.ui
             .banner
             .as_ref()
             .filter(|banner| banner.modal_active())
-            .and_then(|banner| banner.text.strip_prefix("Invite code:"))
-            .map(str::trim)
-            .filter(|code| !code.is_empty())
+            .and_then(|banner| {
+                banner
+                    .text
+                    .strip_prefix("Invite code:")
+                    .map(|code| ("Invite code", code.trim()))
+                    .or_else(|| {
+                        banner
+                            .text
+                            .strip_prefix("Device link token:")
+                            .map(|code| ("Device link token", code.trim()))
+                    })
+            })
+            .filter(|(_, code)| !code.is_empty())
     }
 }

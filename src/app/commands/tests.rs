@@ -96,6 +96,12 @@ mod cases {
             ),
             ("/key list", Action::ListKeys),
             (
+                "/key link work laptop",
+                Action::CreateDeviceLinkToken {
+                    label: Some("work laptop".to_string()),
+                },
+            ),
+            (
                 "/key revoke key-1",
                 Action::RevokeKey {
                     key: "key-1".to_string(),

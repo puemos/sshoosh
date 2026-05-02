@@ -24,11 +24,11 @@ pub(crate) fn reject_publickey_only() -> Auth {
 pub(crate) fn invite_token_prompt() -> Auth {
     use std::borrow::Cow;
     Auth::Partial {
-        name: Cow::Borrowed("sshoosh invite"),
+        name: Cow::Borrowed("sshoosh access"),
         instructions: Cow::Borrowed(
-            "Your SSH key is not registered. Paste a bootstrap or invite token to claim an account.",
+            "Your SSH key is not registered. Paste a bootstrap, invite, or device link token.",
         ),
-        prompts: Cow::Owned(vec![(Cow::Borrowed("Invite token: "), false)]),
+        prompts: Cow::Owned(vec![(Cow::Borrowed("Token: "), false)]),
     }
 }
 

@@ -284,6 +284,10 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
             .add_ssh_key(&account_id, None, &public_key, label.as_deref())
             .await
             .map(|row| ActionResult::message(format!("Added key {}", row.fingerprint))),
+        Action::CreateDeviceLinkToken { label } => session
+            .create_device_link_token(&account_id, label.as_deref())
+            .await
+            .map(|code| ActionResult::modal_message(format!("Device link token: {code}"))),
         Action::LabelKey { key, label } => session
             .label_ssh_key(&account_id, &key, &label)
             .await

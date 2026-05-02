@@ -63,9 +63,142 @@ impl ServerState {
         Ok(Some(account_from_row(row)?))
     }
 
+    /// Redeem a device-link, bootstrap, or invite token for an SSH login.
+    /// Device-link tokens bind the supplied key to an existing account; bootstrap
+    /// and invite tokens create a new account.
+    pub async fn redeem_ssh_login_token_for_key(
+        &self,
+        desired_username: &str,
+        token: &str,
+        fingerprint: &str,
+        public_key: &str,
+    ) -> anyhow::Result<Account> {
+        if let Some(account) = self
+            .redeem_device_link_token_for_key(token, fingerprint, public_key)
+            .await?
+        {
+            return Ok(account);
+        }
+        self.redeem_token_for_key(desired_username, token, fingerprint, public_key)
+            .await
+    }
+
+    async fn redeem_device_link_token_for_key(
+        &self,
+        token: &str,
+        fingerprint: &str,
+        public_key: &str,
+    ) -> anyhow::Result<Option<Account>> {
+        let mut tx = self.db.write_pool().begin().await?;
+        let now = now();
+        let token_hash = code_hash(token);
+        let Some(row) = query(
+            "SELECT t.id, t.account_id, t.label, t.expires_at, t.used_at,
+                    a.username, a.display_name, a.role, a.activated_at, a.disabled_at
+             FROM device_link_tokens t
+             JOIN accounts a ON a.id = t.account_id
+             WHERE t.code_hash = ?
+             LIMIT 1",
+        )
+        .bind(&token_hash)
+        .fetch_optional(&mut tx)
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+
+        anyhow::ensure!(
+            row.get::<Option<String>>("used_at")?.is_none(),
+            "Device link token is invalid, expired, or already used"
+        );
+        let expires_at: String = row.get("expires_at")?;
+        let expires_at =
+            time::OffsetDateTime::parse(&expires_at, &time::format_description::well_known::Rfc3339)
+                .context("invalid device link token expiry")?;
+        anyhow::ensure!(
+            expires_at > time::OffsetDateTime::now_utc(),
+            "Device link token is invalid, expired, or already used"
+        );
+        anyhow::ensure!(
+            row.get::<Option<String>>("disabled_at")?.is_none(),
+            "Device link token account is disabled"
+        );
+        anyhow::ensure!(
+            row.get::<Option<String>>("activated_at")?.is_some(),
+            "Device link token account is not active"
+        );
+
+        let key_id = id();
+        let account_id: String = row.get("account_id")?;
+        let label: Option<String> = row.get("label")?;
+        query(
+            "INSERT INTO ssh_keys (id, account_id, fingerprint, public_key, label, created_at, last_used_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&key_id)
+        .bind(&account_id)
+        .bind(fingerprint)
+        .bind(public_key)
+        .bind(label.as_deref())
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut tx)
+        .await
+        .with_context(|| format!("linking key {fingerprint}"))?;
+        let token_id: String = row.get("id")?;
+        let updated = query(
+            "UPDATE device_link_tokens
+             SET used_at = ?, used_by_key_id = ?
+             WHERE id = ? AND used_at IS NULL",
+        )
+        .bind(&now)
+        .bind(&key_id)
+        .bind(&token_id)
+        .execute(&mut tx)
+        .await?
+        .rows_affected();
+        anyhow::ensure!(
+            updated == 1,
+            "Device link token is invalid, expired, or already used"
+        );
+        query("UPDATE accounts SET last_seen_at = ?, updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(&now)
+            .bind(&account_id)
+            .execute(&mut tx)
+            .await?;
+        insert_audit(
+            &mut tx,
+            Some(&account_id),
+            "ssh_key.linked",
+            Some(&key_id),
+            serde_json::json!({"username": row.get::<String>("username")?, "fingerprint": fingerprint}),
+        )
+        .await?;
+        insert_event(
+            &mut tx,
+            None,
+            None,
+            None,
+            "ssh_key.linked",
+            serde_json::json!({"key_id": key_id, "account_id": account_id.clone()}),
+        )
+        .await?;
+        let account = Account {
+            id: account_id,
+            username: row.get("username")?,
+            display_name: row.get("display_name")?,
+            role: Role::from_db(row.try_get::<String>("role")?.as_str())?,
+            activated: true,
+            pending_username: None,
+        };
+        tx.commit().await?;
+        Ok(Some(account))
+    }
+
     /// Redeem a bootstrap or invite token to create a new account and bind the
-    /// supplied SSH key. Used by the SSH keyboard-interactive flow and the legacy
-    /// `username+token` connection string.
+    /// supplied SSH key. Used by compatibility tests and the login-token fallback.
     pub async fn redeem_token_for_key(
         &self,
         desired_username: &str,

@@ -46,9 +46,12 @@ impl App {
                     self.ui.banner = None;
                 }
                 Key::Char('c') | Key::Char('C') => {
-                    if let Some(code) = self.active_invite_code().map(str::to_string) {
+                    if let Some((kind, code)) = self
+                        .active_modal_token()
+                        .map(|(kind, code)| (kind, code.to_string()))
+                    {
                         self.pending_clipboard_copy = Some(code);
-                        self.ui.banner = Some(Banner::ok("Invite code copied"));
+                        self.ui.banner = Some(Banner::ok(format!("{kind} copied")));
                     }
                 }
                 _ => {}
