@@ -179,10 +179,10 @@ pub(crate) async fn load_channel_by_slug_tx(
         bail!("Channel #{slug} not found");
     };
     Ok(ChannelMeta {
-        id: row.get("id"),
-        slug: row.get("slug"),
-        visibility: row.get("visibility"),
-        created_by_account_id: row.get("created_by_account_id"),
+        id: row.get("id")?,
+        slug: row.get("slug")?,
+        visibility: row.get("visibility")?,
+        created_by_account_id: row.get("created_by_account_id")?,
     })
 }
 
@@ -203,10 +203,10 @@ pub(crate) async fn load_channel_by_slug_any_tx(
         bail!("Channel #{slug} not found");
     };
     Ok(ChannelMeta {
-        id: row.get("id"),
-        slug: row.get("slug"),
-        visibility: row.get("visibility"),
-        created_by_account_id: row.get("created_by_account_id"),
+        id: row.get("id")?,
+        slug: row.get("slug")?,
+        visibility: row.get("visibility")?,
+        created_by_account_id: row.get("created_by_account_id")?,
     })
 }
 
@@ -226,10 +226,10 @@ pub(crate) async fn load_thread_meta_tx(
         bail!("Thread not found");
     };
     Ok(ThreadMeta {
-        channel_id: row.get("channel_id"),
-        creator_account_id: row.get("creator_account_id"),
-        title: row.get("title"),
-        body: row.get("body"),
+        channel_id: row.get("channel_id")?,
+        creator_account_id: row.get("creator_account_id")?,
+        title: row.get("title")?,
+        body: row.get("body")?,
     })
 }
 
@@ -280,10 +280,10 @@ pub(crate) async fn load_channel_by_id_tx(
         bail!("Channel not found");
     };
     Ok(ChannelMeta {
-        id: row.get("id"),
-        slug: row.get("slug"),
-        visibility: row.get("visibility"),
-        created_by_account_id: row.get("created_by_account_id"),
+        id: row.get("id")?,
+        slug: row.get("slug")?,
+        visibility: row.get("visibility")?,
+        created_by_account_id: row.get("created_by_account_id")?,
     })
 }
 
@@ -502,8 +502,8 @@ pub(crate) async fn load_comment_meta_tx(
         bail!("Comment #{obj_index} not found");
     };
     Ok(CommentMeta {
-        id: row.get("id"),
-        author_account_id: row.get("author_account_id"),
+        id: row.get("id")?,
+        author_account_id: row.get("author_account_id")?,
         obj_index,
     })
 }
@@ -669,8 +669,8 @@ pub(crate) async fn load_dm_message_meta_tx(
         bail!("DM message #{obj_index} not found");
     };
     Ok(DmMessageMeta {
-        id: row.get("id"),
-        author_account_id: row.get("author_account_id"),
+        id: row.get("id")?,
+        author_account_id: row.get("author_account_id")?,
         obj_index,
     })
 }
@@ -815,14 +815,16 @@ pub(crate) async fn load_active_presence_sessions(
     Ok(rows
         .into_iter()
         .filter_map(|row| {
-            let last_seen_at: String = row.get("last_seen_at");
+            let last_seen_at: String = row.get("last_seen_at").ok()?;
             let last_seen_at = time::OffsetDateTime::parse(
                 &last_seen_at,
                 &time::format_description::well_known::Rfc3339,
             )
             .ok()?;
             let age = (now - last_seen_at).whole_seconds().max(0);
-            (age <= PRESENCE_SESSION_TTL_SECONDS).then(|| row.get("account_id"))
+            (age <= PRESENCE_SESSION_TTL_SECONDS)
+                .then(|| row.get::<String>("account_id").ok())
+                .flatten()
         })
         .collect())
 }

@@ -22,32 +22,19 @@ pub(crate) async fn render_once(
         return Ok(true);
     }
 
-    if needs_refresh {
-        let mut app = app.lock().await;
-        if let Err(err) = app.refresh().await {
-            app.set_banner_err(format!("refresh failed: {err}"));
-        }
-    }
-
     for action in actions {
-        process_action(app, action).await;
-    }
-
-    let needs_refresh = {
-        let mut app = app.lock().await;
-        app.drain_live_events() || app.take_refresh_requested()
-    };
-    if needs_refresh {
-        let mut app = app.lock().await;
-        if let Err(err) = app.refresh().await {
-            app.set_banner_err(format!("refresh failed: {err}"));
-        }
+        process_action(app, action).await.ok();
     }
 
     let frame = {
         let mut app = app.lock().await;
         if !app.running {
             return Ok(true);
+        }
+        let needs_refresh =
+            needs_refresh || app.drain_live_events() || app.take_refresh_requested();
+        if needs_refresh && let Err(err) = app.refresh().await {
+            app.set_banner_err(format!("refresh failed: {err}"));
         }
         app.render()?
     };

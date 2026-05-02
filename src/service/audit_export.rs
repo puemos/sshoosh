@@ -48,12 +48,12 @@ impl ServerState {
                 break;
             }
             items.push(AuditEntry {
-                id: row.get("id"),
-                actor_username: row.get("actor_username"),
-                action: row.get("action"),
-                target: row.get("target"),
-                metadata_json: row.get("metadata_json"),
-                created_at: row.get("created_at"),
+                id: row.get("id")?,
+                actor_username: row.get("actor_username")?,
+                action: row.get("action")?,
+                target: row.get("target")?,
+                metadata_json: row.get("metadata_json")?,
+                created_at: row.get("created_at")?,
             });
         }
         Ok(Page { items, next_cursor })
@@ -355,8 +355,8 @@ impl ServerState {
         .await?
         {
             return Ok(Some(NextUnread::Thread {
-                channel_id: row.get("channel_id"),
-                thread_id: row.get("thread_id"),
+                channel_id: row.get("channel_id")?,
+                thread_id: row.get("thread_id")?,
             }));
         }
 

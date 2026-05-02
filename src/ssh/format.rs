@@ -4,9 +4,9 @@ pub(crate) async fn clean_disconnect(
     channel_id: ChannelId,
     mouse_enabled: bool,
 ) {
-    let _ = handle
-        .data(channel_id, terminal::leave_alt_screen(mouse_enabled))
-        .await;
+    if let Ok(sequence) = terminal::leave_alt_screen(mouse_enabled) {
+        let _ = handle.data(channel_id, sequence).await;
+    }
     let _ = handle
         .data(channel_id, EXIT_MESSAGE.as_bytes().to_vec())
         .await;

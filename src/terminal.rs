@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
     sync::{Arc, Mutex},
 };
 
@@ -26,15 +26,22 @@ pub struct SharedBuffer {
 }
 
 impl SharedBuffer {
-    pub fn take(&self) -> Vec<u8> {
-        let mut guard = self.inner.lock().expect("shared terminal buffer poisoned");
-        std::mem::take(&mut *guard)
+    pub fn take(&self) -> io::Result<Vec<u8>> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| io::Error::new(ErrorKind::Other, "shared terminal buffer poisoned"))?;
+        let buffer: &mut Vec<u8> = &mut *guard;
+        Ok(std::mem::take(buffer))
     }
 }
 
 impl Write for SharedBuffer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut guard = self.inner.lock().expect("shared terminal buffer poisoned");
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| io::Error::new(ErrorKind::Other, "shared terminal buffer poisoned"))?;
         guard.extend_from_slice(buf);
         Ok(buf.len())
     }
@@ -58,32 +65,30 @@ pub fn terminal(cols: u16, rows: u16) -> anyhow::Result<(SshooshTerminal, Shared
     Ok((terminal, shared))
 }
 
-pub fn enter_alt_screen(mouse_enabled: bool) -> Vec<u8> {
+pub fn enter_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     crossterm::execute!(
         buf,
         terminal::EnterAlternateScreen,
         cursor::Hide,
         terminal::Clear(ClearType::All)
-    )
-    .expect("write terminal enter sequence");
+    )?;
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_ENABLE);
     }
     buf.extend_from_slice(b"\x1b[?2004h");
-    buf
+    Ok(buf)
 }
 
-pub fn leave_alt_screen(mouse_enabled: bool) -> Vec<u8> {
+pub fn leave_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     buf.extend_from_slice(b"\x1b[?2004l\x1b]111\x1b\\");
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_DISABLE);
     }
     buf.extend(pointer_shape("default"));
-    crossterm::execute!(buf, cursor::Show, terminal::LeaveAlternateScreen)
-        .expect("write terminal leave sequence");
-    buf
+    crossterm::execute!(buf, cursor::Show, terminal::LeaveAlternateScreen)?;
+    Ok(buf)
 }
 
 pub fn osc52_copy(text: &str) -> Vec<u8> {
@@ -257,8 +262,8 @@ mod tests {
 
     #[test]
     fn alt_screen_sequences_toggle_minimal_mouse_reporting() {
-        let enter = String::from_utf8_lossy(&enter_alt_screen(true)).into_owned();
-        let leave = String::from_utf8_lossy(&leave_alt_screen(true)).into_owned();
+        let enter = String::from_utf8_lossy(&enter_alt_screen(true).expect("enter")).into_owned();
+        let leave = String::from_utf8_lossy(&leave_alt_screen(true).expect("leave")).into_owned();
 
         assert!(enter.contains("\x1b[?1000h"));
         assert!(enter.contains("\x1b[?1002h"));
@@ -276,8 +281,8 @@ mod tests {
 
     #[test]
     fn alt_screen_can_skip_mouse_reporting() {
-        let enter = String::from_utf8_lossy(&enter_alt_screen(false)).into_owned();
-        let leave = String::from_utf8_lossy(&leave_alt_screen(false)).into_owned();
+        let enter = String::from_utf8_lossy(&enter_alt_screen(false).expect("enter")).into_owned();
+        let leave = String::from_utf8_lossy(&leave_alt_screen(false).expect("leave")).into_owned();
 
         assert!(!enter.contains("\x1b[?1000h"));
         assert!(!enter.contains("\x1b[?1002h"));
@@ -290,6 +295,21 @@ mod tests {
         assert!(!leave.contains("\x1b[?1006l"));
         assert!(leave.contains("\x1b[?2004l"));
         assert!(leave.contains("\x1b]22;default\x1b\\"));
+    }
+
+    #[test]
+    fn shared_buffer_poisoning_returns_io_errors() {
+        let shared = SharedBuffer::default();
+        let poisoned = shared.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.inner.lock().expect("lock shared buffer");
+            panic!("poison shared buffer");
+        })
+        .join();
+
+        assert_eq!(shared.take().unwrap_err().kind(), ErrorKind::Other);
+        let mut writer = shared;
+        assert_eq!(writer.write(b"frame").unwrap_err().kind(), ErrorKind::Other);
     }
 
     #[test]

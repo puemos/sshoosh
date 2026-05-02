@@ -20,6 +20,7 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretBox};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::Mutex;
+use url::Url;
 use zeroize::Zeroizing;
 
 const MIGRATION_INITIAL: &str = include_str!("../migrations/20260430000000_initial.sql");
@@ -55,6 +56,18 @@ pub enum DatabaseKind {
     Remote,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DbRole {
+    Master,
+    Standby,
+}
+
+impl DbRole {
+    fn allow_standby_writes(self) -> bool {
+        matches!(self, Self::Master)
+    }
+}
+
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<libsql::Database>,
@@ -76,6 +89,7 @@ pub struct DbTransaction {
     tx: libsql::Transaction,
     encryption: Option<Arc<EncryptionService>>,
     bypass_master_check: bool,
+    is_master: Arc<AtomicBool>,
 }
 
 pub struct DbReadSession {
@@ -83,7 +97,7 @@ pub struct DbReadSession {
     encryption: Option<Arc<EncryptionService>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DbResult {
     rows_affected: u64,
     last_insert_rowid: i64,
@@ -121,6 +135,24 @@ pub struct Query {
     sql: String,
     params: Vec<Value>,
     bypass_master_check: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+enum QueryMutation {
+    Insert { table: String },
+    Update { table: String },
+    Delete { table: String },
+    Replace { table: String },
+    Create { target: String },
+    Alter { target: String },
+    Drop { target: String },
+    Vacuum,
+    Truncate { target: String },
+    Attach,
+    Detach,
+    Pragma,
+    ReadOnly,
 }
 
 pub struct QueryScalar<T> {
@@ -175,46 +207,51 @@ impl Database {
     }
 
     pub async fn connect_with_config(config: &DatabaseConfig) -> anyhow::Result<Self> {
-        let (inner, kind, display_name, local_path) =
-            if let Some(url) = config.database_url.as_deref() {
-                validate_database_url(url)?;
-                let token = config
-                    .database_auth_token
-                    .as_ref()
-                    .map(|token| token.expose_secret().to_string())
-                    .unwrap_or_default();
-                if is_remote_url(url) && token.is_empty() {
-                    bail!("SSHOOSH_DATABASE_AUTH_TOKEN is required for remote database URLs");
-                }
-                let (db, local_path) = if let Some(path) = strip_url_prefix(url, "file:") {
-                    ensure_parent(Path::new(path))?;
-                    let db = Builder::new_local(path).build().await?;
-                    let local_path = PathBuf::from(path);
-                    secure_local_database_files(&local_path)?;
-                    (db, Some(local_path))
-                } else {
-                    (
-                        Builder::new_remote(url.to_string(), token).build().await?,
-                        None,
-                    )
-                };
-                let kind = if is_file_url(url) {
-                    DatabaseKind::Local
-                } else {
-                    DatabaseKind::Remote
-                };
-                (db, kind, redact_database_url(url), local_path)
+        let (inner, kind, display_name, local_path) = if let Some(url) =
+            config.database_url.as_deref()
+        {
+            validate_database_url(url)?;
+            let token = config
+                .database_auth_token
+                .as_ref()
+                .map(|token| token.expose_secret().to_string())
+                .unwrap_or_default();
+            let parsed = Url::parse(url).with_context(|| format!("invalid database URL {url}"))?;
+            if parsed.scheme() != "file" && token.is_empty() {
+                bail!("SSHOOSH_DATABASE_AUTH_TOKEN is required for remote database URLs");
+            }
+            let (db, local_path) = if parsed.scheme() == "file" {
+                let path = parsed
+                    .to_file_path()
+                    .map_err(|_| anyhow::anyhow!("invalid file database URL {url}"))?;
+                ensure_parent(&path)?;
+                let db = Builder::new_local(&path).build().await?;
+                let local_path = path.clone();
+                secure_local_database_files(&local_path)?;
+                (db, Some(local_path))
             } else {
-                ensure_parent(&config.db_path)?;
-                let inner = Builder::new_local(&config.db_path).build().await?;
-                secure_local_database_files(&config.db_path)?;
                 (
-                    inner,
-                    DatabaseKind::Local,
-                    config.db_path.display().to_string(),
-                    Some(config.db_path.clone()),
+                    Builder::new_remote(url.to_string(), token).build().await?,
+                    None,
                 )
             };
+            let kind = if is_file_url(url) {
+                DatabaseKind::Local
+            } else {
+                DatabaseKind::Remote
+            };
+            (db, kind, redact_database_url(url), local_path)
+        } else {
+            ensure_parent(&config.db_path)?;
+            let inner = Builder::new_local(&config.db_path).build().await?;
+            secure_local_database_files(&config.db_path)?;
+            (
+                inner,
+                DatabaseKind::Local,
+                config.db_path.display().to_string(),
+                Some(config.db_path.clone()),
+            )
+        };
 
         let encryption = config
             .encryption_key
@@ -267,6 +304,14 @@ impl Database {
 
     pub fn is_master(&self) -> bool {
         self.is_master.load(Ordering::Acquire)
+    }
+
+    pub fn role(&self) -> DbRole {
+        if self.is_master() {
+            DbRole::Master
+        } else {
+            DbRole::Standby
+        }
     }
 
     pub fn set_master_status(&self, is_master: bool, fencing_token: i64) {
@@ -478,6 +523,7 @@ impl Database {
             tx,
             encryption: self.encryption.clone(),
             bypass_master_check: false,
+            is_master: self.is_master.clone(),
         })
     }
 
@@ -508,13 +554,17 @@ impl Database {
         )
         .fetch_optional_unchecked(self)
         .await?
-        .map(|row| MasterStatus {
-            node_id: row.get("node_id"),
-            fencing_token: row.get("fencing_token"),
-            lease_until: row.get("lease_until"),
-            heartbeat_at: row.get("heartbeat_at"),
-            is_this_node: row.get::<String>("node_id") == self.node_id(),
-        }))
+        .map(|row| {
+            let node_id: String = row.get("node_id")?;
+            Ok::<MasterStatus, anyhow::Error>(MasterStatus {
+                node_id: node_id.clone(),
+                fencing_token: row.get("fencing_token")?,
+                lease_until: row.get("lease_until")?,
+                heartbeat_at: row.get("heartbeat_at")?,
+                is_this_node: node_id == self.node_id(),
+            })
+        })
+        .transpose()?)
     }
 
     pub async fn try_acquire_or_renew_master(&self) -> anyhow::Result<bool> {
@@ -539,9 +589,9 @@ impl Database {
         )
         .fetch_one_unchecked(&mut tx)
         .await?;
-        let current_node: String = row.get("node_id");
-        let current_token: i64 = row.get("fencing_token");
-        let current_until: String = row.get("lease_until");
+        let current_node: String = row.get("node_id")?;
+        let current_token: i64 = row.get("fencing_token")?;
+        let current_until: String = row.get("lease_until")?;
         let expired = parse_rfc3339(&current_until)
             .map(|until| until < OffsetDateTime::now_utc())
             .unwrap_or(true);
@@ -746,11 +796,26 @@ pub trait DbExecutor {
     async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>>;
 }
 
+fn require_master_for_write(
+    role: DbRole,
+    allow_standby_writes: bool,
+    query: &Query,
+) -> anyhow::Result<()> {
+    if query.bypass_master_check {
+        return Ok(());
+    }
+    if !allow_standby_writes && !role.allow_standby_writes() && query.is_write() {
+        bail!("master lease required for write query");
+    }
+    Ok(())
+}
+
 impl DbExecutor for &Database {
     async fn execute_query(&mut self, mut query: Query) -> anyhow::Result<DbResult> {
         if normalize_sql(&query.sql).starts_with("pragma ignore_check_constraints = on") {
             self.ignore_check_constraints.store(true, Ordering::Release);
         }
+        require_master_for_write(self.role(), false, &query)?;
         query.encrypt_params(self.encryption.as_deref())?;
         let conn = self.connection()?;
         self.configure_connection(&conn).await?;
@@ -779,6 +844,7 @@ impl DbExecutor for &Database {
     }
 
     async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>> {
+        require_master_for_write(self.role(), false, &query)?;
         let conn = self.connection()?;
         self.configure_connection(&conn).await?;
         let row_id_hint = query.row_id_hint();
@@ -796,6 +862,7 @@ impl DbExecutor for &Database {
 
 impl DbExecutor for &DbReadSession {
     async fn execute_query(&mut self, mut query: Query) -> anyhow::Result<DbResult> {
+        require_master_for_write(DbRole::Standby, false, &query)?;
         query.encrypt_params(self.encryption.as_deref())?;
         let started = Instant::now();
         let rows_affected = self
@@ -823,6 +890,7 @@ impl DbExecutor for &DbReadSession {
     }
 
     async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>> {
+        require_master_for_write(DbRole::Standby, false, &query)?;
         let row_id_hint = query.row_id_hint();
         let sql = query.sql.clone();
         let started = Instant::now();
@@ -842,6 +910,7 @@ impl DbExecutor for &mut DbTransaction {
         if self.bypass_master_check {
             query.bypass_master_check = true;
         }
+        require_master_for_write(self_role(self), self.bypass_master_check, &query)?;
         query.encrypt_params(self.encryption.as_deref())?;
         let started = Instant::now();
         let rows_affected = self
@@ -868,7 +937,11 @@ impl DbExecutor for &mut DbTransaction {
         })
     }
 
-    async fn fetch_rows(&mut self, query: Query) -> anyhow::Result<Vec<DbRow>> {
+    async fn fetch_rows(&mut self, mut query: Query) -> anyhow::Result<Vec<DbRow>> {
+        if self.bypass_master_check {
+            query.bypass_master_check = true;
+        }
+        require_master_for_write(self_role(self), self.bypass_master_check, &query)?;
         let row_id_hint = query.row_id_hint();
         let sql = query.sql.clone();
         let started = Instant::now();
@@ -883,6 +956,14 @@ impl DbExecutor for &mut DbTransaction {
     }
 }
 
+fn self_role(exec: &mut DbTransaction) -> DbRole {
+    if exec.is_master.load(Ordering::Acquire) {
+        DbRole::Master
+    } else {
+        DbRole::Standby
+    }
+}
+
 impl DbExecutor for &mut &mut DbTransaction {
     async fn execute_query(&mut self, query: Query) -> anyhow::Result<DbResult> {
         DbExecutor::execute_query(&mut **self, query).await
@@ -894,6 +975,10 @@ impl DbExecutor for &mut &mut DbTransaction {
 }
 
 impl Query {
+    fn is_write(&self) -> bool {
+        query_is_write(&self.sql)
+    }
+
     pub fn bind(mut self, value: impl IntoDbValue) -> Self {
         self.params.push(value.into_db_value());
         self
@@ -952,51 +1037,76 @@ impl Query {
         let Some(encryption) = encryption else {
             return Ok(());
         };
-        let sql = normalize_sql(&self.sql);
-        if sql.starts_with("insert into threads ") {
-            encrypt_param(encryption, &mut self.params, 3, "threads", 0, "title")?;
-            encrypt_param(encryption, &mut self.params, 4, "threads", 0, "body")?;
-        } else if sql.starts_with("update threads set title = ?, body = ?") {
-            encrypt_param(encryption, &mut self.params, 0, "threads", 4, "title")?;
-            encrypt_param(encryption, &mut self.params, 1, "threads", 4, "body")?;
-        } else if sql.starts_with("update threads set title = ?") {
-            encrypt_param(encryption, &mut self.params, 0, "threads", 3, "title")?;
-        } else if sql.starts_with("insert into comments ") {
-            encrypt_param(encryption, &mut self.params, 5, "comments", 0, "body")?;
-        } else if sql.starts_with("update comments set body = ?") {
-            encrypt_param(encryption, &mut self.params, 0, "comments", 3, "body")?;
-        } else if sql.starts_with("insert into conversation_messages ") {
-            encrypt_param(
-                encryption,
-                &mut self.params,
-                4,
-                "conversation_messages",
-                0,
-                "body",
-            )?;
-        } else if sql.starts_with("update conversation_messages set body = ?") {
-            encrypt_param(
-                encryption,
-                &mut self.params,
-                0,
-                "conversation_messages",
-                3,
-                "body",
-            )?;
-        } else if sql.starts_with("insert into notifications ") {
-            encrypt_param(encryption, &mut self.params, 9, "notifications", 0, "title")?;
-            encrypt_param(encryption, &mut self.params, 10, "notifications", 0, "body")?;
-        } else if sql.starts_with("insert into webhook_jobs ") {
-            encrypt_named_payload(encryption, &mut self.params, &sql)?;
-        } else if sql.starts_with("update webhook_jobs set payload_json = ?") {
-            encrypt_param(
-                encryption,
-                &mut self.params,
-                0,
-                "webhook_jobs",
-                1,
-                "payload_json",
-            )?;
+        let mutation = query_mutation(&self.sql);
+        match &mutation {
+            Some(QueryMutation::Insert { table }) if table == "threads" => {
+                encrypt_param(encryption, &mut self.params, 3, "threads", 0, "title")?;
+                encrypt_param(encryption, &mut self.params, 4, "threads", 0, "body")?;
+            }
+            Some(QueryMutation::Update { table }) if table == "threads" => {
+                encrypt_named_update_column(
+                    encryption,
+                    &mut self.params,
+                    &self.sql,
+                    "threads",
+                    "title",
+                )?;
+                encrypt_named_update_column(
+                    encryption,
+                    &mut self.params,
+                    &self.sql,
+                    "threads",
+                    "body",
+                )?;
+            }
+            Some(QueryMutation::Insert { table }) if table == "comments" => {
+                encrypt_param(encryption, &mut self.params, 5, "comments", 0, "body")?;
+            }
+            Some(QueryMutation::Update { table }) if table == "comments" => {
+                encrypt_named_update_column(
+                    encryption,
+                    &mut self.params,
+                    &self.sql,
+                    "comments",
+                    "body",
+                )?;
+            }
+            Some(QueryMutation::Insert { table }) if table == "conversation_messages" => {
+                encrypt_param(
+                    encryption,
+                    &mut self.params,
+                    4,
+                    "conversation_messages",
+                    0,
+                    "body",
+                )?;
+            }
+            Some(QueryMutation::Update { table }) if table == "conversation_messages" => {
+                encrypt_named_update_column(
+                    encryption,
+                    &mut self.params,
+                    &self.sql,
+                    "conversation_messages",
+                    "body",
+                )?;
+            }
+            Some(QueryMutation::Insert { table }) if table == "notifications" => {
+                encrypt_param(encryption, &mut self.params, 9, "notifications", 0, "title")?;
+                encrypt_param(encryption, &mut self.params, 10, "notifications", 0, "body")?;
+            }
+            Some(QueryMutation::Insert { table }) if table == "webhook_jobs" => {
+                encrypt_named_payload(encryption, &mut self.params, &self.sql, &mutation)?;
+            }
+            Some(QueryMutation::Update { table }) if table == "webhook_jobs" => {
+                encrypt_named_update_column(
+                    encryption,
+                    &mut self.params,
+                    &self.sql,
+                    "webhook_jobs",
+                    "payload_json",
+                )?;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1008,6 +1118,153 @@ impl Query {
         } else {
             None
         }
+    }
+}
+
+fn query_is_write(sql: &str) -> bool {
+    !matches!(
+        query_mutation(&normalize_sql(sql)),
+        Some(QueryMutation::ReadOnly)
+    )
+}
+
+fn query_mutation(sql: &str) -> Option<QueryMutation> {
+    let normalized = normalize_sql(sql);
+    let statement = if normalized.starts_with("with ") {
+        strip_with_clause_prefix(&normalized)
+    } else {
+        normalized.as_str()
+    };
+    let mut tokens = statement.split_whitespace();
+    let token = tokens.next()?;
+    match token {
+        "insert" => parse_insert(tokens),
+        "select" | "explain" => Some(QueryMutation::ReadOnly),
+        "or" => match tokens.next()? {
+            "replace" => parse_insert(tokens).map(|mutation| match mutation {
+                QueryMutation::Insert { table } => QueryMutation::Replace { table },
+                _ => mutation,
+            }),
+            "ignore" | "rollback" | "abort" | "fail" => parse_insert(tokens),
+            "update" => parse_update(tokens),
+            _ => None,
+        },
+        "update" => parse_update(tokens),
+        "delete" => {
+            let Some(token) = tokens.next() else {
+                return None;
+            };
+            if token == "from" {
+                tokens.next().map(|table| QueryMutation::Delete {
+                    table: table.to_string(),
+                })
+            } else {
+                None
+            }
+        }
+        "replace" => parse_insert(tokens).map(|m| match m {
+            QueryMutation::Insert { table } => QueryMutation::Replace { table },
+            _ => m,
+        }),
+        "create" | "alter" | "drop" | "truncate" | "attach" | "detach" => {
+            parse_schema_mutation(token, &mut tokens)
+        }
+        "vacuum" => Some(QueryMutation::Vacuum),
+        "begin" | "commit" | "rollback" | "savepoint" | "release" => Some(QueryMutation::ReadOnly),
+        "pragma" => {
+            if statement.contains(" = ") {
+                Some(QueryMutation::Pragma)
+            } else {
+                Some(QueryMutation::ReadOnly)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn strip_with_clause_prefix(sql: &str) -> &str {
+    let mut depth = 0usize;
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] as char {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                if depth > 0 {
+                    depth = depth.saturating_sub(1);
+                }
+                if depth == 0 {
+                    let mut j = i + 1;
+                    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j < bytes.len() && bytes[j] == b',' {
+                        i = j;
+                        continue;
+                    }
+                    if j < bytes.len() {
+                        return &sql[j..];
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    sql
+}
+
+fn parse_insert<'a, I>(mut tokens: I) -> Option<QueryMutation>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut token = tokens.next()?;
+    if token == "or" {
+        token = tokens.next()?;
+    }
+    let table = if token == "into" {
+        tokens.next()?
+    } else {
+        token
+    };
+    Some(QueryMutation::Insert {
+        table: table.to_string(),
+    })
+}
+
+fn parse_update<'a, I>(mut tokens: I) -> Option<QueryMutation>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let table = tokens.next()?;
+    Some(QueryMutation::Update {
+        table: table.to_string(),
+    })
+}
+
+fn parse_schema_mutation<'a>(
+    token: &str,
+    mut tokens: impl Iterator<Item = &'a str>,
+) -> Option<QueryMutation> {
+    let target = tokens
+        .next()
+        .map(|target| strip_schema_qualifier(token, target));
+    target.map(|target| match token {
+        "create" => QueryMutation::Create { target },
+        "alter" => QueryMutation::Alter { target },
+        "drop" => QueryMutation::Drop { target },
+        "truncate" => QueryMutation::Truncate { target },
+        "attach" => QueryMutation::Attach,
+        "detach" => QueryMutation::Detach,
+        _ => QueryMutation::Create { target },
+    })
+}
+
+fn strip_schema_qualifier<'a>(token: &str, value: &'a str) -> String {
+    if token == "attach" || token == "detach" {
+        value.to_string()
+    } else {
+        value.trim_matches(&['"', '`', '\''][..]).to_string()
     }
 }
 
@@ -1087,9 +1344,8 @@ impl<T> QueryAs<T> {
 }
 
 impl DbRow {
-    pub fn get<T: FromDbValue>(&self, name: &str) -> T {
+    pub fn get<T: FromDbValue>(&self, name: &str) -> anyhow::Result<T> {
         self.try_get(name)
-            .expect("database column conversion failed")
     }
 
     pub fn try_get<T: FromDbValue>(&self, name: &str) -> anyhow::Result<T> {
@@ -1102,9 +1358,8 @@ impl DbRow {
         self.try_get_idx(idx)
     }
 
-    pub fn get_idx<T: FromDbValue>(&self, idx: usize) -> T {
+    pub fn get_idx<T: FromDbValue>(&self, idx: usize) -> anyhow::Result<T> {
         self.try_get_idx(idx)
-            .expect("database column conversion failed")
     }
 
     pub fn try_get_idx<T: FromDbValue>(&self, idx: usize) -> anyhow::Result<T> {
@@ -1424,11 +1679,146 @@ fn encrypt_param(
 }
 
 fn encrypt_named_payload(
-    _encryption: &EncryptionService,
-    _params: &mut [Value],
-    _sql: &str,
+    encryption: &EncryptionService,
+    params: &mut [Value],
+    sql: &str,
+    mutation: &Option<QueryMutation>,
 ) -> anyhow::Result<()> {
+    let (id_idx, payload_idx) = match mutation {
+        Some(QueryMutation::Insert { .. }) => locate_named_params(sql, "webhook_jobs", false),
+        Some(QueryMutation::Update { .. }) => locate_named_params(sql, "webhook_jobs", true),
+        _ => return Ok(()),
+    };
+    let Some(id_idx) = id_idx else {
+        return Ok(());
+    };
+    let Some(payload_idx) = payload_idx else {
+        return Ok(());
+    };
+    let Some(id) = params.get(id_idx).and_then(value_as_str) else {
+        return Ok(());
+    };
+    let Some(Value::Text(payload)) = params.get(payload_idx).cloned() else {
+        return Ok(());
+    };
+    params[payload_idx] =
+        Value::Text(encryption.encrypt("webhook_jobs", &id, "payload_json", &payload)?);
     Ok(())
+}
+
+fn encrypt_named_update_column(
+    encryption: &EncryptionService,
+    params: &mut [Value],
+    sql: &str,
+    table: &str,
+    column: &str,
+) -> anyhow::Result<()> {
+    let normalized = normalize_sql(sql);
+    if query_mutation(&normalized)
+        != Some(QueryMutation::Update {
+            table: table.to_string(),
+        })
+    {
+        return Ok(());
+    }
+    let (id_idx, value_idx) = locate_update_indices(&normalized, column);
+    let Some(id_idx) = id_idx else {
+        return Ok(());
+    };
+    let Some(value_idx) = value_idx else {
+        return Ok(());
+    };
+    let Some(id) = params.get(id_idx).and_then(value_as_str) else {
+        return Ok(());
+    };
+    let Some(Value::Text(value)) = params.get(value_idx).cloned() else {
+        return Ok(());
+    };
+    params[value_idx] = Value::Text(encryption.encrypt(table, &id, column, &value)?);
+    Ok(())
+}
+
+fn locate_named_params(sql: &str, table: &str, is_update: bool) -> (Option<usize>, Option<usize>) {
+    let normalized = normalize_sql(sql);
+    if !normalized.contains(&format!(" {table}")) {
+        return (None, None);
+    }
+    if is_update {
+        return locate_update_indices(&normalized, "payload_json");
+    }
+    locate_webhook_insert_indices(&normalized)
+}
+
+fn locate_webhook_insert_indices(sql: &str) -> (Option<usize>, Option<usize>) {
+    let values_start = sql.find(" values ");
+    let Some(values_start) = values_start else {
+        return (None, None);
+    };
+    let columns_part = sql
+        .split_once("insert into webhook_jobs")
+        .and_then(|(_, rest)| rest.split_once(" values "))
+        .map(|(columns, _)| columns.trim());
+    let Some(columns_part) = columns_part else {
+        return (Some(0), Some(1));
+    };
+    let values_part = &sql[values_start + 8..];
+    if values_part.is_empty() {
+        return (None, None);
+    }
+    let id_idx = parse_sql_column_index(columns_part, "id");
+    let payload_idx = parse_sql_column_index(columns_part, "payload_json")
+        .or_else(|| Some(values_part.matches("?").count().saturating_sub(1)));
+    (id_idx, payload_idx)
+}
+
+fn parse_sql_column_index(columns: &str, target: &str) -> Option<usize> {
+    let Some((columns, _)) = columns.trim().split_once('(') else {
+        return None;
+    };
+    let Some((columns, _)) = columns.rsplit_once(')') else {
+        return None;
+    };
+    columns
+        .split(',')
+        .map(str::trim)
+        .position(|column| column == target)
+}
+
+fn locate_update_indices(sql: &str, target_column: &str) -> (Option<usize>, Option<usize>) {
+    let Some(set_start) = sql.find(" set ") else {
+        return (None, None);
+    };
+    let Some(where_start) = sql.rfind(" where ") else {
+        return (None, None);
+    };
+    let set_clause = &sql[set_start + 5..where_start];
+    let where_clause = &sql[where_start + 7..];
+    let mut payload_idx = None;
+    let mut params_before_assignment = 0usize;
+    let mut set_param_count = 0usize;
+    for assignment in set_clause.split(',') {
+        let assignment_param_count = assignment.matches('?').count();
+        if assignment
+            .split('=')
+            .next()
+            .map(str::trim)
+            .is_some_and(|left| left == target_column)
+        {
+            payload_idx = Some(params_before_assignment);
+        }
+        params_before_assignment += assignment_param_count;
+        set_param_count += assignment_param_count;
+    }
+    if payload_idx.is_none() {
+        return (None, None);
+    }
+
+    let where_has_id = where_clause
+        .split_whitespace()
+        .zip(where_clause.split_whitespace().skip(1))
+        .any(|(left, right)| left == "id" && right.trim_start().starts_with('='));
+    let id_idx = where_has_id.then_some(set_param_count);
+    (id_idx, payload_idx)
 }
 
 fn value_as_str(value: &Value) -> Option<String> {
@@ -1474,9 +1864,9 @@ async fn migrate_table_columns(
         .await?;
     let mut count = 0;
     for row in rows {
-        let id: String = row.get("id");
+        let id: String = row.get("id")?;
         for column in columns {
-            let value: String = row.get(column);
+            let value: String = row.get(column)?;
             if value.starts_with(ENVELOPE_PREFIX) {
                 continue;
             }
@@ -1593,6 +1983,12 @@ fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 }
 
 fn validate_database_url(url: &str) -> anyhow::Result<()> {
+    let parsed = Url::parse(url).with_context(|| format!("invalid database URL {url}"))?;
+    anyhow::ensure!(
+        is_file_url(url) || is_remote_url(url),
+        "unsupported database URL scheme '{}'",
+        parsed.scheme()
+    );
     if is_http_url(url) && !is_local_http_database_url(url) {
         bail!("plain HTTP database URLs are only allowed for localhost development");
     }
@@ -1600,61 +1996,37 @@ fn validate_database_url(url: &str) -> anyhow::Result<()> {
 }
 
 fn is_local_http_database_url(url: &str) -> bool {
-    let Some(rest) = strip_url_prefix(url, "http://") else {
+    let parsed = match Url::parse(url) {
+        Ok(parsed) if parsed.scheme() == "http" => parsed,
+        _ => return false,
+    };
+    let Some(host) = parsed.host() else {
         return false;
     };
-    let Some(host) = database_url_host(rest) else {
-        return false;
-    };
-    matches!(
-        host.to_ascii_lowercase().as_str(),
-        "localhost" | "127.0.0.1" | "::1"
-    )
-}
-
-fn database_url_host(url_without_scheme: &str) -> Option<&str> {
-    let authority = url_without_scheme
-        .split(&['/', '?', '#'])
-        .next()
-        .filter(|authority| !authority.is_empty())?;
-    let authority = authority
-        .rsplit_once('@')
-        .map(|(_, host)| host)
-        .unwrap_or(authority);
-    if let Some(rest) = authority.strip_prefix('[') {
-        return rest.split_once(']').map(|(host, _)| host);
+    match host {
+        url::Host::Domain(host) => matches!(host.to_ascii_lowercase().as_str(), "localhost"),
+        url::Host::Ipv4(ipv4) => ipv4.is_loopback(),
+        url::Host::Ipv6(ipv6) => ipv6.is_loopback(),
     }
-    Some(
-        authority
-            .split_once(':')
-            .map(|(host, _)| host)
-            .unwrap_or(authority),
-    )
-    .filter(|host| !host.is_empty())
 }
 
 fn is_remote_url(url: &str) -> bool {
-    has_url_prefix(url, "libsql://")
-        || has_url_prefix(url, "https://")
-        || has_url_prefix(url, "http://")
+    let Some(parsed) = Url::parse(url).ok() else {
+        return false;
+    };
+    matches!(parsed.scheme(), "http" | "https" | "libsql")
 }
 
 fn is_file_url(url: &str) -> bool {
-    has_url_prefix(url, "file:")
+    Url::parse(url)
+        .ok()
+        .is_some_and(|parsed| parsed.scheme() == "file")
 }
 
 fn is_http_url(url: &str) -> bool {
-    has_url_prefix(url, "http://")
-}
-
-fn strip_url_prefix<'a>(url: &'a str, prefix: &str) -> Option<&'a str> {
-    has_url_prefix(url, prefix).then(|| &url[prefix.len()..])
-}
-
-fn has_url_prefix(url: &str, prefix: &str) -> bool {
-    url.as_bytes()
-        .get(..prefix.len())
-        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix.as_bytes()))
+    Url::parse(url)
+        .ok()
+        .is_some_and(|parsed| parsed.scheme() == "http")
 }
 
 fn redact_database_url(url: &str) -> String {
@@ -1726,6 +2098,7 @@ mod tests {
             "http://example.com/db",
             "HTTP://example.com/db",
             "http://localhost.evil/db",
+            "http://user:pass@example.com/db",
         ] {
             let err = validate_database_url(url).expect_err("reject http");
             assert!(
@@ -1740,6 +2113,8 @@ mod tests {
     fn localhost_http_database_urls_are_allowed() {
         for url in [
             "http://localhost:8080/db",
+            "http://LOCALHOST:8080/db/",
+            "http://user:pass@localhost:8080/db",
             "http://127.0.0.1:8080/db",
             "http://[::1]:8080/db",
         ] {
@@ -1755,6 +2130,13 @@ mod tests {
             "file:/tmp/sshoosh.sqlite",
         ] {
             validate_database_url(url).expect(url);
+            assert!(is_remote_url(url) || is_file_url(url));
         }
+    }
+
+    #[test]
+    fn unsupported_database_url_schemes_are_rejected() {
+        let err = validate_database_url("ftp://localhost/db").expect_err("reject ftp");
+        assert!(err.to_string().contains("unsupported database URL scheme"));
     }
 }

@@ -39,8 +39,8 @@ impl ServerState {
         .fetch_optional(&mut tx)
         .await?
         {
-            let account_id: String = row.get("id");
-            let activated = row.get::<Option<String>>("activated_at").is_some();
+            let account_id: String = row.get("id")?;
+            let activated = row.get::<Option<String>>("activated_at")?.is_some();
             anyhow::ensure!(
                 activated,
                 "Pending SSH keys are not supported; reconnect as username+<token> or ask an owner/admin to add your key"
@@ -122,8 +122,8 @@ impl ServerState {
                     .fetch_optional(&mut tx)
                     .await?;
             anyhow::ensure!(existing.is_none(), "Username is already taken");
-            invite_id = Some(invite.get::<String>("id"));
-            Role::from_db(invite.get::<String>("role_on_accept").as_str())?
+            invite_id = Some(invite.get::<String>("id")?);
+            Role::from_db(invite.get::<String>("role_on_accept")?.as_str())?
         };
 
         query(
@@ -371,8 +371,8 @@ impl ServerState {
             .bind(account_id)
             .fetch_one(&read_session)
             .await?;
-        let notification_unread_count: i64 = unread_count_row.get("notification_unread_count");
-        let mention_unread_count: i64 = unread_count_row.get("mention_unread_count");
+        let notification_unread_count: i64 = unread_count_row.get("notification_unread_count")?;
+        let mention_unread_count: i64 = unread_count_row.get("mention_unread_count")?;
 
         let snapshot = Snapshot {
             current_username: Some(account.username),

@@ -50,14 +50,14 @@ impl ServerState {
                 break;
             }
             items.push(InviteSummary {
-                id: row.get("id"),
-                role_on_accept: Role::from_db(row.get::<String>("role_on_accept").as_str())?,
-                created_by: row.get("created_by"),
-                accepted_by: row.get("accepted_by"),
-                created_at: row.get("created_at"),
-                expires_at: row.get("expires_at"),
-                revoked_at: row.get("revoked_at"),
-                accepted_at: row.get("accepted_at"),
+                id: row.get("id")?,
+                role_on_accept: Role::from_db(row.get::<String>("role_on_accept")?.as_str())?,
+                created_by: row.get("created_by")?,
+                accepted_by: row.get("accepted_by")?,
+                created_at: row.get("created_at")?,
+                expires_at: row.get("expires_at")?,
+                revoked_at: row.get("revoked_at")?,
+                accepted_at: row.get("accepted_at")?,
             });
         }
         Ok(Page { items, next_cursor })
@@ -158,11 +158,11 @@ impl ServerState {
                 break;
             }
             items.push(ChannelMemberSummary {
-                channel_id: row.get("channel_id"),
-                channel_slug: row.get("channel_slug"),
-                username: row.get("username"),
-                role: row.get("role"),
-                joined_at: row.get("joined_at"),
+                channel_id: row.get("channel_id")?,
+                channel_slug: row.get("channel_slug")?,
+                username: row.get("username")?,
+                role: row.get("role")?,
+                joined_at: row.get("joined_at")?,
             });
         }
         Ok(Page { items, next_cursor })
@@ -266,15 +266,15 @@ impl ServerState {
                 break;
             }
             items.push(ChannelDirectoryItem {
-                id: row.get("id"),
-                slug: row.get("slug"),
-                name: row.get("name"),
-                visibility: row.get("visibility"),
+                id: row.get("id")?,
+                slug: row.get("slug")?,
+                name: row.get("name")?,
+                visibility: row.get("visibility")?,
                 topic: row
-                    .get::<Option<String>>("topic")
+                    .get::<Option<String>>("topic")?
                     .map(|topic| sanitize_single_line_text(&topic)),
-                joined: row.get::<i64>("joined") != 0,
-                archived: row.get::<Option<String>>("archived_at").is_some(),
+                joined: row.get::<i64>("joined")? != 0,
+                archived: row.get::<Option<String>>("archived_at")?.is_some(),
             });
         }
         Ok(Page { items, next_cursor })

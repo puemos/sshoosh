@@ -1176,7 +1176,8 @@ mod cases {
                 },
             },
         )
-        .await;
+        .await
+        .ok();
 
         let app = app.lock().await;
         assert_eq!(
@@ -1209,7 +1210,8 @@ mod cases {
                 },
             },
         )
-        .await;
+        .await
+        .ok();
 
         let app = app.lock().await;
         let banner = app.ui.banner.as_ref().expect("error banner");

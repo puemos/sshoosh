@@ -133,27 +133,28 @@ impl ServerState {
             .bind(limit)
             .fetch_all(self.db.read_pool())
             .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| MentionSummary {
-                id: row.get("id"),
-                actor_username: row.get("actor_username"),
-                source_kind: row.get("source_kind"),
-                source_id: row.get("source_id"),
-                source_obj_index: row.get("source_obj_index"),
-                channel_id: row.get("channel_id"),
-                channel_slug: row.get("channel_slug"),
-                thread_id: row.get("thread_id"),
-                thread_title: row
-                    .get::<Option<String>>("thread_title")
-                    .map(|title| sanitize_single_line_text(&title)),
-                conversation_id: row.get("conversation_id"),
-                title: sanitize_single_line_text(&row.get::<String>("title")),
-                body: sanitize_stored_text(&row.get::<String>("body")),
-                created_at: row.get("created_at"),
-                read_at: row.get("read_at"),
+        rows.into_iter()
+            .map(|row| {
+                Ok(MentionSummary {
+                    id: row.get("id")?,
+                    actor_username: row.get("actor_username")?,
+                    source_kind: row.get("source_kind")?,
+                    source_id: row.get("source_id")?,
+                    source_obj_index: row.get("source_obj_index")?,
+                    channel_id: row.get("channel_id")?,
+                    channel_slug: row.get("channel_slug")?,
+                    thread_id: row.get("thread_id")?,
+                    thread_title: row
+                        .get::<Option<String>>("thread_title")?
+                        .map(|title| sanitize_single_line_text(&title)),
+                    conversation_id: row.get("conversation_id")?,
+                    title: sanitize_single_line_text(&row.get::<String>("title")?),
+                    body: sanitize_stored_text(&row.get::<String>("body")?),
+                    created_at: row.get("created_at")?,
+                    read_at: row.get("read_at")?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn react_to_thread(

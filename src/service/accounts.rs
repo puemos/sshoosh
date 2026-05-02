@@ -58,15 +58,21 @@ impl ServerState {
                 ])?);
                 break;
             }
+            let row_display_name = row.try_get::<String>("display_name")?;
+            let row_role = row.try_get::<String>("role")?;
+            let id: String = row.get("id")?;
+            let username: String = row.get("username")?;
+            let created_at: String = row.get("created_at")?;
+            let last_seen_at: Option<String> = row.get("last_seen_at")?;
             items.push(AccountSummary {
-                id: row.get("id"),
-                username: row.get("username"),
-                display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
-                role: Role::from_db(row.get::<String>("role").as_str())?,
-                activated: row.get::<Option<String>>("activated_at").is_some(),
-                disabled: row.get::<Option<String>>("disabled_at").is_some(),
-                created_at: row.get("created_at"),
-                last_seen_at: row.get("last_seen_at"),
+                id,
+                username,
+                display_name: sanitize_single_line_text(&row_display_name),
+                role: Role::from_db(row_role.as_str())?,
+                activated: row.try_get::<Option<String>>("activated_at")?.is_some(),
+                disabled: row.try_get::<Option<String>>("disabled_at")?.is_some(),
+                created_at,
+                last_seen_at,
             });
         }
         Ok(Page { items, next_cursor })
@@ -278,7 +284,7 @@ impl ServerState {
         .bind(account_id)
         .fetch_all(self.db.read_pool())
         .await?;
-        Ok(rows.into_iter().map(ssh_key_summary_from_row).collect())
+        rows.into_iter().map(ssh_key_summary_from_row).collect()
     }
 
     pub async fn add_ssh_key(
@@ -370,17 +376,17 @@ impl ServerState {
             bail!("Active SSH key not found");
         };
         let target = Account {
-            id: row.get("account_id"),
-            username: row.get("username"),
+            id: row.get("account_id")?,
+            username: row.get("username")?,
             display_name: String::new(),
-            role: Role::from_db(row.get::<String>("role").as_str())?,
+            role: Role::from_db(row.try_get::<String>("role")?.as_str())?,
             activated: true,
             pending_username: None,
         };
         if actor.id != target.id {
             ensure_can_manage_account(&actor, &target)?;
         }
-        let key_id: String = row.get("id");
+        let key_id: String = row.get("id")?;
         let label = sanitize_single_line_text(label);
         let label = label.trim();
         let label = (!label.is_empty()).then_some(label);
@@ -460,7 +466,7 @@ impl ServerState {
                 ])?);
                 break;
             }
-            items.push(ssh_key_summary_from_row(row));
+            items.push(ssh_key_summary_from_row(row)?);
         }
         Ok(Page { items, next_cursor })
     }
@@ -482,10 +488,10 @@ impl ServerState {
             bail!("Active SSH key not found");
         };
         let target = Account {
-            id: row.get("account_id"),
-            username: row.get("username"),
+            id: row.get("account_id")?,
+            username: row.get("username")?,
             display_name: String::new(),
-            role: Role::from_db(row.get::<String>("role").as_str())?,
+            role: Role::from_db(row.try_get::<String>("role")?.as_str())?,
             activated: true,
             pending_username: None,
         };
@@ -495,7 +501,7 @@ impl ServerState {
         if target.role == Role::Owner {
             ensure_owner_keeps_active_key(&mut tx, &target.id).await?;
         }
-        let key_id: String = row.get("id");
+        let key_id: String = row.get("id")?;
         let now = now();
         query("UPDATE ssh_keys SET revoked_at = ? WHERE id = ?")
             .bind(&now)
@@ -507,7 +513,7 @@ impl ServerState {
             Some(actor_id),
             "ssh_key.revoked",
             Some(&key_id),
-            serde_json::json!({"username": target.username, "fingerprint": row.get::<String>("fingerprint")}),
+            serde_json::json!({"username": target.username, "fingerprint": row.get::<String>("fingerprint")?}),
         )
         .await?;
         insert_event(

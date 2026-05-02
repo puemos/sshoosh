@@ -46,15 +46,15 @@ pub(crate) async fn load_user_presence(
     Ok(rows
         .into_iter()
         .map(|row| {
-            let account_id: String = row.get("id");
-            UserPresence {
+            let account_id: String = row.get("id")?;
+            Ok(UserPresence {
                 connected: active_account_ids.contains(&account_id),
-                username: row.get("username"),
-                display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
-                last_seen_at: row.get("last_seen_at"),
-            }
+                username: row.get("username")?,
+                display_name: sanitize_single_line_text(&row.get::<String>("display_name")?),
+                last_seen_at: row.get("last_seen_at")?,
+            })
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()?)
 }
 
 pub(crate) async fn load_notifications_page(
@@ -105,23 +105,23 @@ pub(crate) async fn load_notifications_page(
             break;
         }
         items.push(NotificationSummary {
-            id: row.get("id"),
-            kind: row.get("kind"),
-            source_kind: row.get("source_kind"),
-            source_id: row.get("source_id"),
-            source_obj_index: row.get("source_obj_index"),
-            actor_username: row.get("actor_username"),
-            channel_id: row.get("channel_id"),
-            channel_slug: row.get("channel_slug"),
-            thread_id: row.get("thread_id"),
+            id: row.get("id")?,
+            kind: row.get("kind")?,
+            source_kind: row.get("source_kind")?,
+            source_id: row.get("source_id")?,
+            source_obj_index: row.get("source_obj_index")?,
+            actor_username: row.get("actor_username")?,
+            channel_id: row.get("channel_id")?,
+            channel_slug: row.get("channel_slug")?,
+            thread_id: row.get("thread_id")?,
             thread_title: row
-                .get::<Option<String>>("thread_title")
+                .get::<Option<String>>("thread_title")?
                 .map(|title| sanitize_single_line_text(&title)),
-            conversation_id: row.get("conversation_id"),
-            title: sanitize_single_line_text(&row.get::<String>("title")),
-            body: sanitize_stored_text(&row.get::<String>("body")),
-            created_at: row.get("created_at"),
-            read_at: row.get("read_at"),
+            conversation_id: row.get("conversation_id")?,
+            title: sanitize_single_line_text(&row.get::<String>("title")?),
+            body: sanitize_stored_text(&row.get::<String>("body")?),
+            created_at: row.get("created_at")?,
+            read_at: row.get("read_at")?,
         });
     }
     Ok(Page { items, next_cursor })
@@ -159,17 +159,19 @@ pub(crate) async fn load_channels(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|row| Channel {
-            id: row.get("id"),
-            slug: row.get("slug"),
-            name: row.get("name"),
-            visibility: row.get("visibility"),
-            topic: row
-                .get::<Option<String>>("topic")
-                .map(|topic| sanitize_single_line_text(&topic)),
-            unread_count: row.get("unread_count"),
+        .map(|row| {
+            Ok(Channel {
+                id: row.get("id")?,
+                slug: row.get("slug")?,
+                name: row.get("name")?,
+                visibility: row.get("visibility")?,
+                topic: row
+                    .get::<Option<String>>("topic")?
+                    .map(|topic| sanitize_single_line_text(&topic)),
+                unread_count: row.get("unread_count")?,
+            })
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()?)
 }
 
 pub(crate) async fn load_threads(
@@ -213,25 +215,27 @@ pub(crate) async fn load_threads(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|row| ThreadItem {
-            id: row.get("id"),
-            channel_id: row.get("channel_id"),
-            title: sanitize_single_line_text(&row.get::<String>("title")),
-            body: sanitize_stored_text(&row.get::<String>("body")),
-            author: row.get("author"),
-            comment_count: row.get("comment_count"),
-            last_comment_index: row.get("last_comment_index"),
-            unread_count: row.get("unread_count"),
-            last_activity_at: row.get("last_activity_at"),
-            created_at: row.get("created_at"),
-            edited_at: row.get("edited_at"),
-            archived_at: row.get("archived_at"),
-            pinned_at: row.get("pinned_at"),
-            muted_until: row.get("muted_until"),
-            saved_at: row.get("saved_at"),
-            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
+        .map(|row| {
+            Ok(ThreadItem {
+                id: row.get("id")?,
+                channel_id: row.get("channel_id")?,
+                title: sanitize_single_line_text(&row.get::<String>("title")?),
+                body: sanitize_stored_text(&row.get::<String>("body")?),
+                author: row.get("author")?,
+                comment_count: row.get("comment_count")?,
+                last_comment_index: row.get("last_comment_index")?,
+                unread_count: row.get("unread_count")?,
+                last_activity_at: row.get("last_activity_at")?,
+                created_at: row.get("created_at")?,
+                edited_at: row.get("edited_at")?,
+                archived_at: row.get("archived_at")?,
+                pinned_at: row.get("pinned_at")?,
+                muted_until: row.get("muted_until")?,
+                saved_at: row.get("saved_at")?,
+                reactions: parse_reaction_summaries(&row.get::<String>("reactions")?),
+            })
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()?)
 }
 
 pub(crate) async fn load_comments(
@@ -276,17 +280,19 @@ pub(crate) async fn load_comments(
     .await?;
     let mut comments: Vec<_> = rows
         .into_iter()
-        .map(|row| CommentItem {
-            id: row.get("id"),
-            author: row.get("author"),
-            obj_index: row.get("obj_index"),
-            body: sanitize_stored_text(&row.get::<String>("body")),
-            created_at: row.get("created_at"),
-            edited_at: row.get("edited_at"),
-            saved_at: row.get("saved_at"),
-            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
+        .map(|row| {
+            Ok(CommentItem {
+                id: row.get("id")?,
+                author: row.get("author")?,
+                obj_index: row.get("obj_index")?,
+                body: sanitize_stored_text(&row.get::<String>("body")?),
+                created_at: row.get("created_at")?,
+                edited_at: row.get("edited_at")?,
+                saved_at: row.get("saved_at")?,
+                reactions: parse_reaction_summaries(&row.get::<String>("reactions")?),
+            })
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let has_more = comments.len() > limit as usize;
     if has_more {
         comments.remove(0);
@@ -330,19 +336,21 @@ pub(crate) async fn load_conversations(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|row| Conversation {
-            id: row.get("id"),
-            peer_username: row.get("peer_username"),
-            last_message_index: row.get("last_message_index"),
-            unread_count: row.get("unread_count"),
-            last_activity_at: row.get("last_activity_at"),
-            last_message_preview: row
-                .get::<Option<String>>("last_message_preview")
-                .map(|preview| sanitize_single_line_text(&preview)),
-            muted_until: row.get("muted_until"),
-            saved_at: row.get("saved_at"),
+        .map(|row| {
+            Ok(Conversation {
+                id: row.get("id")?,
+                peer_username: row.get("peer_username")?,
+                last_message_index: row.get("last_message_index")?,
+                unread_count: row.get("unread_count")?,
+                last_activity_at: row.get("last_activity_at")?,
+                last_message_preview: row
+                    .get::<Option<String>>("last_message_preview")?
+                    .map(|preview| sanitize_single_line_text(&preview)),
+                muted_until: row.get("muted_until")?,
+                saved_at: row.get("saved_at")?,
+            })
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()?)
 }
 
 pub(crate) async fn load_dm_sidebar(
@@ -397,19 +405,21 @@ pub(crate) async fn load_dm_sidebar(
     );
     Ok(rows
         .into_iter()
-        .map(|row| DmSidebarItem {
-            conversation_id: row.get("conversation_id"),
-            peer_username: row.get("peer_username"),
-            last_message_index: row.get("last_message_index"),
-            unread_count: row.get("unread_count"),
-            last_activity_at: row.get("last_activity_at"),
-            last_message_preview: row
-                .get::<Option<String>>("last_message_preview")
-                .map(|preview| sanitize_single_line_text(&preview)),
-            muted_until: row.get("muted_until"),
-            saved_at: row.get("saved_at"),
+        .map(|row| {
+            Ok(DmSidebarItem {
+                conversation_id: row.get("conversation_id")?,
+                peer_username: row.get("peer_username")?,
+                last_message_index: row.get("last_message_index")?,
+                unread_count: row.get("unread_count")?,
+                last_activity_at: row.get("last_activity_at")?,
+                last_message_preview: row
+                    .get::<Option<String>>("last_message_preview")?
+                    .map(|preview| sanitize_single_line_text(&preview)),
+                muted_until: row.get("muted_until")?,
+                saved_at: row.get("saved_at")?,
+            })
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()?)
 }
 
 pub(crate) async fn load_conversation_messages(
@@ -454,17 +464,19 @@ pub(crate) async fn load_conversation_messages(
     .await?;
     let mut messages: Vec<_> = rows
         .into_iter()
-        .map(|row| ConversationMessage {
-            id: row.get("id"),
-            author: row.get("author"),
-            obj_index: row.get("obj_index"),
-            body: sanitize_stored_text(&row.get::<String>("body")),
-            created_at: row.get("created_at"),
-            edited_at: row.get("edited_at"),
-            saved_at: row.get("saved_at"),
-            reactions: parse_reaction_summaries(&row.get::<String>("reactions")),
+        .map(|row| {
+            Ok(ConversationMessage {
+                id: row.get("id")?,
+                author: row.get("author")?,
+                obj_index: row.get("obj_index")?,
+                body: sanitize_stored_text(&row.get::<String>("body")?),
+                created_at: row.get("created_at")?,
+                edited_at: row.get("edited_at")?,
+                saved_at: row.get("saved_at")?,
+                reactions: parse_reaction_summaries(&row.get::<String>("reactions")?),
+            })
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let has_more = messages.len() > limit as usize;
     if has_more {
         messages.remove(0);
@@ -572,34 +584,34 @@ pub(crate) async fn load_saved_messages_page(
     let mut items: Vec<_> = rows
         .into_iter()
         .map(|row| {
-            let kind = match row.get::<String>("kind").as_str() {
+            let kind = match row.get::<String>("kind")?.as_str() {
                 "comment" => SavedMessageKind::Comment,
                 _ => SavedMessageKind::Dm,
             };
-            SavedMessageItem {
+            Ok(SavedMessageItem {
                 kind,
-                source_id: row.get("source_id"),
-                source_obj_index: row.get("source_obj_index"),
-                author: row.get("author"),
-                body: sanitize_stored_text(&row.get::<String>("body")),
-                source_label: sanitize_single_line_text(&row.get::<String>("source_label")),
+                source_id: row.get("source_id")?,
+                source_obj_index: row.get("source_obj_index")?,
+                author: row.get("author")?,
+                body: sanitize_stored_text(&row.get::<String>("body")?),
+                source_label: sanitize_single_line_text(&row.get::<String>("source_label")?),
                 channel_slug: row
-                    .get::<Option<String>>("channel_slug")
+                    .get::<Option<String>>("channel_slug")?
                     .map(|slug| sanitize_single_line_text(&slug)),
                 thread_title: row
-                    .get::<Option<String>>("thread_title")
+                    .get::<Option<String>>("thread_title")?
                     .map(|title| sanitize_single_line_text(&title)),
                 dm_peer_username: row
-                    .get::<Option<String>>("dm_peer_username")
+                    .get::<Option<String>>("dm_peer_username")?
                     .map(|username| sanitize_single_line_text(&username)),
-                saved_at: row.get("saved_at"),
-                created_at: row.get("created_at"),
-                channel_id: row.get("channel_id"),
-                thread_id: row.get("thread_id"),
-                conversation_id: row.get("conversation_id"),
-            }
+                saved_at: row.get("saved_at")?,
+                created_at: row.get("created_at")?,
+                channel_id: row.get("channel_id")?,
+                thread_id: row.get("thread_id")?,
+                conversation_id: row.get("conversation_id")?,
+            })
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let has_more = items.len() > limit as usize;
     let next_cursor = if has_more {
         items.pop().expect("extra row");

@@ -143,17 +143,17 @@ pub(crate) async fn search_visible_page(
             break;
         }
         last_cursor = Some(encode_cursor([
-            row.get::<String>("rank_cursor"),
-            row.get::<String>("object_id"),
+            row.get::<String>("rank_cursor")?,
+            row.get::<String>("object_id")?,
         ])?);
-        let kind = match row.get::<String>("kind").as_str() {
+        let kind = match row.get::<String>("kind")?.as_str() {
             "thread" => SearchKind::Thread,
             "comment" => SearchKind::Comment,
             _ => SearchKind::Dm,
         };
-        let title = sanitize_single_line_text(&row.get::<String>("title"));
-        let body = sanitize_stored_text(&row.get::<String>("body"));
-        let context = sanitize_single_line_text(&row.get::<String>("context"));
+        let title = sanitize_single_line_text(&row.get::<String>("title")?);
+        let body = sanitize_stored_text(&row.get::<String>("body")?);
+        let context = sanitize_single_line_text(&row.get::<String>("context")?);
         let label = match kind {
             SearchKind::Thread => title.clone(),
             SearchKind::Comment => format!("{title} comment"),
@@ -164,9 +164,9 @@ pub(crate) async fn search_visible_page(
             label,
             context,
             snippet: snippet(&format!("{title}\n{body}"), search),
-            channel_id: row.get("channel_id"),
-            thread_id: row.get("thread_id"),
-            conversation_id: row.get("conversation_id"),
+            channel_id: row.get("channel_id")?,
+            thread_id: row.get("thread_id")?,
+            conversation_id: row.get("conversation_id")?,
         });
     }
     Ok(SearchPage {
@@ -176,31 +176,33 @@ pub(crate) async fn search_visible_page(
 }
 
 pub(crate) fn account_from_row(row: DbRow) -> anyhow::Result<Account> {
-    let activated: Option<String> = row.get("activated_at");
+    let activated: Option<String> = row.get("activated_at")?;
+    let display_name = row.get::<String>("display_name")?;
+    let role = Role::from_db(row.get::<String>("role")?.as_str())?;
     Ok(Account {
-        id: row.get("id"),
-        username: row.get("username"),
-        display_name: sanitize_single_line_text(&row.get::<String>("display_name")),
-        role: Role::from_db(row.get::<String>("role").as_str())?,
+        id: row.get("id")?,
+        username: row.get("username")?,
+        display_name: sanitize_single_line_text(&display_name),
+        role,
         activated: activated.is_some(),
         pending_username: row
-            .get::<Option<String>>("pending_username")
+            .try_get::<Option<String>>("pending_username")?
             .map(|username| sanitize_single_line_text(&username)),
     })
 }
 
-pub(crate) fn ssh_key_summary_from_row(row: DbRow) -> SshKeySummary {
-    SshKeySummary {
-        id: row.get("id"),
-        username: row.get("username"),
-        fingerprint: row.get("fingerprint"),
+pub(crate) fn ssh_key_summary_from_row(row: DbRow) -> anyhow::Result<SshKeySummary> {
+    Ok(SshKeySummary {
+        id: row.get("id")?,
+        username: row.get("username")?,
+        fingerprint: row.get("fingerprint")?,
         label: row
-            .get::<Option<String>>("label")
+            .try_get::<Option<String>>("label")?
             .map(|label| sanitize_single_line_text(&label)),
-        created_at: row.get("created_at"),
-        last_used_at: row.get("last_used_at"),
-        revoked_at: row.get("revoked_at"),
-    }
+        created_at: row.get("created_at")?,
+        last_used_at: row.get("last_used_at")?,
+        revoked_at: row.get("revoked_at")?,
+    })
 }
 
 pub(crate) struct ParsedPublicKey {

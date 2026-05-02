@@ -1694,6 +1694,74 @@ async fn encrypted_content_keeps_plaintext_fts() {
     assert_eq!(snapshot.threads[0].body, "Launch at dawn");
 }
 
+#[tokio::test]
+async fn webhook_payloads_are_encrypted_on_insert_and_update() {
+    let db_path = temp_path("encrypted-webhook").with_extension("sqlite");
+    let mut cfg = database_config(db_path.clone(), "webhook-enc-node");
+    let key = URL_SAFE_NO_PAD.encode([9u8; 32]);
+    cfg.encryption_key = Some(SecretString::new(key.into_boxed_str()));
+    let db = Database::connect_with_config(&cfg)
+        .await
+        .expect("connect db");
+    db.init().await.expect("init db");
+
+    let job_id = Uuid::now_v7().to_string();
+    query(
+        "INSERT INTO
+           webhook_jobs (id, payload_json, created_at)
+         VALUES (?, ?, ?)",
+    )
+    .bind(&job_id)
+    .bind("{\"event\":\"created\"}")
+    .bind(now())
+    .execute(db.write_pool())
+    .await
+    .expect("insert webhook job");
+
+    let decrypted: String = query_scalar("SELECT payload_json FROM webhook_jobs WHERE id = ?")
+        .bind(&job_id)
+        .fetch_one(db.read_pool())
+        .await
+        .expect("decrypted insert payload");
+    assert_eq!(decrypted, "{\"event\":\"created\"}");
+
+    query(
+        "UPDATE webhook_jobs
+         SET payload_json = ?, failed_at = ?
+         WHERE id = ?",
+    )
+    .bind("{\"event\":\"updated\"}")
+    .bind(now())
+    .bind(&job_id)
+    .execute(db.write_pool())
+    .await
+    .expect("update webhook job");
+
+    let decrypted: String = query_scalar("SELECT payload_json FROM webhook_jobs WHERE id = ?")
+        .bind(&job_id)
+        .fetch_one(db.read_pool())
+        .await
+        .expect("decrypted update payload");
+    assert_eq!(decrypted, "{\"event\":\"updated\"}");
+
+    let raw = libsql::Builder::new_local(&db_path)
+        .build()
+        .await
+        .expect("raw db");
+    let conn = raw.connect().expect("raw conn");
+    let mut rows = conn
+        .query(
+            "SELECT payload_json FROM webhook_jobs WHERE id = ?",
+            [job_id.as_str()],
+        )
+        .await
+        .expect("raw webhook");
+    let row = rows.next().await.expect("row").expect("webhook row");
+    let raw_payload: String = row.get(0).expect("raw payload");
+    assert!(raw_payload.starts_with("sshoosh:v1:xchacha20poly1305:"));
+    assert!(!raw_payload.contains("updated"));
+}
+
 #[cfg(unix)]
 async fn assert_local_sqlite_files_are_owner_only(cfg: DatabaseConfig, db_path: PathBuf) {
     use std::os::unix::fs::PermissionsExt;
@@ -1800,7 +1868,7 @@ async fn master_lease_fails_over_after_ttl() {
 }
 
 #[tokio::test]
-async fn shared_sqlite_nodes_can_write_without_holding_master_lease() {
+async fn shared_sqlite_nodes_reject_writes_without_master_lease() {
     let db_path = temp_path("active-active").with_extension("sqlite");
     let mut first = database_config(db_path.clone(), "node-a");
     first.master_lease_ttl = Duration::from_secs(15);
@@ -1825,11 +1893,41 @@ async fn shared_sqlite_nodes_can_write_without_holding_master_lease() {
         .expect("runtime b");
     assert!(!db_b.is_master());
 
-    let invite = state_b
+    let err = state_b
         .create_invite(owner.id.clone())
         .await
-        .expect("standby node creates invite");
-    assert!(!invite.is_empty());
+        .expect_err("standby node must reject user writes");
+    assert!(err.to_string().contains("master lease required"), "{err:?}");
+
+    let returning_result = query(
+        "INSERT INTO audit_log (id, actor_account_id, action, target, metadata_json, created_at)
+         VALUES (?, ?, 'lease.returning', NULL, '{}', ?)
+         RETURNING id",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(&owner.id)
+    .bind(now())
+    .fetch_one(db_b.write_pool())
+    .await;
+    let returning_err = match returning_result {
+        Ok(_) => panic!("standby fetch_rows write must be rejected"),
+        Err(err) => err,
+    };
+    assert!(
+        returning_err.to_string().contains("master lease required"),
+        "{returning_err:?}"
+    );
+
+    query(
+        "INSERT INTO audit_log (id, actor_account_id, action, target, metadata_json, created_at)
+         VALUES (?, ?, 'lease.internal', NULL, '{}', ?)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(&owner.id)
+    .bind(now())
+    .execute_unchecked(db_b.write_pool())
+    .await
+    .expect("explicit internal bypass can write from standby");
 }
 
 #[tokio::test]

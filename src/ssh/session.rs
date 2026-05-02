@@ -1,4 +1,16 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static INPUT_DROPPED_BYTES: AtomicU64 = AtomicU64::new(0);
+static INPUT_RESERVATION_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn input_backpressure_drops() -> u64 {
+    INPUT_DROPPED_BYTES.load(Ordering::Acquire)
+}
+
+pub(crate) fn input_reservation_timeouts() -> u64 {
+    INPUT_RESERVATION_TIMEOUTS.load(Ordering::Acquire)
+}
 impl russh::server::Handler for ClientHandler {
     type Error = anyhow::Error;
 
@@ -95,7 +107,13 @@ impl russh::server::Handler for ClientHandler {
         let channel_id = chan.id();
         let handle = session.handle();
         let mouse_enabled = self.mouse_enabled;
-        let mut init = terminal::enter_alt_screen(mouse_enabled);
+        let mut init = match terminal::enter_alt_screen(mouse_enabled) {
+            Ok(sequence) => sequence,
+            Err(err) => {
+                tracing::warn!(error = ?err, "initialize terminal sequences failed");
+                Vec::new()
+            }
+        };
         let account_id = {
             let mut app = app.lock().await;
             if let Some(title) = app.terminal_title_update() {
@@ -164,9 +182,9 @@ impl russh::server::Handler for ClientHandler {
                     }
                     Err(err) => {
                         tracing::debug!(error = ?err, "render loop failed");
-                        let _ = handle
-                            .data(channel_id, terminal::leave_alt_screen(mouse_enabled))
-                            .await;
+                        if let Ok(sequence) = terminal::leave_alt_screen(mouse_enabled) {
+                            let _ = handle.data(channel_id, sequence).await;
+                        }
                         let _ = handle.eof(channel_id).await;
                         let _ = handle.close(channel_id).await;
                         break;
@@ -188,10 +206,17 @@ impl russh::server::Handler for ClientHandler {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if let Some(input_tx) = self.input_tx.as_ref()
-            && let Ok(permit) = input_tx.try_reserve()
-        {
-            permit.send(data.to_vec());
+        if let Some(input_tx) = self.input_tx.as_ref() {
+            let enqueued = send_input_bytes(input_tx, data, Duration::from_millis(150)).await;
+            if !enqueued {
+                INPUT_DROPPED_BYTES.fetch_add(data.len() as u64, Ordering::AcqRel);
+                INPUT_RESERVATION_TIMEOUTS.fetch_add(1, Ordering::AcqRel);
+                tracing::warn!(
+                    dropped_bytes_total = input_backpressure_drops(),
+                    reservation_timeouts_total = input_reservation_timeouts(),
+                    "ssh input dropped after bounded backpressure wait"
+                );
+            }
         }
         if let Some(signal) = self.render_signal.as_ref() {
             signal.dirty.store(true, Ordering::Release);
@@ -245,12 +270,58 @@ impl russh::server::Handler for ClientHandler {
     }
 }
 
+async fn send_input_bytes(
+    input_tx: &mpsc::Sender<Vec<u8>>,
+    data: &[u8],
+    timeout_after: Duration,
+) -> bool {
+    match timeout(timeout_after, input_tx.reserve()).await {
+        Ok(Ok(permit)) => {
+            permit.send(data.to_vec());
+            true
+        }
+        Ok(Err(err)) => {
+            tracing::warn!(error = ?err, "input channel reservation failed");
+            false
+        }
+        Err(_) => {
+            tracing::warn!(dropped = data.len(), "input channel backpressure timeout");
+            false
+        }
+    }
+}
+
 impl ClientHandler {
     fn cleanup_terminal(&mut self, channel: ChannelId, session: &mut Session) {
         if !self.terminal_active {
             return;
         }
         self.terminal_active = false;
-        let _ = session.data(channel, terminal::leave_alt_screen(self.mouse_enabled));
+        if let Ok(sequence) = terminal::leave_alt_screen(self.mouse_enabled) {
+            let _ = session.data(channel, sequence);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn send_input_bytes_enqueues_when_space_is_available() {
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
+        let first = send_input_bytes(&tx, b"first", Duration::from_millis(20)).await;
+        let second = send_input_bytes(&tx, b"second", Duration::from_millis(20)).await;
+        assert!(first);
+        assert!(!second);
+        assert_eq!(rx.recv().await, Some(b"first".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn send_input_bytes_reports_closed_channel() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(1);
+        drop(rx);
+        let closed = send_input_bytes(&tx, b"closed", Duration::from_millis(20)).await;
+        assert!(!closed);
     }
 }

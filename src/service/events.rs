@@ -296,7 +296,7 @@ pub(crate) async fn create_mention_notifications_tx(
         let Some(row) = row else {
             continue;
         };
-        let target_id: String = row.get("id");
+        let target_id: String = row.get("id")?;
         if target_id == actor_id || targets.contains(&target_id) {
             continue;
         }

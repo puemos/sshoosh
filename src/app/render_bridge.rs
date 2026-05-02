@@ -19,7 +19,13 @@ impl App {
             render::draw(frame, account, snapshot, ui, commands);
             render::apply_selection(frame, ui);
         })?;
-        let mut output = self.shared.take();
+        let mut output = match self.shared.take() {
+            Ok(output) => output,
+            Err(err) => {
+                tracing::warn!(error = ?err, "terminal shared buffer read failed");
+                Vec::new()
+            }
+        };
         for link in &self.ui.link_overlays {
             output.extend(terminal::osc8_hyperlink_at(
                 link.rect, &link.url, &link.text, link.style,

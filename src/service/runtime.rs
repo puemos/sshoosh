@@ -1,4 +1,7 @@
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static MALFORMED_EVENT_PAYLOADS: AtomicUsize = AtomicUsize::new(0);
 
 pub struct ServerRuntime {
     handles: Vec<JoinHandle<()>>,
@@ -68,23 +71,86 @@ fn start_event_poller(
             }
             let mut next_seq = last_seq;
             for row in rows {
-                let seq: i64 = row.get("seq");
+                let seq: i64 = match row.try_get("seq") {
+                    Ok(seq) => seq,
+                    Err(err) => {
+                        tracing::warn!(error = ?err, "dropping malformed event row");
+                        continue;
+                    }
+                };
                 next_seq = next_seq.max(seq);
-                let payload_json: String = row.get("payload_json");
-                let payload =
-                    serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
-                let _ = live_tx.send(LiveEvent {
-                    seq,
-                    channel_id: row.get("channel_id"),
-                    thread_id: row.get("thread_id"),
-                    conversation_id: row.get("conversation_id"),
-                    kind: row.get("kind"),
-                    payload,
-                });
+                let payload_json: String = match row.try_get("payload_json") {
+                    Ok(payload_json) => payload_json,
+                    Err(err) => {
+                        tracing::warn!(error = ?err, seq, "dropping malformed event row");
+                        continue;
+                    }
+                };
+                let Some(payload) = parse_event_payload(&payload_json, seq) else {
+                    continue;
+                };
+                match live_event_from_row(row, seq, payload) {
+                    Ok(event) => {
+                        let _ = live_tx.send(event);
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = ?err, seq, "dropping malformed event row");
+                    }
+                }
             }
             *cursor.write().await = next_seq;
         }
     })
+}
+
+fn live_event_from_row(
+    row: DbRow,
+    seq: i64,
+    payload: serde_json::Value,
+) -> anyhow::Result<LiveEvent> {
+    Ok(LiveEvent {
+        seq,
+        channel_id: row.try_get("channel_id")?,
+        thread_id: row.try_get("thread_id")?,
+        conversation_id: row.try_get("conversation_id")?,
+        kind: row.try_get("kind")?,
+        payload,
+    })
+}
+
+fn parse_event_payload(payload_json: &str, seq: i64) -> Option<serde_json::Value> {
+    match serde_json::from_str::<serde_json::Value>(payload_json) {
+        Ok(payload) => Some(payload),
+        Err(err) => {
+            MALFORMED_EVENT_PAYLOADS.fetch_add(1, Ordering::AcqRel);
+            tracing::warn!(
+                error = %err,
+                seq,
+                malformed_payloads_total = malformed_event_payload_count(),
+                payload_preview = &payload_json.chars().take(160).collect::<String>(),
+                "dropping malformed event payload"
+            );
+            None
+        }
+    }
+}
+
+pub(crate) fn malformed_event_payload_count() -> usize {
+    MALFORMED_EVENT_PAYLOADS.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_event_payload_reports_json_errors() {
+        let before = malformed_event_payload_count();
+        let parsed = parse_event_payload("{\"ok\":true}", 1).expect("valid payload should parse");
+        assert_eq!(parsed["ok"].as_bool(), Some(true));
+        assert!(parse_event_payload("{invalid json", 2).is_none());
+        assert_eq!(malformed_event_payload_count(), before + 1);
+    }
 }
 
 fn start_master_lease_manager(db: Database) -> JoinHandle<()> {

@@ -139,8 +139,8 @@ pub(crate) async fn join_channel(
     let Some(row) = row else {
         bail!("Channel #{slug} not found");
     };
-    let channel_id: String = row.get("id");
-    let visibility: String = row.get("visibility");
+    let channel_id: String = row.get("id")?;
+    let visibility: String = row.get("visibility")?;
     anyhow::ensure!(visibility == "public", "Private channels require an invite");
     let now = now();
     query(
@@ -276,8 +276,8 @@ pub(crate) async fn add_comment(
     let Some(row) = row else {
         bail!("Thread not found");
     };
-    let channel_id: String = row.get("channel_id");
-    let current_index: i64 = row.get("last_comment_index");
+    let channel_id: String = row.get("channel_id")?;
+    let current_index: i64 = row.get("last_comment_index")?;
     ensure_can_view_channel(&mut tx, actor_id, &channel_id).await?;
     let next_index = current_index + 1;
     let now = now();
@@ -418,7 +418,7 @@ pub(crate) async fn open_dm(
     let Some(target_row) = target_row else {
         bail!("User @{target} not found");
     };
-    let target_id: String = target_row.get("id");
+    let target_id: String = target_row.get("id")?;
     anyhow::ensure!(target_id != actor_id, "Cannot DM yourself");
     let dm_key = dm_key(actor_id, &target_id);
     let now = now();
