@@ -100,3 +100,49 @@ jobs:
             dist/sshoosh-${{ github.ref_name }}-*
             dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
+
+  publish-homebrew:
+    name: Bump Homebrew Tap
+    runs-on: ubuntu-24.04
+    needs: publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: puemos/homebrew-tap
+          token: ${{ secrets.GH_TOKEN }}
+          path: homebrew-tap
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Download release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-delay 3 -fsSL \
+            "https://github.com/puemos/sshoosh/releases/download/${GITHUB_REF_NAME}/SHA256SUMS.txt" \
+            -o SHA256SUMS.txt
+
+      - name: Update Formula and README
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/update_homebrew_tap.py \
+            --tap homebrew-tap \
+            --checksums SHA256SUMS.txt \
+            --tag "${GITHUB_REF_NAME}"
+
+      - name: Commit and push Homebrew updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/sshoosh.rb README.md
+          git diff --staged --quiet || git commit -m "Bump sshoosh to ${GITHUB_REF_NAME}"
+          git push

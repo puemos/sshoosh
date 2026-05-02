@@ -20,6 +20,12 @@ ssh -p 2222 "$USER+TOKEN@127.0.0.1"
 
 The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
 
+After the first tagged release publishes the Homebrew formula, Homebrew installs the same executable-only package:
+
+```sh
+brew install puemos/tap/sshoosh
+```
+
 Connect as `username+TOKEN@host` with the one-time bootstrap token to create the first owner, create `#general`, and auto-join the owner to it. Additional unknown SSH keys must also connect as `username+invite-token@host`, or an owner/admin can add a key directly to an existing account. Unknown keys without a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
 ## Quick Deploy
