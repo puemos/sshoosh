@@ -615,9 +615,10 @@ pub(crate) fn wrapped_line_count(text: &str, width: usize) -> u16 {
 }
 
 pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, ui: &mut UiState) {
-    let modal = centered(area, 68, 9);
-    let (title, lines) = if let Some(code) = banner.text.strip_prefix("Invite code:") {
+    let (modal_height, title, lines) = if let Some(code) = banner.text.strip_prefix("Invite code:")
+    {
         (
+            9,
             " Invite code ",
             vec![
                 Line::from("One-time invite for a new SSH key"),
@@ -636,12 +637,36 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
                 )),
             ],
         )
+    } else if let Some(code) = banner.text.strip_prefix("Device link token:") {
+        (
+            10,
+            " Device link token ",
+            vec![
+                Line::from("One-time token for linking this account on a new device"),
+                Line::from("Expires in 10 minutes"),
+                Line::from(""),
+                Line::from(Span::styled(
+                    code.trim().to_string(),
+                    Style::default()
+                        .fg(theme::OK)
+                        .bg(theme::ELEVATED_PANEL)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "c copies, Enter or Esc closes",
+                    theme::elevated_accent(),
+                )),
+            ],
+        )
     } else {
         (
+            9,
             if banner.error { " Error " } else { " Message " },
             vec![Line::from(sanitize_terminal_visible_text(&banner.text))],
         )
     };
+    let modal = centered(area, 68, modal_height);
     ui.hit_map.push(modal, HitTarget::BannerModal);
     let inner = elevated_panel(frame, modal, title);
     frame.render_widget(

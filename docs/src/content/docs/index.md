@@ -16,7 +16,7 @@ SSHOOSH_DB=./sshoosh.sqlite \
 SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 \
 sshoosh serve --host 0.0.0.0 --port 2222
 ssh -p 2222 "$USER@127.0.0.1"
-# Paste the bootstrap token at the "Invite token:" prompt.
+# Paste the bootstrap token at the "Token:" prompt.
 ```
 
 The installer downloads the matching GitHub release binary, verifies it against `SHA256SUMS.txt`, and installs only the `sshoosh` executable. It does not create users, write systemd units, or start services. Use `install.sh --dir DIR --version vX.Y.Z` when you need an explicit install directory or release tag.
@@ -27,9 +27,27 @@ Homebrew also installs the same executable-only package:
 brew install puemos/tap/sshoosh
 ```
 
-Connect as `username@host` and paste the one-time bootstrap token at the `Invite token:` prompt to create the first owner, create `#general`, and auto-join the owner to it. New users invited later follow the same flow with their invite token. Owners and admins can also pre-register a key with `sshoosh keys add`, in which case no prompt appears. Unknown keys that do not redeem a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
+Connect as `username@host` and paste the one-time bootstrap token at the masked `Token:` prompt to create the first owner, create `#general`, and auto-join the owner to it. New users invited later follow the same flow with their invite token. Already signed-in users can run `/key link [label]` to create a 10-minute device link token for a new SSH key on the same account. Owners and admins can also pre-register a key with `sshoosh keys add`, in which case no prompt appears. Unknown keys that do not redeem a token are rejected before any account rows are written. `#general` is mandatory for activated users and cannot be left, archived, or made private.
 
-The `Invite token:` prompt is delivered over SSH keyboard-interactive auth (RFC 4256) with input masking, so the token never appears in the SSH user field, `ps`, sshd logs, terminal scrollback, or shell history.
+The `Token:` prompt is delivered over SSH keyboard-interactive auth (RFC 4256) with input masking, so bootstrap, invite, and device link tokens never appear in the SSH user field, `ps`, sshd logs, terminal scrollback, or shell history.
+
+## Add another device
+
+Each account can have multiple SSH keys. If you are already signed in on one device, create a short-lived link token from inside the TUI:
+
+```text
+/key link laptop
+```
+
+The optional label is stored on the new key so `/key my` stays readable. Copy the token from the modal, then connect from the new device with the SSH key you want to add:
+
+```sh
+ssh -p 2222 username@host
+```
+
+Paste the device link token at the masked `Token:` prompt. `sshoosh` links the offered SSH public key to your existing account, marks the token used, and signs you in as the same user. The SSH username is not used to choose the account during device linking; the token owner is.
+
+Device link tokens are bearer secrets. They expire after 10 minutes, are single-use, and are stored only as hashes. If a token expires or is lost, run `/key link [label]` again from an already linked device. Owners and admins can still pre-register a user's public key with `sshoosh keys add` when a self-service handoff is not practical.
 
 ## Quick Deploy
 
@@ -102,7 +120,7 @@ docker run -d --name sshoosh --restart unless-stopped \
   ghcr.io/puemos/sshoosh:latest
 
 ssh -p 2222 "$USER@127.0.0.1"
-# Paste the bootstrap token at the "Invite token:" prompt.
+# Paste the bootstrap token at the "Token:" prompt.
 ```
 
 The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`.
@@ -251,6 +269,7 @@ sshoosh dev-db-bench --users 50 --channels 50 --threads 1000 --comments 100000 -
 /key list
 /key my
 /key add ssh-ed25519... [label]
+/key link [label]
 /key label key-id-or-fingerprint label
 /key revoke key-id-or-fingerprint
 /search query

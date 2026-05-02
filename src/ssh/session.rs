@@ -58,7 +58,7 @@ impl russh::server::Handler for ClientHandler {
         tracing::info!(
             peer = ?self.peer_addr,
             username = %user,
-            "unknown public key; requesting invite token via keyboard-interactive"
+            "unknown public key; requesting access token via keyboard-interactive"
         );
         Ok(Auth::Reject {
             proceed_with_methods: Some(russh::MethodSet::from(
@@ -111,7 +111,7 @@ impl russh::server::Handler for ClientHandler {
             .expect("pending_key_auth checked above");
         match self
             .state
-            .redeem_token_for_key(user, &token, &pending.fingerprint, &pending.public_key)
+            .redeem_ssh_login_token_for_key(user, &token, &pending.fingerprint, &pending.public_key)
             .await
         {
             Ok(account) => {

@@ -341,6 +341,13 @@ impl CommandRegistry {
                 executor: CommandExecutor::Action(Action::CreateInvite),
             },
             PaletteItem {
+                label: "Link new device".to_string(),
+                detail: "one-time token for another SSH key".to_string(),
+                category: "Account".to_string(),
+                shortcut: None,
+                executor: CommandExecutor::Action(Action::CreateDeviceLinkToken { label: None }),
+            },
+            PaletteItem {
                 label: "Mark thread read".to_string(),
                 detail: "clear unread count".to_string(),
                 category: "Read state".to_string(),

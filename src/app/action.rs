@@ -88,6 +88,9 @@ pub enum Action {
         public_key: String,
         label: Option<String>,
     },
+    CreateDeviceLinkToken {
+        label: Option<String>,
+    },
     LabelKey {
         key: String,
         label: String,

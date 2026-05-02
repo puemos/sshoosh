@@ -239,6 +239,14 @@ impl ClientSession {
         self.state.list_my_ssh_keys(account_id).await
     }
 
+    pub async fn create_device_link_token(
+        &self,
+        account_id: &str,
+        label: Option<&str>,
+    ) -> anyhow::Result<String> {
+        self.state.create_device_link_token(account_id, label).await
+    }
+
     pub async fn add_ssh_key(
         &self,
         actor_id: &str,

@@ -1618,6 +1618,207 @@ async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
 }
 
 #[tokio::test]
+async fn device_link_token_links_new_key_to_existing_account_without_creating_account() {
+    let (_config, state) = test_state("device-link-token").await;
+    let owner = bootstrap_owner(&state, "SHA256:link-owner", "ssh-ed25519 owner").await;
+    let token = state
+        .create_device_link_token(&owner.id, Some("desktop"))
+        .await
+        .expect("device link token");
+
+    let linked = state
+        .redeem_ssh_login_token_for_key(
+            "ignored-username",
+            &token,
+            "SHA256:link-desktop",
+            "ssh-ed25519 desktop",
+        )
+        .await
+        .expect("link device");
+
+    assert_eq!(linked.id, owner.id);
+    assert_eq!(linked.username, owner.username);
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ?")
+        .bind(&owner.id)
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    let label: Option<String> = query_scalar("SELECT label FROM ssh_keys WHERE fingerprint = ?")
+        .bind("SHA256:link-desktop")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("linked key label");
+    let used_count: i64 =
+        query_scalar("SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL AND used_by_key_id IS NOT NULL")
+            .bind(&owner.id)
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("used token count");
+    assert_eq!(account_count, 1);
+    assert_eq!(key_count, 2);
+    assert_eq!(label.as_deref(), Some("desktop"));
+    assert_eq!(used_count, 1);
+
+    let reused = state
+        .redeem_ssh_login_token_for_key(
+            "ignored-username",
+            &token,
+            "SHA256:link-spare",
+            "ssh-ed25519 spare",
+        )
+        .await;
+    assert!(reused.is_err(), "{reused:?}");
+    let key_count_after_reuse: i64 =
+        query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ?")
+            .bind(&owner.id)
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("key count after reuse");
+    assert_eq!(key_count_after_reuse, 2);
+}
+
+#[tokio::test]
+async fn device_linked_ssh_keys_resolve_and_act_as_one_account() {
+    let (_config, state) = test_state("device-link-same-account").await;
+    let owner = bootstrap_owner(&state, "SHA256:same-primary", "ssh-ed25519 primary").await;
+    let token = state
+        .create_device_link_token(&owner.id, Some("second device"))
+        .await
+        .expect("device link token");
+    state
+        .redeem_ssh_login_token_for_key(
+            "not-the-account-selector",
+            &token,
+            "SHA256:same-secondary",
+            "ssh-ed25519 secondary",
+        )
+        .await
+        .expect("link second ssh key");
+
+    let primary_login = state
+        .lookup_active_account_for_key("SHA256:same-primary")
+        .await
+        .expect("primary lookup")
+        .expect("primary account");
+    let secondary_login = state
+        .lookup_active_account_for_key("SHA256:same-secondary")
+        .await
+        .expect("secondary lookup")
+        .expect("secondary account");
+
+    assert_eq!(primary_login.id, owner.id);
+    assert_eq!(secondary_login.id, owner.id);
+    assert_eq!(primary_login.username, secondary_login.username);
+    assert_eq!(primary_login.role, secondary_login.role);
+
+    state
+        .set_display_name(&secondary_login.id, &secondary_login.id, "Same Operator")
+        .await
+        .expect("second key session updates shared account");
+    let reloaded_from_primary = state
+        .reload_account(&primary_login.id)
+        .await
+        .expect("reload shared account");
+    assert_eq!(reloaded_from_primary.display_name, "Same Operator");
+
+    let account_count: i64 = query_scalar("SELECT COUNT(*) FROM accounts")
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("account count");
+    let distinct_key_accounts: i64 = query_scalar(
+        "SELECT COUNT(DISTINCT account_id)
+         FROM ssh_keys
+         WHERE fingerprint IN ('SHA256:same-primary', 'SHA256:same-secondary')",
+    )
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("distinct key accounts");
+    assert_eq!(account_count, 1);
+    assert_eq!(distinct_key_accounts, 1);
+}
+
+#[tokio::test]
+async fn expired_device_link_token_does_not_add_or_consume_key() {
+    let (_config, state) = test_state("device-link-expired").await;
+    let owner = bootstrap_owner(&state, "SHA256:expired-owner", "ssh-ed25519 owner").await;
+    let token = state
+        .create_device_link_token(&owner.id, Some("tablet"))
+        .await
+        .expect("device link token");
+    query(
+        "UPDATE device_link_tokens
+         SET expires_at = '1970-01-01T00:00:00Z'
+         WHERE account_id = ? AND used_at IS NULL",
+    )
+    .bind(&owner.id)
+    .execute(state.db.write_pool())
+    .await
+    .expect("expire token");
+
+    let expired = state
+        .redeem_ssh_login_token_for_key(
+            "ignored-username",
+            &token,
+            "SHA256:expired-tablet",
+            "ssh-ed25519 tablet",
+        )
+        .await;
+
+    assert!(expired.is_err(), "{expired:?}");
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ?")
+        .bind(&owner.id)
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    let consumed_count: i64 =
+        query_scalar("SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL")
+            .bind(&owner.id)
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("consumed token count");
+    assert_eq!(key_count, 1);
+    assert_eq!(consumed_count, 0);
+}
+
+#[tokio::test]
+async fn device_link_token_duplicate_fingerprint_rolls_back_token_use() {
+    let (_config, state) = test_state("device-link-duplicate").await;
+    let owner = bootstrap_owner(&state, "SHA256:duplicate-owner", "ssh-ed25519 owner").await;
+    let token = state
+        .create_device_link_token(&owner.id, Some("duplicate"))
+        .await
+        .expect("device link token");
+
+    let duplicate = state
+        .redeem_ssh_login_token_for_key(
+            "ignored-username",
+            &token,
+            "SHA256:duplicate-owner",
+            "ssh-ed25519 owner",
+        )
+        .await;
+
+    assert!(duplicate.is_err(), "{duplicate:?}");
+    let key_count: i64 = query_scalar("SELECT COUNT(*) FROM ssh_keys WHERE account_id = ?")
+        .bind(&owner.id)
+        .fetch_one(state.db.read_pool())
+        .await
+        .expect("key count");
+    let consumed_count: i64 =
+        query_scalar("SELECT COUNT(*) FROM device_link_tokens WHERE account_id = ? AND used_at IS NOT NULL")
+            .bind(&owner.id)
+            .fetch_one(state.db.read_pool())
+            .await
+            .expect("consumed token count");
+    assert_eq!(key_count, 1);
+    assert_eq!(consumed_count, 0);
+}
+
+#[tokio::test]
 async fn server_state_new_starts_no_live_event_tasks() {
     let (_config, state) = test_state("inert-state").await;
     let mut live_rx = state.subscribe();
@@ -2322,12 +2523,8 @@ async fn ssh_keyboard_interactive_redeems_invite_for_unknown_key() {
         other => panic!("expected info request, got {other:?}"),
     };
     assert_eq!(info.len(), 1, "{info:?}");
-    assert!(
-        info[0].prompt.to_lowercase().contains("invite"),
-        "{:?}",
-        info[0].prompt
-    );
-    assert!(!info[0].echo, "invite token prompt must mask input");
+    assert_eq!(info[0].prompt, "Token: ");
+    assert!(!info[0].echo, "token prompt must mask input");
 
     let outcome = session
         .authenticate_keyboard_interactive_respond(vec![invite.clone()])

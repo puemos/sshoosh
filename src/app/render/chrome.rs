@@ -28,7 +28,7 @@ pub(crate) fn draw_onboarding(frame: &mut Frame, area: Rect, account: &Account, 
             theme::elevated_unread(),
         )),
         Line::from(""),
-        Line::from("Enter the bootstrap token or ask an owner/admin for an invite code."),
+    Line::from("Enter a bootstrap, invite, or device link token."),
         Line::from("Type the secret and press Enter, or use: /join SECRET username"),
         Line::from(""),
         Line::from(vec![

@@ -1,4 +1,7 @@
 use super::*;
+
+const DEVICE_LINK_TOKEN_TTL_MINUTES: i64 = 10;
+
 impl ServerState {
     pub async fn create_invite_with_options(
         &self,
@@ -285,6 +288,50 @@ impl ServerState {
         .fetch_all(self.db.read_pool())
         .await?;
         rows.into_iter().map(ssh_key_summary_from_row).collect()
+    }
+
+    pub async fn create_device_link_token(
+        &self,
+        account_id: &str,
+        label: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let mut tx = begin(self.db.write_pool()).await?;
+        let account = load_account_tx(&mut tx, account_id).await?;
+        anyhow::ensure!(account.activated, "Account is not active");
+        let token = invite_code();
+        let token_hash = code_hash(&token);
+        let now = now();
+        let expires_at = (time::OffsetDateTime::now_utc()
+            + time::Duration::minutes(DEVICE_LINK_TOKEN_TTL_MINUTES))
+        .format(&time::format_description::well_known::Rfc3339)?;
+        let label = label
+            .map(sanitize_single_line_text)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let token_id = id();
+        query(
+            "INSERT INTO device_link_tokens
+             (id, account_id, code_hash, label, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&token_id)
+        .bind(&account.id)
+        .bind(&token_hash)
+        .bind(label.as_deref())
+        .bind(&now)
+        .bind(&expires_at)
+        .execute(&mut tx)
+        .await?;
+        insert_audit(
+            &mut tx,
+            Some(account_id),
+            "device_link_token.created",
+            Some(&token_id),
+            serde_json::json!({"username": account.username, "expires_at": expires_at}),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(token)
     }
 
     pub async fn add_ssh_key(

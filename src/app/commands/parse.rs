@@ -187,6 +187,9 @@ pub(crate) fn parse_key_command(input: &str) -> Result<Action, String> {
         "list" | "ls" => Ok(Action::ListKeys),
         "my" | "mine" => Ok(Action::ListMyKeys),
         "add" => parse_key_add(rest),
+        "link" => Ok(Action::CreateDeviceLinkToken {
+            label: optional_arg(rest),
+        }),
         "label" => parse_two_args(rest, "Key id and label are required")
             .map(|(key, label)| Action::LabelKey { key, label }),
         "revoke" | "remove" => {
