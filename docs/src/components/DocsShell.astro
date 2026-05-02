@@ -1,11 +1,11 @@
 ---
-import SiteChrome from './SiteChrome.astro';
+import SiteChrome from "./SiteChrome.astro";
 
 type Entry = {
-  data: {
-    title: string;
-    description?: string;
-  };
+    data: {
+        title: string;
+        description?: string;
+    };
 };
 
 const { entry } = Astro.props as { entry: Entry };
@@ -14,41 +14,47 @@ const href = (path: string) => `${base}${path}`;
 ---
 
 <SiteChrome
-  title={`${entry.data.title} | sshoosh`}
-  description={entry.data.description ?? 'sshoosh documentation'}
-  current="docs"
+    title={`${entry.data.title} | sshoosh`}
+    description={entry.data.description ?? "sshoosh documentation"}
+    current="docs"
 >
-  <div class="docs-layout">
-    <aside class="sidebar" aria-label="Documentation navigation">
-      <a class="sidebar-title" href={href('docs/')}>
-        <img src={href('assets/sshoosh-logo.svg')} alt="" aria-hidden="true" />
-        <span>sshoosh docs</span>
-      </a>
-      <section class="nav-section">
-        <h2>Start</h2>
-        <a href={href('docs/')} aria-current="page">Overview</a>
-      </section>
-      <section class="nav-section">
-        <h2>Run</h2>
-        <a href="#quick-start">Quick Start</a>
-        <a href="#quick-deploy">Quick Deploy</a>
-        <a href="#configuration">Configuration</a>
-        <a href="#commands">Commands</a>
-      </section>
-      <section class="nav-section">
-        <h2>Operate</h2>
-        <a href="#notifications">Notifications</a>
-        <a href="#backup-export-and-systemd">Backup & systemd</a>
-      </section>
-    </aside>
+    <div class="docs-layout">
+        <aside class="sidebar" aria-label="Documentation navigation">
+            <a class="sidebar-title" href={href("docs/")}>
+                <span>sshoosh docs</span>
+            </a>
+            <section class="nav-section">
+                <h2>Start</h2>
+                <a href={href("docs/")} aria-current="page">Overview</a>
+            </section>
+            <section class="nav-section">
+                <h2>Run</h2>
+                <a href="#quick-start">Quick Start</a>
+                <a href="#quick-deploy">Quick Deploy</a>
+                <a href="#connection-resilience">Connection resilience</a>
+                <a href="#configuration">Configuration</a>
+                <a href="#commands">Commands</a>
+                <a href="#membership-and-channels">Membership and channels</a>
+                <a href="#development">Development</a>
+            </section>
+            <section class="nav-section">
+                <h2>Operate</h2>
+                <a href="#notifications">Notifications</a>
+                <a href="#backup-export-and-systemd">Backup & systemd</a>
+            </section>
+        </aside>
 
-    <main class="doc-main">
-      <p class="doc-kicker"><span class="prompt">$</span> man sshoosh</p>
-      <h1>{entry.data.title}</h1>
-      {entry.data.description && <p class="doc-description">{entry.data.description}</p>}
-      <article class="doc-article">
-        <slot />
-      </article>
-    </main>
-  </div>
+        <main class="doc-main">
+            <p class="doc-kicker"><span class="prompt">$</span> man sshoosh</p>
+            <h1>{entry.data.title}</h1>
+            {
+                entry.data.description && (
+                    <p class="doc-description">{entry.data.description}</p>
+                )
+            }
+            <article class="doc-article">
+                <slot />
+            </article>
+        </main>
+    </div>
 </SiteChrome>

@@ -137,7 +137,7 @@ Use `--no-mouse` or `SSHOOSH_NO_MOUSE=true` if your terminal has problematic mou
 
 ## Commands
 
-Core CLI commands:
+### Core CLI commands
 
 ```sh
 sshoosh serve
@@ -147,36 +147,110 @@ sshoosh doctor --repair-search
 sshoosh backup /path/to/backup.sqlite
 sshoosh master status
 sshoosh encrypt migrate
-sshoosh invite --role member --ttl-hours 24
+sshoosh audit list --limit 100
+sshoosh notifications list --actor alice
+sshoosh notifications mark-read --actor alice
 ```
 
-Protected CLI commands require `--actor ownername` to attribute the action to a specific active account.
+Protected CLI commands require `--actor <owner-or-admin>` to attribute the action to a specific active account.
 
 | Area | CLI examples |
 | --- | --- |
-| Users | `sshoosh users list`, `sshoosh users role alice admin`, `sshoosh users disable alice` |
-| Keys | `sshoosh keys list`, `sshoosh keys add "ssh-ed25519 AAAA..." --username alice`, `sshoosh keys revoke <key>` |
+| Users | `sshoosh users list`, `sshoosh users rename alice alice-prod`, `sshoosh users display-name alice "Alice Lee"`, `sshoosh users disable alice`, `sshoosh users enable alice`, `sshoosh users role alice admin` |
+| Keys | `sshoosh keys list`, `sshoosh keys my`, `sshoosh keys add "ssh-ed25519 AAAA..." --username alice`, `sshoosh keys label <key-id-or-fingerprint> laptop`, `sshoosh keys revoke <key-id-or-fingerprint>` |
 | Invites | `sshoosh invites create --role admin --ttl-hours 2`, `sshoosh invites revoke <invite-id>` |
-| Channels | `sshoosh channels create engineering`, `sshoosh channels create ops-secret --private`, `sshoosh channels add-member ops-secret alice` |
+| Channels | `sshoosh channels list`, `sshoosh channels create engineering`, `sshoosh channels create ops-secret --private`, `sshoosh channels join engineering`, `sshoosh channels leave engineering`, `sshoosh channels rename engineering eng`, `sshoosh channels topic eng "Build notes"`, `sshoosh channels archive eng`, `sshoosh channels unarchive eng`, `sshoosh channels members ops-secret`, `sshoosh channels add-member ops-secret alice`, `sshoosh channels remove-member ops-secret alice` |
 | Notifications | `sshoosh notifications list --actor alice`, `sshoosh notifications mark-read --actor alice` |
+| Encryption | `sshoosh encrypt migrate` |
+| Master | `sshoosh master status` |
+| Audit | `sshoosh audit list --limit 100` |
 | Export | `sshoosh export --format json --out export.json --include-audit`, `sshoosh export --format markdown --out export.md` |
+| Backup | `sshoosh backup /path/to/backup.sqlite` |
 
-Common TUI commands:
+### Developer CLI commands
+
+These commands are intended for local workflows and local testing:
+
+```sh
+sshoosh dev --host 127.0.0.1 --port 2222
+sshoosh dev-ssh --host 127.0.0.1 --port 2222
+sshoosh dev-db-bench --users 50 --channels 50 --threads 1000 --comments 100000 --dms 5000
+```
+
+### Complete TUI command reference
 
 ```text
 /invite new [member|admin] [ttl-hours]
+/invite list
+/invite revoke invite-id
 /channel new name
 /channel private name
 /channel list
 /channel join #channel
 /channel leave [#channel]
+/channel topic #channel <topic>
+/channel rename #channel <name>
+/channel archive [#channel]
+/channel unarchive #channel
+/channel members #channel
+/channel add #channel @user
+/channel remove #channel @user
 /thread new title
+/thread rename title
+/thread delete
+/thread archive
+/thread unarchive
+/thread pin
+/thread unpin
+/thread mute [hours]
+/thread unmute
+/thread read
+/thread unread
 /dm open @user
+/dm edit index body
+/dm delete index
+/dm mute [hours]
+/dm unmute
+/dm read
+/dm unread
+/user list
+/user profile display-name
+/user username new-name
+/user disable @user
+/user enable @user
+/user role @user owner|admin|member
+/key list
+/key my
+/key add ssh-ed25519... [label]
+/key label key-id-or-fingerprint label
+/key revoke key-id-or-fingerprint
 /search query
+/comment edit index body
+/comment delete index
 /notification mentions
 /notification list
+/notification read
+/notification terminal on
+/notification terminal off
+/notification terminal status
 /audit
-```
+/audit list
+/reaction add emoji [comment-or-message-index]
+/reaction remove emoji [comment-or-message-index]
+/reaction delete emoji [comment-or-message-index]
+/save index
+/unsave index
+/more
+/older
+/help
+/quit
+``` 
+
+Command aliases are available in the TUI: `/chan` (`/channel`), `/t` (`/thread`), `/d` (`/dm`), `/msg` (`/dm`), and `/q` (`/quit`).
+
+### Readability note
+
+`/audit` is shorthand for `/audit list`.
 
 In compose mode, `Ctrl-X E` prefills an edit command for your latest comment in the current thread or your latest message in the current DM. With mouse support enabled, right-click one of your comments or DM messages to open the message menu, then choose edit or delete; deletes require confirmation.
 
