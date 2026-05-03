@@ -45,6 +45,7 @@ impl App {
             history_limit: DEFAULT_HISTORY_LIMIT,
             search_limit: DEFAULT_SEARCH_LIMIT,
             saved_limit: DEFAULT_SEARCH_LIMIT,
+            label_limit: DEFAULT_SEARCH_LIMIT,
             seen_notification_ids,
             pending_terminal_notifications: VecDeque::new(),
             emitted_terminal_title: None,
@@ -67,6 +68,10 @@ impl App {
         let saved_messages = self.snapshot.saved_messages.clone();
         let saved_has_more = self.snapshot.saved_has_more;
         let saved_next_cursor = self.snapshot.saved_next_cursor.clone();
+        let label_query = self.snapshot.label_query.clone();
+        let label_items = self.snapshot.label_items.clone();
+        let label_has_more = self.snapshot.label_has_more;
+        let label_next_cursor = self.snapshot.label_next_cursor.clone();
         let notifications = self.snapshot.notifications.clone();
         let notifications_next_cursor = self.snapshot.notifications_next_cursor.clone();
         self.snapshot = self
@@ -106,6 +111,15 @@ impl App {
                 .ui
                 .saved_selected
                 .min(self.snapshot.saved_messages.len().saturating_sub(1));
+        } else if matches!(self.ui.route, Route::Label(_)) {
+            self.snapshot.label_query = label_query;
+            self.snapshot.label_items = label_items;
+            self.snapshot.label_has_more = label_has_more;
+            self.snapshot.label_next_cursor = label_next_cursor;
+            self.ui.label_selected = self
+                .ui
+                .label_selected
+                .min(self.snapshot.label_items.len().saturating_sub(1));
         } else if self.ui.route == Route::Notifications {
             self.snapshot.notifications = notifications;
             self.snapshot.notifications_next_cursor = notifications_next_cursor;
@@ -175,6 +189,13 @@ impl App {
         self.snapshot.selected_channel_id.clone()
     }
 
+    pub fn first_channel_id(&self) -> Option<String> {
+        self.snapshot
+            .channels
+            .first()
+            .map(|channel| channel.id.clone())
+    }
+
     pub fn selected_channel_slug(&self) -> Option<String> {
         self.snapshot
             .selected_channel_id
@@ -242,6 +263,12 @@ impl App {
         self.ui.route == Route::Saved
     }
 
+    pub fn label_query(&self) -> Option<String> {
+        matches!(self.ui.route, Route::Label(_))
+            .then(|| self.snapshot.label_query.clone())
+            .flatten()
+    }
+
     pub fn notifications_active(&self) -> bool {
         self.ui.route == Route::Notifications
     }
@@ -255,6 +282,11 @@ impl App {
         self.saved_active()
             .then(|| self.snapshot.saved_next_cursor.clone())
             .flatten()
+    }
+
+    pub fn label_page_request(&self) -> Option<(String, Option<String>)> {
+        self.label_query()
+            .map(|tag| (tag, self.snapshot.label_next_cursor.clone()))
     }
 
     pub fn notifications_next_cursor(&self) -> Option<String> {
@@ -271,6 +303,11 @@ impl App {
     pub fn reset_saved_limit(&mut self) -> i64 {
         self.saved_limit = DEFAULT_SEARCH_LIMIT;
         self.saved_limit
+    }
+
+    pub fn reset_label_limit(&mut self) -> i64 {
+        self.label_limit = DEFAULT_SEARCH_LIMIT;
+        self.label_limit
     }
 
     pub fn increase_history_limit(&mut self) -> i64 {
@@ -408,6 +445,35 @@ impl App {
         }
     }
 
+    pub fn set_label_feed(
+        &mut self,
+        tag: String,
+        items: Vec<LabelFeedItem>,
+        has_more: bool,
+        reset_selection: bool,
+    ) {
+        self.snapshot.label_query = Some(tag.clone());
+        self.snapshot.label_items = items;
+        self.snapshot.label_has_more = has_more;
+        if !has_more {
+            self.snapshot.label_next_cursor = None;
+        }
+        self.snapshot.selected_thread_id = None;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
+        self.ui.route = Route::Label(tag);
+        self.ui.active_pane = ActivePane::Detail;
+        if reset_selection {
+            self.ui.label_selected = 0;
+            self.reset_detail_scroll();
+        } else {
+            self.ui.label_selected = self
+                .ui
+                .label_selected
+                .min(self.snapshot.label_items.len().saturating_sub(1));
+        }
+    }
+
     pub fn set_search_results_page(
         &mut self,
         query: String,
@@ -452,6 +518,18 @@ impl App {
         self.snapshot.saved_next_cursor = next_cursor;
     }
 
+    pub fn set_label_feed_page(
+        &mut self,
+        tag: String,
+        items: Vec<LabelFeedItem>,
+        next_cursor: Option<String>,
+        reset_selection: bool,
+    ) {
+        let has_more = next_cursor.is_some();
+        self.set_label_feed(tag, items, has_more, reset_selection);
+        self.snapshot.label_next_cursor = next_cursor;
+    }
+
     pub fn append_saved_messages(
         &mut self,
         mut messages: Vec<SavedMessageItem>,
@@ -463,6 +541,28 @@ impl App {
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Saved;
+        self.ui.active_pane = ActivePane::Detail;
+    }
+
+    pub fn append_label_feed(
+        &mut self,
+        tag: String,
+        mut items: Vec<LabelFeedItem>,
+        next_cursor: Option<String>,
+    ) {
+        if self.snapshot.label_query.as_deref() == Some(tag.as_str()) {
+            self.snapshot.label_items.append(&mut items);
+        } else {
+            self.snapshot.label_query = Some(tag.clone());
+            self.snapshot.label_items = items;
+            self.ui.label_selected = 0;
+        }
+        self.snapshot.label_has_more = next_cursor.is_some();
+        self.snapshot.label_next_cursor = next_cursor;
+        self.snapshot.selected_thread_id = None;
+        self.snapshot.selected_conversation_id = None;
+        self.ui.pending_source_focus = None;
+        self.ui.route = Route::Label(tag);
         self.ui.active_pane = ActivePane::Detail;
     }
 

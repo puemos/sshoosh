@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::SourceFocus;
-use crate::service::SavedMessageKind;
+use crate::service::{LabelFeedItem, LabelFeedKind, SavedMessageKind};
 use crate::time_format::{
     calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
 };
@@ -37,6 +37,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     }
     if matches!(ui.route, Route::Search) {
         draw_search_detail(frame, area, snapshot, ui);
+        return;
+    }
+    if matches!(ui.route, Route::Label(_)) {
+        draw_label_detail(frame, area, snapshot, ui);
         return;
     }
     if matches!(ui.route, Route::Saved) {
@@ -89,11 +93,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let messages_area = pane_scroll_area(area);
     let content_area = scroll_content_area(messages_area);
     let message_width = message_content_width(content_area);
-    let mut link_hits = Vec::new();
-    let mut mention_hits = Vec::new();
-    let mut reaction_hits = Vec::new();
-    let mut card_hits = Vec::new();
-    let mut selection_hits = Vec::new();
+    let mut message_hits = MessageHits::default();
     let mut focused_row = None;
     let mut content_row = 0u16;
     if let Some(thread) = selected {
@@ -130,16 +130,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 &thread.body,
                 message_width,
             );
-            append_message_card(
-                &mut items,
-                &mut link_hits,
-                &mut mention_hits,
-                &mut reaction_hits,
-                &mut card_hits,
-                &mut selection_hits,
-                &mut content_row,
-                card,
-            );
+            append_message_card(&mut items, &mut message_hits, &mut content_row, card);
             prev_author = Some(thread.author.clone());
             prev_kind = Some(MessageKind::ThreadRoot);
             prev_created_at = Some(thread.created_at.clone());
@@ -196,16 +187,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 card,
                 HitTarget::EditableMessage(EditableMessageTarget::Comment(comment.obj_index)),
             );
-            append_message_card(
-                &mut items,
-                &mut link_hits,
-                &mut mention_hits,
-                &mut reaction_hits,
-                &mut card_hits,
-                &mut selection_hits,
-                &mut content_row,
-                card,
-            );
+            append_message_card(&mut items, &mut message_hits, &mut content_row, card);
             prev_author = Some(comment.author.clone());
             prev_kind = Some(MessageKind::Comment);
             prev_created_at = Some(comment.created_at.clone());
@@ -233,16 +215,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     );
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
-    register_mention_hits(ui, content_area, mention_hits, ui.detail_scroll.offset().y);
-    register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
-    register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
-    register_message_selection_regions(
-        ui,
-        content_area,
-        selection_hits,
-        ui.detail_scroll.offset().y,
-    );
+    register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
 }
 
 pub(crate) fn draw_search_detail(
@@ -387,6 +360,99 @@ pub(crate) fn draw_saved_detail(
     }
     if snapshot.saved_has_more {
         items.push(history_prompt("More saved messages available. Use /more."));
+    }
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
+    }
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    register_scroll_hits(
+        ui,
+        messages_area,
+        HitTarget::DetailScroll,
+        row_hits,
+        ui.detail_scroll.offset().y,
+    );
+}
+
+pub(crate) fn draw_label_detail(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
+    frame.render_widget(Block::default().style(theme::panel()), area);
+    let area = pane_inner(area);
+    let tag = snapshot
+        .label_query
+        .as_deref()
+        .or(match &ui.route {
+            Route::Label(tag) => Some(tag.as_str()),
+            _ => None,
+        })
+        .unwrap_or("label");
+    let count = snapshot
+        .hot_labels
+        .iter()
+        .find(|hot| hot.tag == tag)
+        .map(|hot| hot.count)
+        .unwrap_or(snapshot.label_items.len() as i64);
+    let meta = format!(
+        "{} labeled {}",
+        count,
+        if count == 1 { "message" } else { "messages" }
+    );
+    draw_thread_header(frame, area, None, &format!("${tag}"), Some(&meta), ui);
+    let messages_area = pane_scroll_area(area);
+    let mut items = Vec::new();
+    let mut row_hits = Vec::new();
+    let mut selected_row = None;
+    if snapshot.label_items.is_empty() {
+        ui.hit_map.push(messages_area, HitTarget::DetailScroll);
+        ui.detail_scroll_metrics = DetailScrollMetrics::default();
+        render_empty_state(
+            frame,
+            messages_area,
+            &mut ui.detail_scroll,
+            empty_state_lines(
+                "No label messages",
+                "Use $labels in messages",
+                "/label $label",
+            ),
+        );
+        return;
+    }
+
+    let row_width = messages_area.width.saturating_sub(2) as usize;
+    let body_width = row_width.max(1);
+    let mut content_row = 0u16;
+    for (idx, item) in snapshot.label_items.iter().enumerate() {
+        let selected = idx == ui.label_selected;
+        if selected {
+            selected_row = Some(content_row);
+        }
+        let row = saved_message_result_list_item(SavedMessageResultRow {
+            selected,
+            title: label_result_title(snapshot, item),
+            meta: format_human_timestamp(&item.created_at),
+            body: item.body.clone(),
+            body_width,
+        });
+        let height = row.height() as u16;
+        items.push(row);
+        for offset in 0..height {
+            row_hits.push((
+                content_row.saturating_add(offset),
+                HitTarget::LabelResult(idx),
+            ));
+        }
+        content_row = content_row.saturating_add(height);
+    }
+    if snapshot.label_has_more {
+        items.push(history_prompt(
+            "More labeled messages available. Use /more.",
+        ));
     }
     if ui.detail_selection_scroll_pending {
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
@@ -676,6 +742,36 @@ fn saved_result_title(snapshot: &Snapshot, item: &crate::service::SavedMessageIt
                 _ => item.source_label.replace(" · ", " / "),
             };
             format!("@{} on {}", item.author, source)
+        }
+    }
+}
+
+fn label_result_title(snapshot: &Snapshot, item: &LabelFeedItem) -> String {
+    match item.kind {
+        LabelFeedKind::Thread => {
+            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
+                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+                _ => item.source_label.replace(" · ", " / "),
+            };
+            format!("@{} started {}", item.author, source)
+        }
+        LabelFeedKind::Comment => {
+            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
+                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+                _ => item.source_label.replace(" · ", " / "),
+            };
+            format!("@{} on {}", item.author, source)
+        }
+        LabelFeedKind::Dm => {
+            let actor = snapshot
+                .current_username
+                .as_deref()
+                .unwrap_or(item.author.as_str());
+            let peer = item
+                .dm_peer_username
+                .as_deref()
+                .unwrap_or(item.source_label.strip_prefix("DM @").unwrap_or("DM"));
+            format!("DM @{actor} -> @{peer}")
         }
     }
 }
@@ -1066,11 +1162,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let content_area = scroll_content_area(messages_area);
     let message_width = message_content_width(content_area);
     let mut items: Vec<ListItem> = Vec::new();
-    let mut link_hits = Vec::new();
-    let mut mention_hits = Vec::new();
-    let mut reaction_hits = Vec::new();
-    let mut card_hits = Vec::new();
-    let mut selection_hits = Vec::new();
+    let mut message_hits = MessageHits::default();
     let mut focused_row = None;
     let mut content_row = 0u16;
     if snapshot.conversation_messages_has_more {
@@ -1131,16 +1223,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 card,
                 HitTarget::EditableMessage(EditableMessageTarget::Dm(message.obj_index)),
             );
-            append_message_card(
-                &mut items,
-                &mut link_hits,
-                &mut mention_hits,
-                &mut reaction_hits,
-                &mut card_hits,
-                &mut selection_hits,
-                &mut content_row,
-                card,
-            );
+            append_message_card(&mut items, &mut message_hits, &mut content_row, card);
             prev_author = Some(message.author.clone());
             prev_kind = Some(MessageKind::Dm);
             prev_created_at = Some(message.created_at.clone());
@@ -1155,16 +1238,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     );
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
-    register_mention_hits(ui, content_area, mention_hits, ui.detail_scroll.offset().y);
-    register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
-    register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
-    register_message_selection_regions(
-        ui,
-        content_area,
-        selection_hits,
-        ui.detail_scroll.offset().y,
-    );
+    register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
 }
 
 fn apply_pending_source_focus(ui: &mut UiState, focused_row: Option<u16>, capped: bool) {

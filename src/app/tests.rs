@@ -11,7 +11,7 @@ mod cases {
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
-            DmSidebarItem, NotificationSummary, ReactionSummary, SavedMessageItem,
+            DmSidebarItem, HotLabel, NotificationSummary, ReactionSummary, SavedMessageItem,
             SavedMessageKind, SearchKind, SearchResult, ServerState, Snapshot, ThreadItem,
             UserPresence,
         },
@@ -729,6 +729,35 @@ mod cases {
         assert!(app.snapshot.selected_thread_id.is_none());
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn mouse_clicking_workspace_label_more_expands_section() {
+        let mut app = test_app("workspace-label-more").await;
+        app.ui.active_pane = ActivePane::Rail;
+        app.snapshot.hot_labels = [
+            "incident", "deploy", "database", "security", "customer", "support",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(idx, tag)| HotLabel {
+            tag: (*tag).to_string(),
+            count: 10 - idx as i64,
+            latest_at: "2026-05-03T12:00:00Z".to_string(),
+        })
+        .collect();
+        app.render().expect("render collapsed labels");
+        assert!(!app.ui.labels_expanded);
+
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::WorkspaceLabelsMore)
+        });
+
+        assert!(app.ui.labels_expanded);
+        app.render().expect("render expanded labels");
+        assert!(app.ui.hit_map.entries().iter().any(|region| {
+            matches!(&region.target, HitTarget::WorkspaceLabel(tag) if tag == "support")
+        }));
     }
 
     #[tokio::test]

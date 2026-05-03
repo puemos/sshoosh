@@ -5,6 +5,10 @@ impl App {
             self.move_search(delta);
             return;
         }
+        if matches!(self.ui.route, Route::Label(_)) && self.ui.active_pane == ActivePane::Detail {
+            self.move_label(delta);
+            return;
+        }
         if self.ui.route == Route::Saved && self.ui.active_pane == ActivePane::Detail {
             self.move_saved(delta);
             return;
@@ -90,6 +94,20 @@ impl App {
         self.ui.search_selected = clamp_index(self.ui.search_selected, delta, len);
     }
 
+    pub(crate) fn move_label(&mut self, delta: isize) {
+        let len = self.snapshot.label_items.len();
+        if len == 0 {
+            return;
+        }
+        let next = clamp_index(self.ui.label_selected, delta, len);
+        if next != self.ui.label_selected {
+            self.ui.label_selected = next;
+            self.ui.detail_selection_scroll_pending = true;
+        } else if delta > 0 && self.ui.label_selected == len.saturating_sub(1) {
+            self.queue_result_list_page_if_available();
+        }
+    }
+
     pub(crate) fn move_saved(&mut self, delta: isize) {
         let len = self.snapshot.saved_messages.len();
         if len == 0 {
@@ -128,7 +146,7 @@ impl App {
                     self.snapshot.selected_conversation_id.is_some()
                         && self.snapshot.conversation_messages_has_more
                 }
-                Route::Search | Route::Saved | Route::Notifications => false,
+                Route::Search | Route::Label(_) | Route::Saved | Route::Notifications => false,
             }
     }
 
@@ -149,7 +167,7 @@ impl App {
                 .conversation_messages
                 .first()
                 .map(|message| SourceFocus::Dm(message.obj_index)),
-            Route::Search | Route::Saved | Route::Notifications => None,
+            Route::Search | Route::Label(_) | Route::Saved | Route::Notifications => None,
         };
     }
 
@@ -187,6 +205,7 @@ impl App {
 
     fn can_load_more_result_list(&self) -> bool {
         match self.ui.route {
+            Route::Label(_) => self.snapshot.label_next_cursor.is_some(),
             Route::Saved => self.snapshot.saved_next_cursor.is_some(),
             Route::Notifications => self.snapshot.notifications_next_cursor.is_some(),
             Route::Channel(_) | Route::Dms | Route::Search => false,
@@ -280,7 +299,35 @@ impl App {
                 username: dm.peer_username.clone(),
             }));
         }
+        let label_tags = self.workspace_label_tags();
+        rows.extend(label_tags.iter().cloned().map(WorkspaceRow::Label));
+        if !self.ui.labels_expanded && self.all_workspace_label_tags().len() > label_tags.len() {
+            rows.push(WorkspaceRow::LabelsMore);
+        }
         rows
+    }
+
+    pub(crate) fn workspace_label_tags(&self) -> Vec<String> {
+        let mut tags = self.all_workspace_label_tags();
+        if !self.ui.labels_expanded && tags.len() > 5 {
+            tags.truncate(5);
+        }
+        tags
+    }
+
+    pub(crate) fn all_workspace_label_tags(&self) -> Vec<String> {
+        let mut tags: Vec<String> = self
+            .snapshot
+            .hot_labels
+            .iter()
+            .map(|tag| tag.tag.clone())
+            .collect();
+        if let Route::Label(tag) = &self.ui.route
+            && !tags.iter().any(|existing| existing == tag)
+        {
+            tags.push(tag.clone());
+        }
+        tags
     }
 
     pub(crate) fn current_workspace_row(&self) -> Option<WorkspaceRow> {
@@ -322,6 +369,10 @@ impl App {
                 }),
             _ if matches!(self.ui.route, Route::Saved) => Some(WorkspaceRow::Saved),
             _ if matches!(self.ui.route, Route::Notifications) => Some(WorkspaceRow::Notifications),
+            _ if matches!(self.ui.route, Route::Label(_)) => match &self.ui.route {
+                Route::Label(tag) => Some(WorkspaceRow::Label(tag.clone())),
+                _ => None,
+            },
             _ => self
                 .snapshot
                 .selected_channel_id
@@ -385,6 +436,18 @@ impl App {
                 self.reset_detail_scroll();
                 self.actions.push(Action::ListSaved);
             }
+            WorkspaceRow::Label(tag) => {
+                self.ui.route = Route::Label(tag.clone());
+                self.ui.active_pane = ActivePane::Detail;
+                self.snapshot.selected_thread_id = None;
+                self.snapshot.selected_conversation_id = None;
+                self.reset_detail_scroll();
+                self.actions.push(Action::OpenLabel { tag });
+            }
+            WorkspaceRow::LabelsMore => {
+                self.ui.labels_expanded = true;
+                self.ui.active_pane = ActivePane::Rail;
+            }
             WorkspaceRow::Notifications => {
                 self.ui.route = Route::Notifications;
                 self.ui.active_pane = ActivePane::Detail;
@@ -420,6 +483,10 @@ impl App {
             self.activate_search_result();
             return;
         }
+        if matches!(self.ui.route, Route::Label(_)) && self.ui.active_pane == ActivePane::Detail {
+            self.activate_label_result();
+            return;
+        }
         if self.ui.route == Route::Saved && self.ui.active_pane == ActivePane::Detail {
             self.activate_saved_result();
             return;
@@ -433,7 +500,7 @@ impl App {
             ActivePane::Rail => {
                 if matches!(
                     self.ui.route,
-                    Route::Dms | Route::Saved | Route::Notifications
+                    Route::Dms | Route::Label(_) | Route::Saved | Route::Notifications
                 ) {
                     self.ui.active_pane = ActivePane::Detail;
                 } else if self.ui.threads_collapsed {
@@ -478,6 +545,33 @@ impl App {
             self.select_conversation(conversation_id);
         } else if let (Some(channel_id), Some(thread_id)) = (result.channel_id, result.thread_id) {
             self.select_thread(channel_id, thread_id);
+        }
+    }
+
+    pub(crate) fn activate_label_result(&mut self) {
+        let Some(item) = self
+            .snapshot
+            .label_items
+            .get(self.ui.label_selected)
+            .cloned()
+        else {
+            return;
+        };
+        let focus = match item.kind {
+            LabelFeedKind::Thread => SourceFocus::ThreadRoot,
+            LabelFeedKind::Comment => item
+                .source_obj_index
+                .map(SourceFocus::Comment)
+                .unwrap_or(SourceFocus::ThreadRoot),
+            LabelFeedKind::Dm => item
+                .source_obj_index
+                .map(SourceFocus::Dm)
+                .unwrap_or(SourceFocus::Dm(0)),
+        };
+        if let (Some(channel_id), Some(thread_id)) = (item.channel_id, item.thread_id) {
+            self.select_thread_with_focus(channel_id, thread_id, focus);
+        } else if let Some(conversation_id) = item.conversation_id {
+            self.select_conversation_with_focus(conversation_id, focus);
         }
     }
 
@@ -599,7 +693,12 @@ impl App {
     pub(crate) fn navigate_right(&mut self) {
         match self.ui.active_pane {
             ActivePane::Detail => {}
-            ActivePane::Rail if matches!(self.ui.route, Route::Saved | Route::Notifications) => {
+            ActivePane::Rail
+                if matches!(
+                    self.ui.route,
+                    Route::Label(_) | Route::Saved | Route::Notifications
+                ) =>
+            {
                 self.ui.active_pane = ActivePane::Detail;
             }
             ActivePane::List => self.ui.active_pane = ActivePane::Detail,
@@ -643,6 +742,14 @@ impl App {
         if matches!(self.ui.route, Route::Dms) {
             self.ui.active_pane = ActivePane::Detail;
             self.actions.push(Action::MarkDmRead);
+            return;
+        }
+
+        if matches!(
+            self.ui.route,
+            Route::Label(_) | Route::Saved | Route::Notifications
+        ) {
+            self.ui.active_pane = ActivePane::Detail;
             return;
         }
 

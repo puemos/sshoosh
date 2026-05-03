@@ -35,6 +35,7 @@ pub enum Route {
     #[default]
     Dms,
     Search,
+    Label(String),
     Saved,
     Notifications,
 }
@@ -95,6 +96,8 @@ pub struct UiState {
     pub comment_menu: Option<CommentMenuState>,
     pub comment_delete: Option<CommentDeleteState>,
     pub search_selected: usize,
+    pub label_selected: usize,
+    pub labels_expanded: bool,
     pub saved_selected: usize,
     pub notifications_selected: usize,
     pub detail_selection_scroll_pending: bool,
@@ -124,6 +127,8 @@ impl Default for UiState {
             comment_menu: None,
             comment_delete: None,
             search_selected: 0,
+            label_selected: 0,
+            labels_expanded: false,
             saved_selected: 0,
             notifications_selected: 0,
             detail_selection_scroll_pending: false,
@@ -322,6 +327,8 @@ pub enum HitTarget {
     WorkspaceScroll,
     WorkspaceChannel(String),
     WorkspaceThread(String),
+    WorkspaceLabel(String),
+    WorkspaceLabelsMore,
     WorkspaceSaved,
     WorkspaceNotifications,
     WorkspaceDm {
@@ -331,6 +338,7 @@ pub enum HitTarget {
     TopbarMentions,
     DetailScroll,
     SearchResult(usize),
+    LabelResult(usize),
     SavedResult(usize),
     NotificationResult(usize),
     NotificationFilter(NotificationFilter),
@@ -347,6 +355,7 @@ pub enum HitTarget {
     },
     MessageLink(String),
     MessageMention(String),
+    MessageLabel(String),
     ComposerInput {
         scroll_y: u16,
     },
@@ -405,6 +414,7 @@ impl UiState {
             }
             let _ = conversation_id;
         } else if self.route != Route::Search
+            && !matches!(self.route, Route::Label(_))
             && self.route != Route::Saved
             && self.route != Route::Notifications
             && let Some(channel_id) = snapshot.selected_channel_id.clone()

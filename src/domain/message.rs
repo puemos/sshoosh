@@ -114,6 +114,37 @@ pub struct SavedMessageItem {
     pub conversation_id: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct HotLabel {
+    pub tag: String,
+    pub count: i64,
+    pub latest_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabelFeedKind {
+    Thread,
+    Comment,
+    Dm,
+}
+
+#[derive(Clone, Debug)]
+pub struct LabelFeedItem {
+    pub kind: LabelFeedKind,
+    pub source_id: String,
+    pub source_obj_index: Option<i64>,
+    pub author: String,
+    pub body: String,
+    pub source_label: String,
+    pub channel_slug: Option<String>,
+    pub thread_title: Option<String>,
+    pub dm_peer_username: Option<String>,
+    pub created_at: String,
+    pub channel_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub conversation_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub current_username: Option<String>,
@@ -134,6 +165,11 @@ pub struct Snapshot {
     pub saved_next_cursor: Option<String>,
     pub saved_count: i64,
     pub saved_has_more: bool,
+    pub hot_labels: Vec<HotLabel>,
+    pub label_query: Option<String>,
+    pub label_items: Vec<LabelFeedItem>,
+    pub label_next_cursor: Option<String>,
+    pub label_has_more: bool,
     pub notifications: Vec<NotificationSummary>,
     pub notifications_next_cursor: Option<String>,
     pub notification_unread_count: i64,

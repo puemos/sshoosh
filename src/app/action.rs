@@ -171,6 +171,9 @@ pub enum Action {
     Search {
         query: String,
     },
+    OpenLabel {
+        tag: String,
+    },
     ListSaved,
     LoadMore,
     LoadOlder,

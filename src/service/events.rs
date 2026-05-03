@@ -160,6 +160,74 @@ pub(crate) async fn delete_search_index_tx(
     Ok(())
 }
 
+pub(crate) struct LabelIndexInput<'a> {
+    pub(crate) source_kind: &'a str,
+    pub(crate) source_id: &'a str,
+    pub(crate) channel_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) conversation_id: Option<&'a str>,
+    pub(crate) obj_index: Option<i64>,
+    pub(crate) text: &'a str,
+    pub(crate) created_at: &'a str,
+}
+
+pub(crate) async fn replace_labels_tx(
+    mut tx: &mut DbTransaction,
+    input: LabelIndexInput<'_>,
+) -> anyhow::Result<()> {
+    delete_labels_tx(tx, input.source_kind, input.source_id).await?;
+    for tag in parse_labels(input.text) {
+        query(
+            "INSERT INTO message_labels
+             (tag, source_kind, source_id, channel_id, thread_id, conversation_id, obj_index, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(tag)
+        .bind(input.source_kind)
+        .bind(input.source_id)
+        .bind(input.channel_id)
+        .bind(input.thread_id)
+        .bind(input.conversation_id)
+        .bind(input.obj_index)
+        .bind(input.created_at)
+        .execute(&mut tx)
+        .await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn delete_labels_tx(
+    mut tx: &mut DbTransaction,
+    source_kind: &str,
+    source_id: &str,
+) -> anyhow::Result<()> {
+    query("DELETE FROM message_labels WHERE source_kind = ? AND source_id = ?")
+        .bind(source_kind)
+        .bind(source_id)
+        .execute(&mut tx)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn delete_thread_labels_tx(
+    mut tx: &mut DbTransaction,
+    thread_id: &str,
+) -> anyhow::Result<()> {
+    query("DELETE FROM message_labels WHERE thread_id = ?")
+        .bind(thread_id)
+        .execute(&mut tx)
+        .await?;
+    Ok(())
+}
+
+pub(crate) fn thread_label_text(title: &str, body: &str) -> String {
+    if body.trim().is_empty() {
+        title.to_string()
+    } else {
+        format!("{title}\n{body}")
+    }
+}
+
 pub(crate) fn fts_query(query: &str) -> String {
     let mut terms = Vec::new();
     let mut current = String::new();

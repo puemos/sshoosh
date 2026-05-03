@@ -28,6 +28,7 @@ struct ActionSelection {
     channel_slug: Option<String>,
     thread_id: Option<String>,
     conversation_id: Option<String>,
+    first_channel_id: Option<String>,
 }
 
 impl ActionSelection {
@@ -38,6 +39,7 @@ impl ActionSelection {
             channel_slug: app.selected_channel_slug(),
             thread_id: app.selected_thread_id(),
             conversation_id: app.selected_conversation_id(),
+            first_channel_id: app.first_channel_id(),
         }
     }
 }
@@ -132,7 +134,14 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
             }
         }
         Action::CreateThread { title } => {
-            let channel_id = ActionSelection::current(app).await.channel_id;
+            let selection = ActionSelection::current(app).await;
+            let had_channel_selection = selection.channel_id.is_some();
+            let fallback_channel_id = selection
+                .conversation_id
+                .is_none()
+                .then_some(selection.first_channel_id)
+                .flatten();
+            let channel_id = selection.channel_id.or(fallback_channel_id);
             if let Some(channel_id) = channel_id {
                 let thread_id = match session
                     .create_thread(account_id, channel_id.clone(), title)
@@ -142,7 +151,12 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                     Err(err) => Err(err)?,
                 };
                 let latest = ActionSelection::current(app).await;
-                if latest.channel_id.as_deref() == Some(channel_id.as_str()) {
+                let unchanged_source_agnostic_route = !had_channel_selection
+                    && latest.channel_id.is_none()
+                    && latest.conversation_id.is_none();
+                if latest.channel_id.as_deref() == Some(channel_id.as_str())
+                    || unchanged_source_agnostic_route
+                {
                     app.lock().await.select_thread(channel_id, thread_id);
                 }
                 Ok(ActionResult::message("Thread created"))
@@ -579,6 +593,23 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                 Err(err) => Err(err),
             }
         }
+        Action::OpenLabel { tag } => {
+            let tag = crate::service::normalize_label(&tag)
+                .ok_or_else(|| anyhow::anyhow!("Label is required"))?;
+            let limit = app.lock().await.reset_label_limit();
+            match session
+                .label_feed_page_after(&account_id, &tag, PageRequest::first(limit))
+                .await
+            {
+                Ok(page) => {
+                    app.lock()
+                        .await
+                        .set_label_feed_page(tag, page.items, page.next_cursor, true);
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
         Action::ListSaved => {
             let limit = app.lock().await.reset_saved_limit();
             match session
@@ -645,27 +676,55 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                         }
                         Err(err) => Err(err),
                     }
-                } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
-                    match session
-                        .list_notifications_page(
-                            &account_id,
-                            PageRequest {
-                                limit: 50,
-                                cursor: Some(cursor),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(page) => {
-                            app.lock()
-                                .await
-                                .append_notifications(page.items, page.next_cursor);
-                            Ok(ActionResult::silent())
-                        }
-                        Err(err) => Err(err),
-                    }
                 } else {
-                    Ok(ActionResult::silent())
+                    let label_request = {
+                        let app = app.lock().await;
+                        app.label_page_request()
+                    };
+                    if let Some((tag, Some(cursor))) = label_request {
+                        match session
+                            .label_feed_page_after(
+                                &account_id,
+                                &tag,
+                                PageRequest {
+                                    limit: 50,
+                                    cursor: Some(cursor),
+                                },
+                            )
+                            .await
+                        {
+                            Ok(page) => {
+                                app.lock().await.append_label_feed(
+                                    tag,
+                                    page.items,
+                                    page.next_cursor,
+                                );
+                                Ok(ActionResult::silent())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
+                        match session
+                            .list_notifications_page(
+                                &account_id,
+                                PageRequest {
+                                    limit: 50,
+                                    cursor: Some(cursor),
+                                },
+                            )
+                            .await
+                        {
+                            Ok(page) => {
+                                app.lock()
+                                    .await
+                                    .append_notifications(page.items, page.next_cursor);
+                                Ok(ActionResult::silent())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Ok(ActionResult::silent())
+                    }
                 }
             }
         }

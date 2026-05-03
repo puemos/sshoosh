@@ -663,6 +663,224 @@ pub(crate) async fn load_saved_message_count(
     .await
 }
 
+pub(crate) async fn load_hot_labels(
+    pool: impl DbExecutor + Copy,
+    account_id: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<HotLabel>> {
+    let limit = page_limit(limit, 50);
+    let rows = query(
+        "SELECT mh.tag,
+                COUNT(*) AS count,
+                MAX(mh.created_at) AS latest_at,
+                SUM(
+                  CASE
+                    WHEN julianday('now') - julianday(mh.created_at) <= 1 THEN 20
+                    WHEN julianday('now') - julianday(mh.created_at) <= 7 THEN 6
+                    WHEN julianday('now') - julianday(mh.created_at) <= 30 THEN 2
+                    ELSE 1
+                  END
+                ) AS score
+         FROM message_labels mh
+         LEFT JOIN threads t ON t.id = mh.thread_id
+         LEFT JOIN comments cm ON cm.id = mh.source_id AND mh.source_kind = 'comment'
+         LEFT JOIN conversation_messages dm ON dm.id = mh.source_id AND mh.source_kind = 'dm'
+         WHERE (
+             mh.source_kind IN ('thread', 'comment')
+             AND t.deleted_at IS NULL
+             AND (cm.id IS NULL OR cm.deleted_at IS NULL)
+             AND EXISTS (
+               SELECT 1 FROM channel_members m
+               WHERE m.channel_id = mh.channel_id AND m.account_id = ?
+             )
+           )
+           OR (
+             mh.source_kind = 'dm'
+             AND dm.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM conversation_members m
+               WHERE m.conversation_id = mh.conversation_id AND m.account_id = ?
+             )
+           )
+         GROUP BY mh.tag
+         ORDER BY score DESC, latest_at DESC, mh.tag ASC
+         LIMIT ?",
+    )
+    .bind(account_id)
+    .bind(account_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(HotLabel {
+                tag: row.get("tag")?,
+                count: row.get("count")?,
+                latest_at: row.get("latest_at")?,
+            })
+        })
+        .collect()
+}
+
+pub(crate) async fn load_label_feed_page(
+    pool: impl DbExecutor + Copy,
+    account_id: &str,
+    tag: &str,
+    request: PageRequest,
+) -> anyhow::Result<Page<LabelFeedItem>> {
+    let tag = normalize_label(tag).ok_or_else(|| anyhow::anyhow!("Label is required"))?;
+    let limit = page_limit(request.limit, 500);
+    let fetch_limit = limit.saturating_add(1);
+    let cursor = decode_cursor(request.cursor.as_deref(), 2)?;
+    let cursor_filter = if cursor.is_some() {
+        "WHERE created_at < ? OR (created_at = ? AND source_id < ?)"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT kind, source_id, source_obj_index, author, body, source_label,
+                channel_slug, thread_title, dm_peer_username, created_at,
+                channel_id, thread_id, conversation_id
+         FROM (
+           SELECT 'thread' AS kind,
+                  t.id AS source_id,
+                  NULL AS source_obj_index,
+                  a.username AS author,
+                  CASE WHEN t.body = '' THEN t.title ELSE t.body END AS body,
+                  '#' || ch.slug || ' · ' || t.title AS source_label,
+                  ch.slug AS channel_slug,
+                  t.title AS thread_title,
+                  NULL AS dm_peer_username,
+                  mh.created_at,
+                  ch.id AS channel_id,
+                  t.id AS thread_id,
+                  NULL AS conversation_id
+           FROM message_labels mh
+           JOIN threads t ON t.id = mh.source_id
+           JOIN channels ch ON ch.id = t.channel_id
+           JOIN accounts a ON a.id = t.creator_account_id
+           WHERE mh.tag = ?
+             AND mh.source_kind = 'thread'
+             AND t.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM channel_members m
+               WHERE m.channel_id = t.channel_id AND m.account_id = ?
+             )
+           UNION ALL
+           SELECT 'comment' AS kind,
+                  cm.id AS source_id,
+                  cm.obj_index AS source_obj_index,
+                  a.username AS author,
+                  cm.body,
+                  '#' || ch.slug || ' · ' || t.title AS source_label,
+                  ch.slug AS channel_slug,
+                  t.title AS thread_title,
+                  NULL AS dm_peer_username,
+                  mh.created_at,
+                  ch.id AS channel_id,
+                  t.id AS thread_id,
+                  NULL AS conversation_id
+           FROM message_labels mh
+           JOIN comments cm ON cm.id = mh.source_id
+           JOIN threads t ON t.id = cm.thread_id
+           JOIN channels ch ON ch.id = cm.channel_id
+           JOIN accounts a ON a.id = cm.author_account_id
+           WHERE mh.tag = ?
+             AND mh.source_kind = 'comment'
+             AND cm.deleted_at IS NULL
+             AND t.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM channel_members m
+               WHERE m.channel_id = cm.channel_id AND m.account_id = ?
+             )
+           UNION ALL
+           SELECT 'dm' AS kind,
+                  dm.id AS source_id,
+                  dm.obj_index AS source_obj_index,
+                  a.username AS author,
+                  dm.body,
+                  'DM @' || peer.username AS source_label,
+                  NULL AS channel_slug,
+                  NULL AS thread_title,
+                  peer.username AS dm_peer_username,
+                  mh.created_at,
+                  NULL AS channel_id,
+                  NULL AS thread_id,
+                  conv.id AS conversation_id
+           FROM message_labels mh
+           JOIN conversation_messages dm ON dm.id = mh.source_id
+           JOIN conversations conv ON conv.id = dm.conversation_id
+           JOIN accounts a ON a.id = dm.author_account_id
+           JOIN conversation_members me
+             ON me.conversation_id = conv.id AND me.account_id = ?
+           JOIN conversation_members other
+             ON other.conversation_id = conv.id AND other.account_id <> ?
+           JOIN accounts peer ON peer.id = other.account_id
+           WHERE mh.tag = ?
+             AND mh.source_kind = 'dm'
+             AND dm.deleted_at IS NULL
+         )
+         {cursor_filter}
+         ORDER BY created_at DESC, source_id DESC
+         LIMIT ?"
+    );
+    let mut query = query(&sql)
+        .bind(&tag)
+        .bind(account_id)
+        .bind(&tag)
+        .bind(account_id)
+        .bind(account_id)
+        .bind(account_id)
+        .bind(&tag);
+    if let Some(cursor) = cursor {
+        query = query.bind(&cursor[0]).bind(&cursor[0]).bind(&cursor[1]);
+    }
+    let rows = query.bind(fetch_limit).fetch_all(pool).await?;
+    let mut items: Vec<_> = rows
+        .into_iter()
+        .map(|row| {
+            let kind = match row.get::<String>("kind")?.as_str() {
+                "thread" => LabelFeedKind::Thread,
+                "comment" => LabelFeedKind::Comment,
+                _ => LabelFeedKind::Dm,
+            };
+            Ok(LabelFeedItem {
+                kind,
+                source_id: row.get("source_id")?,
+                source_obj_index: row.get("source_obj_index")?,
+                author: row.get("author")?,
+                body: sanitize_stored_text(&row.get::<String>("body")?),
+                source_label: sanitize_single_line_text(&row.get::<String>("source_label")?),
+                channel_slug: row
+                    .get::<Option<String>>("channel_slug")?
+                    .map(|slug| sanitize_single_line_text(&slug)),
+                thread_title: row
+                    .get::<Option<String>>("thread_title")?
+                    .map(|title| sanitize_single_line_text(&title)),
+                dm_peer_username: row
+                    .get::<Option<String>>("dm_peer_username")?
+                    .map(|username| sanitize_single_line_text(&username)),
+                created_at: row.get("created_at")?,
+                channel_id: row.get("channel_id")?,
+                thread_id: row.get("thread_id")?,
+                conversation_id: row.get("conversation_id")?,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let has_more = items.len() > limit as usize;
+    let next_cursor = if has_more {
+        items.pop().expect("extra row");
+        let last = items.last().expect("last label feed row");
+        Some(encode_cursor([
+            last.created_at.clone(),
+            last.source_id.clone(),
+        ])?)
+    } else {
+        None
+    };
+    Ok(Page { items, next_cursor })
+}
+
 pub(crate) async fn load_account_tx(
     mut tx: &mut DbTransaction,
     account_id: &str,

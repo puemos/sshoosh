@@ -144,6 +144,14 @@ impl Default for CommandRegistry {
                     category: "Search",
                 },
                 CommandSpec {
+                    name: "label",
+                    aliases: &["tag"],
+                    description: "Open a label feed",
+                    args: "$label",
+                    shortcut: None,
+                    category: "Search",
+                },
+                CommandSpec {
                     name: "save",
                     aliases: &[],
                     description: "Save a message",
@@ -231,6 +239,9 @@ impl CommandRegistry {
             "reaction" => parse_reaction_command(rest).map(Some),
             "search" => require(rest, "Search query is required")
                 .map(|query| Some(Action::Search { query })),
+            "label" => {
+                require(rest, "Label is required").map(|tag| Some(Action::OpenLabel { tag }))
+            }
             "save" => parse_index(rest, "Message index is required")
                 .map(|index| Some(Action::SetMessageSaved { index, saved: true })),
             "unsave" => parse_index(rest, "Message index is required").map(|index| {

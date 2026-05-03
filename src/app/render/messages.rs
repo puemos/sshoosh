@@ -12,6 +12,7 @@ pub(crate) struct MessageCard<'a> {
     item: ListItem<'a>,
     links: Vec<MessageLinkHit>,
     mentions: Vec<MessageMentionHit>,
+    labels: Vec<MessageLabelHit>,
     reactions: Vec<MessageReactionHit>,
     hit: Option<MessageCardHit>,
 }
@@ -43,6 +44,13 @@ pub(crate) struct MessageMentionHit {
     username: String,
 }
 
+pub(crate) struct MessageLabelHit {
+    row: u16,
+    col: u16,
+    width: u16,
+    tag: String,
+}
+
 pub(crate) struct MessageCardHit {
     row: u16,
     height: u16,
@@ -59,6 +67,16 @@ pub(crate) struct MessageReactionHit {
 pub(crate) struct MessageSelectionHit {
     row: u16,
     height: u16,
+}
+
+#[derive(Default)]
+pub(crate) struct MessageHits {
+    links: Vec<MessageLinkHit>,
+    mentions: Vec<MessageMentionHit>,
+    labels: Vec<MessageLabelHit>,
+    reactions: Vec<MessageReactionHit>,
+    cards: Vec<MessageCardHit>,
+    selections: Vec<MessageSelectionHit>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,6 +131,7 @@ pub(crate) fn message_card<'a>(
     let mut lines = Vec::new();
     let mut links = Vec::new();
     let mut mentions = Vec::new();
+    let mut labels = Vec::new();
     let mut reaction_hits = Vec::new();
     let mut row_idx: usize = 0;
 
@@ -170,6 +189,19 @@ pub(crate) fn message_card<'a>(
                     username: username.clone(),
                 });
             }
+            if let Some(tag) = run
+                .link_url
+                .as_ref()
+                .and_then(|url| url.strip_prefix(LABEL_LINK_PREFIX))
+                && span_width > 0
+            {
+                labels.push(MessageLabelHit {
+                    row: row_idx.min(u16::MAX as usize) as u16,
+                    col,
+                    width: span_width,
+                    tag: tag.to_string(),
+                });
+            }
             col = col.saturating_add(span_width);
             last_visible_chars = last_visible_chars.saturating_add(chars);
             content.push(Span::styled(run.text, style));
@@ -208,6 +240,7 @@ pub(crate) fn message_card<'a>(
         item: ListItem::new(lines).style(theme::message_card_on(surface)),
         links,
         mentions,
+        labels,
         reactions: reaction_hits,
         hit: None,
     }
@@ -394,37 +427,103 @@ pub(crate) fn append_plain_item<'a>(
 
 pub(crate) fn append_message_card<'a>(
     items: &mut Vec<ListItem<'a>>,
-    link_hits: &mut Vec<MessageLinkHit>,
-    mention_hits: &mut Vec<MessageMentionHit>,
-    reaction_hits: &mut Vec<MessageReactionHit>,
-    card_hits: &mut Vec<MessageCardHit>,
-    selection_hits: &mut Vec<MessageSelectionHit>,
+    hits: &mut MessageHits,
     content_row: &mut u16,
     card: MessageCard<'a>,
 ) {
     let height = card.item.height().min(u16::MAX as usize) as u16;
     for mut link in card.links {
         link.row = link.row.saturating_add(*content_row);
-        link_hits.push(link);
+        hits.links.push(link);
     }
     for mut mention in card.mentions {
         mention.row = mention.row.saturating_add(*content_row);
-        mention_hits.push(mention);
+        hits.mentions.push(mention);
+    }
+    for mut label in card.labels {
+        label.row = label.row.saturating_add(*content_row);
+        hits.labels.push(label);
     }
     for mut reaction in card.reactions {
         reaction.row = reaction.row.saturating_add(*content_row);
-        reaction_hits.push(reaction);
+        hits.reactions.push(reaction);
     }
     if let Some(mut hit) = card.hit {
         hit.row = hit.row.saturating_add(*content_row);
-        card_hits.push(hit);
+        hits.cards.push(hit);
     }
-    selection_hits.push(MessageSelectionHit {
+    hits.selections.push(MessageSelectionHit {
         row: *content_row,
         height,
     });
     *content_row = content_row.saturating_add(height);
     items.push(card.item);
+}
+
+pub(crate) fn register_message_hits(
+    ui: &mut UiState,
+    area: Rect,
+    hits: MessageHits,
+    offset_y: u16,
+) {
+    register_card_hits(ui, area, hits.cards, offset_y);
+    register_reaction_hits(ui, area, hits.reactions, offset_y);
+    register_link_hits(ui, area, hits.links, offset_y);
+    register_mention_hits(ui, area, hits.mentions, offset_y);
+    register_label_hits(ui, area, hits.labels, offset_y);
+    register_message_selection_regions(ui, area, hits.selections, offset_y);
+}
+
+pub(crate) fn register_mention_hits(
+    ui: &mut UiState,
+    area: Rect,
+    mention_hits: Vec<MessageMentionHit>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for mention in mention_hits {
+        if mention.row < offset_y || mention.row >= bottom {
+            continue;
+        }
+        let Some(x) = area.x.checked_add(mention.col) else {
+            continue;
+        };
+        let right = area.x.saturating_add(area.width);
+        if x >= right {
+            continue;
+        }
+        let width = mention.width.min(right.saturating_sub(x));
+        ui.hit_map.push(
+            Rect::new(x, area.y + mention.row.saturating_sub(offset_y), width, 1),
+            HitTarget::MessageMention(mention.username),
+        );
+    }
+}
+
+pub(crate) fn register_label_hits(
+    ui: &mut UiState,
+    area: Rect,
+    label_hits: Vec<MessageLabelHit>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for label in label_hits {
+        if label.row < offset_y || label.row >= bottom {
+            continue;
+        }
+        let Some(x) = area.x.checked_add(label.col) else {
+            continue;
+        };
+        let right = area.x.saturating_add(area.width);
+        if x >= right {
+            continue;
+        }
+        let width = label.width.min(right.saturating_sub(x));
+        ui.hit_map.push(
+            Rect::new(x, area.y + label.row.saturating_sub(offset_y), width, 1),
+            HitTarget::MessageLabel(label.tag),
+        );
+    }
 }
 
 pub(crate) fn register_card_hits(
@@ -469,32 +568,6 @@ pub(crate) fn register_reaction_hits(
         ui.hit_map.push(
             Rect::new(x, area.y + reaction.row.saturating_sub(offset_y), width, 1),
             reaction.target,
-        );
-    }
-}
-
-pub(crate) fn register_mention_hits(
-    ui: &mut UiState,
-    area: Rect,
-    mention_hits: Vec<MessageMentionHit>,
-    offset_y: u16,
-) {
-    let bottom = offset_y.saturating_add(area.height);
-    for mention in mention_hits {
-        if mention.row < offset_y || mention.row >= bottom {
-            continue;
-        }
-        let Some(x) = area.x.checked_add(mention.col) else {
-            continue;
-        };
-        let right = area.x.saturating_add(area.width);
-        if x >= right {
-            continue;
-        }
-        let width = mention.width.min(right.saturating_sub(x));
-        ui.hit_map.push(
-            Rect::new(x, area.y + mention.row.saturating_sub(offset_y), width, 1),
-            HitTarget::MessageMention(mention.username),
         );
     }
 }

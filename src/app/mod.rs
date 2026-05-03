@@ -16,8 +16,9 @@ use ratatui::layout::{Position, Rect};
 use crate::{
     client::ClientSession,
     service::{
-        Account, DEFAULT_HISTORY_LIMIT, LiveEvent, MAX_HISTORY_LIMIT, NotificationSummary,
-        SavedMessageItem, SavedMessageKind, SearchResult, ServerState, Snapshot,
+        Account, DEFAULT_HISTORY_LIMIT, LabelFeedItem, LabelFeedKind, LiveEvent, MAX_HISTORY_LIMIT,
+        NotificationSummary, SavedMessageItem, SavedMessageKind, SearchResult, ServerState,
+        Snapshot,
     },
     terminal::{self, SharedBuffer, SshooshTerminal},
 };
@@ -57,6 +58,7 @@ pub struct App {
     history_limit: i64,
     search_limit: i64,
     saved_limit: i64,
+    label_limit: i64,
     seen_notification_ids: HashSet<String>,
     pending_terminal_notifications: VecDeque<TerminalNotification>,
     emitted_terminal_title: Option<String>,
@@ -66,6 +68,8 @@ pub struct App {
 pub(crate) enum WorkspaceRow {
     Channel(String),
     Thread(String),
+    Label(String),
+    LabelsMore,
     Saved,
     Notifications,
     Dm {

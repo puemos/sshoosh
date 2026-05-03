@@ -566,6 +566,7 @@ impl ServerState {
         let conversations = load_conversations(&read_session, account_id).await?;
         let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
         let saved_count = load_saved_message_count(&read_session, account_id).await?;
+        let hot_labels = load_hot_labels(&read_session, account_id, 12).await?;
         let selected_conversation_id = selected_conversation_id
             .filter(|id| {
                 conversations
@@ -644,6 +645,11 @@ impl ServerState {
             saved_next_cursor: None,
             saved_count,
             saved_has_more: false,
+            hot_labels,
+            label_query: None,
+            label_items: Vec::new(),
+            label_next_cursor: None,
+            label_has_more: false,
             notifications: notifications_page.items,
             notifications_next_cursor: notifications_page.next_cursor,
             notification_unread_count,
@@ -662,6 +668,7 @@ impl ServerState {
             conversation_messages = snapshot.conversation_messages.len(),
             notifications = snapshot.notifications.len(),
             saved_count = snapshot.saved_count,
+            hot_labels = snapshot.hot_labels.len(),
             "snapshot loaded"
         );
         Ok(snapshot)

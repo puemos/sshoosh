@@ -596,4 +596,19 @@ impl ClientSession {
             .saved_messages_page_after(account_id, request)
             .await
     }
+
+    pub async fn hot_labels(&self, account_id: &str, limit: i64) -> anyhow::Result<Vec<HotLabel>> {
+        self.state.hot_labels(account_id, limit).await
+    }
+
+    pub async fn label_feed_page_after(
+        &self,
+        account_id: &str,
+        tag: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<LabelFeedItem>> {
+        self.state
+            .label_feed_page_after(account_id, tag, request)
+            .await
+    }
 }

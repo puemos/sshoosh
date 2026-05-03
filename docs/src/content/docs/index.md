@@ -274,6 +274,7 @@ sshoosh dev-db-bench --users 50 --channels 50 --threads 1000 --comments 100000 -
 /key label key-id-or-fingerprint label
 /key revoke key-id-or-fingerprint
 /search query
+/label $label
 /comment edit index body
 /comment delete index
 /notification mentions
@@ -295,7 +296,7 @@ sshoosh dev-db-bench --users 50 --channels 50 --threads 1000 --comments 100000 -
 /quit
 ``` 
 
-Command aliases are available in the TUI: `/chan` (`/channel`), `/t` (`/thread`), `/d` (`/dm`), `/msg` (`/dm`), and `/q` (`/quit`).
+Command aliases are available in the TUI: `/chan` (`/channel`), `/t` (`/thread`), `/d` (`/dm`), `/msg` (`/dm`), `/tag` (`/label`), and `/q` (`/quit`).
 
 Use `/older` to load older thread or DM message history. Use `/more` to load additional search, saved, and notification rows.
 

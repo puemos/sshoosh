@@ -21,6 +21,19 @@ pub(crate) fn autocomplete_after_command(
     let sub_prefix = &buffer[sub_start..cursor.min(sub_end)];
     let subcommands = subcommands_for(spec.name);
 
+    if subcommands.is_empty() {
+        if spec.name == "label" {
+            return autocomplete_arguments(
+                sub_start..cursor,
+                &buffer[sub_start..cursor],
+                label_suggestions(snapshot),
+                spec.description,
+                true,
+            );
+        }
+        return AutocompleteState::default();
+    }
+
     if !subcommands.is_empty() && cursor <= sub_end {
         let mut items: Vec<_> = subcommands
             .iter()
@@ -124,6 +137,21 @@ pub(crate) fn argument_suggestions(
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn label_suggestions(snapshot: &Snapshot) -> Vec<(String, String)> {
+    snapshot
+        .hot_labels
+        .iter()
+        .map(|tag| {
+            let plural = if tag.count == 1 {
+                "message"
+            } else {
+                "messages"
+            };
+            (format!("${}", tag.tag), format!("{} {plural}", tag.count))
+        })
+        .collect()
 }
 
 pub(crate) fn autocomplete_mentions(
