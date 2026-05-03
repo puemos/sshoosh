@@ -46,8 +46,8 @@ impl App {
                 placeholder,
             } => self.open_compose_prompt(&title, &prefix, &placeholder),
             CommandExecutor::SwitchChannel(id) => {
+                self.clear_conversation_source_selection();
                 self.snapshot.selected_channel_id = Some(id.clone());
-                self.snapshot.selected_conversation_id = None;
                 self.snapshot.selected_thread_id = None;
                 self.snapshot.threads.clear();
                 self.snapshot.comments.clear();
@@ -58,6 +58,7 @@ impl App {
                 self.refresh_requested = true;
             }
             CommandExecutor::SwitchDm(id) => {
+                self.clear_channel_source_selection();
                 self.snapshot.selected_conversation_id = Some(id);
                 self.snapshot.conversation_messages.clear();
                 self.reset_detail_scroll();
@@ -66,6 +67,7 @@ impl App {
                 self.refresh_requested = true;
             }
             CommandExecutor::SwitchThread(id) => {
+                self.clear_conversation_source_selection();
                 self.snapshot.selected_thread_id = Some(id);
                 self.snapshot.comments.clear();
                 self.reset_detail_scroll_to_bottom();

@@ -563,10 +563,24 @@ impl ServerState {
         let mut active_account_ids = load_active_presence_sessions(&read_session).await?;
         active_account_ids.extend(self.active_account_ids().await);
         let users = load_user_presence(&read_session, &active_account_ids).await?;
-        let selected_channel_id = selected_channel_id
-            .filter(|id| channels.iter().any(|channel| channel.id == *id))
-            .map(ToOwned::to_owned)
-            .or_else(|| channels.first().map(|channel| channel.id.clone()));
+        let conversations = load_conversations(&read_session, account_id).await?;
+        let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
+        let saved_count = load_saved_message_count(&read_session, account_id).await?;
+        let selected_conversation_id = selected_conversation_id
+            .filter(|id| {
+                conversations
+                    .iter()
+                    .any(|conversation| conversation.id == *id)
+            })
+            .map(ToOwned::to_owned);
+        let selected_channel_id = if selected_conversation_id.is_some() {
+            None
+        } else {
+            selected_channel_id
+                .filter(|id| channels.iter().any(|channel| channel.id == *id))
+                .map(ToOwned::to_owned)
+                .or_else(|| channels.first().map(|channel| channel.id.clone()))
+        };
 
         let threads = if let Some(channel_id) = selected_channel_id.as_deref() {
             load_threads(&read_session, account_id, channel_id).await?
@@ -582,17 +596,6 @@ impl ServerState {
         } else {
             (Vec::new(), false)
         };
-
-        let conversations = load_conversations(&read_session, account_id).await?;
-        let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
-        let saved_count = load_saved_message_count(&read_session, account_id).await?;
-        let selected_conversation_id = selected_conversation_id
-            .filter(|id| {
-                conversations
-                    .iter()
-                    .any(|conversation| conversation.id == *id)
-            })
-            .map(ToOwned::to_owned);
         let (conversation_messages, conversation_messages_has_more) = if let Some(conversation_id) =
             selected_conversation_id.as_deref()
         {

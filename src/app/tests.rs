@@ -51,6 +51,71 @@ mod cases {
         app
     }
 
+    async fn test_app_with_alice_dm(name: &str) -> (App, String) {
+        let db_path = temp_path(name).with_extension("sqlite");
+        let db = Database::connect(&db_path).await.expect("connect db");
+        db.init().await.expect("init db");
+        let state = ServerState::new(db).await.expect("state");
+        let token = state
+            .create_bootstrap_token()
+            .await
+            .expect("bootstrap token");
+        let pending_owner = state
+            .redeem_token_for_key(
+                "owner",
+                &token,
+                &format!("SHA256:{name}-owner"),
+                &format!("ssh-ed25519 {name}-owner"),
+            )
+            .await
+            .expect("owner account");
+        let owner = state
+            .complete_onboarding(&pending_owner.id, "owner")
+            .await
+            .expect("complete owner");
+        let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+        let pending_alice = state
+            .redeem_token_for_key(
+                "alice",
+                &invite,
+                &format!("SHA256:{name}-alice"),
+                &format!("ssh-ed25519 {name}-alice"),
+            )
+            .await
+            .expect("alice account");
+        state
+            .complete_onboarding(&pending_alice.id, "alice")
+            .await
+            .expect("complete alice");
+        let initial = state
+            .snapshot(&owner.id, None, None, None)
+            .await
+            .expect("initial snapshot");
+        let channel_id = initial
+            .selected_channel_id
+            .clone()
+            .expect("general channel");
+        state
+            .create_thread(owner.id.clone(), channel_id, "Stale thread".to_string())
+            .await
+            .expect("create stale thread");
+        let conversation_id = state
+            .open_dm(owner.id.clone(), "alice".to_string())
+            .await
+            .expect("open dm");
+        state
+            .send_dm(
+                owner.id.clone(),
+                conversation_id.clone(),
+                "hello alice".to_string(),
+            )
+            .await
+            .expect("send dm");
+        let mut app = App::new(owner, state, 100, 30).await.expect("app");
+        app.ui.dismiss_startup_splash();
+        (app, conversation_id)
+    }
+
     fn snapshot() -> Snapshot {
         Snapshot {
             current_username: Some("owner".to_string()),
@@ -136,6 +201,26 @@ mod cases {
             thread_title: Some("Deploy notes".to_string()),
             conversation_id: None,
             title: "Reply".to_string(),
+            body: body.to_string(),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            read_at: None,
+        }
+    }
+
+    fn dm_notification(index: i64, body: &str) -> NotificationSummary {
+        NotificationSummary {
+            id: format!("dm-notification-{index}"),
+            kind: "dm".to_string(),
+            source_kind: Some("dm".to_string()),
+            source_id: Some(format!("dm-message-{index}")),
+            source_obj_index: Some(index),
+            actor_username: Some("alice".to_string()),
+            channel_id: None,
+            channel_slug: None,
+            thread_id: None,
+            thread_title: None,
+            conversation_id: Some("dm".to_string()),
+            title: "New DM".to_string(),
             body: body.to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
             read_at: None,
@@ -295,6 +380,8 @@ mod cases {
 
         assert_eq!(app.ui.mode, UiMode::Normal);
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
         assert!(app.refresh_requested);
@@ -349,6 +436,8 @@ mod cases {
 
         assert_eq!(app.ui.mode, UiMode::Normal);
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
         assert_eq!(app.ui.route, Route::Dms);
         assert!(app.refresh_requested);
     }
@@ -626,6 +715,8 @@ mod cases {
             )
         });
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
     }
@@ -805,13 +896,13 @@ mod cases {
             author: "owner".to_string(),
             body: "Saved DM".to_string(),
             source_label: "DM @alice".to_string(),
-            channel_slug: None,
-            thread_title: None,
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("thread".to_string()),
             dm_peer_username: Some("alice".to_string()),
             saved_at: "2020-01-03T03:04:00Z".to_string(),
             created_at: "2020-01-02T03:04:00Z".to_string(),
-            channel_id: None,
-            thread_id: None,
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
             conversation_id: Some("dm".to_string()),
         }];
         app.ui.route = Route::Saved;
@@ -821,8 +912,35 @@ mod cases {
 
         assert_eq!(app.ui.route, Route::Dms);
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
         app.render().expect("render focused dm");
         assert_eq!(app.ui.detail_scroll.offset().y, 16);
+        assert_eq!(app.ui.pending_source_focus, None);
+    }
+
+    #[tokio::test]
+    async fn dm_notification_opens_conversation_and_clears_channel_selection() {
+        let mut app = test_app("dm-notification-focus").await;
+        app.snapshot.conversation_messages = (1..=5)
+            .map(|index| dm_message(index, "alice", &format!("DM {index}")))
+            .collect();
+        let mut notification = dm_notification(3, "DM body");
+        notification.channel_id = Some("general".to_string());
+        notification.channel_slug = Some("general".to_string());
+        notification.thread_id = Some("thread".to_string());
+        notification.thread_title = Some("thread".to_string());
+        app.snapshot.notifications = vec![notification];
+        app.ui.route = Route::Notifications;
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.activate_selection();
+
+        assert_eq!(app.ui.route, Route::Dms);
+        assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
+        app.render().expect("render focused dm");
         assert_eq!(app.ui.pending_source_focus, None);
     }
 
@@ -892,6 +1010,26 @@ mod cases {
 
         assert_eq!(app.history_limit, MAX_HISTORY_LIMIT);
         assert_eq!(app.ui.pending_source_focus, Some(SourceFocus::Comment(1)));
+    }
+
+    #[tokio::test]
+    async fn refresh_after_dm_source_selection_does_not_restore_channel_thread() {
+        let (mut app, conversation_id) = test_app_with_alice_dm("dm-refresh-source").await;
+        assert!(app.snapshot.selected_channel_id.is_some());
+        assert!(app.snapshot.selected_thread_id.is_some());
+
+        app.select_conversation(conversation_id.clone());
+        app.refresh().await.expect("refresh");
+
+        assert_eq!(app.ui.route, Route::Dms);
+        assert_eq!(
+            app.snapshot.selected_conversation_id.as_deref(),
+            Some(conversation_id.as_str())
+        );
+        assert!(app.snapshot.selected_channel_id.is_none());
+        assert!(app.snapshot.selected_thread_id.is_none());
+        assert!(app.snapshot.comments.is_empty());
+        assert!(app.snapshot.threads.is_empty());
     }
 
     #[tokio::test]

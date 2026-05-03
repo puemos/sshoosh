@@ -115,6 +115,12 @@ impl App {
                 .notifications_selected
                 .min(visible_len.saturating_sub(1));
         }
+        if matches!(
+            self.ui.route,
+            Route::Search | Route::Saved | Route::Notifications
+        ) {
+            self.clear_active_source_selection();
+        }
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
         self.refresh_requested = false;
@@ -197,6 +203,25 @@ impl App {
         self.snapshot.selected_conversation_id.clone()
     }
 
+    pub(crate) fn clear_channel_source_selection(&mut self) {
+        self.snapshot.selected_channel_id = None;
+        self.snapshot.selected_thread_id = None;
+        self.snapshot.threads.clear();
+        self.snapshot.comments.clear();
+        self.snapshot.comments_has_more = false;
+    }
+
+    pub(crate) fn clear_conversation_source_selection(&mut self) {
+        self.snapshot.selected_conversation_id = None;
+        self.snapshot.conversation_messages.clear();
+        self.snapshot.conversation_messages_has_more = false;
+    }
+
+    pub(crate) fn clear_active_source_selection(&mut self) {
+        self.clear_channel_source_selection();
+        self.clear_conversation_source_selection();
+    }
+
     pub(crate) fn terminal_title_update(&mut self) -> Option<Vec<u8>> {
         let title = self.current_terminal_title();
         if self.emitted_terminal_title.as_deref() == Some(title.as_str()) {
@@ -258,9 +283,9 @@ impl App {
 
     pub fn select_channel(&mut self, channel_id: String) {
         self.reset_history_limit();
+        self.clear_conversation_source_selection();
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = None;
-        self.snapshot.selected_conversation_id = None;
         self.snapshot.threads.clear();
         self.snapshot.comments.clear();
         self.ui.pending_source_focus = None;
@@ -273,9 +298,9 @@ impl App {
 
     pub fn select_thread(&mut self, channel_id: String, thread_id: String) {
         self.reset_history_limit();
+        self.clear_conversation_source_selection();
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = Some(thread_id);
-        self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
         self.reset_detail_scroll_to_bottom();
         self.ui.route = Route::Channel(channel_id);
@@ -302,6 +327,7 @@ impl App {
 
     pub fn select_conversation(&mut self, conversation_id: String) {
         self.reset_history_limit();
+        self.clear_channel_source_selection();
         self.snapshot.selected_conversation_id = Some(conversation_id);
         self.ui.pending_source_focus = None;
         self.reset_detail_scroll();
@@ -341,7 +367,7 @@ impl App {
         if !has_more {
             self.snapshot.search_next_cursor = None;
         }
-        self.snapshot.selected_conversation_id = None;
+        self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Search;
         self.ui.active_pane = ActivePane::Detail;
@@ -367,7 +393,7 @@ impl App {
         if !has_more {
             self.snapshot.saved_next_cursor = None;
         }
-        self.snapshot.selected_conversation_id = None;
+        self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Saved;
         self.ui.active_pane = ActivePane::Detail;
@@ -409,7 +435,7 @@ impl App {
         }
         self.snapshot.search_has_more = next_cursor.is_some();
         self.snapshot.search_next_cursor = next_cursor;
-        self.snapshot.selected_conversation_id = None;
+        self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Search;
         self.ui.active_pane = ActivePane::Detail;
@@ -434,7 +460,7 @@ impl App {
         self.snapshot.saved_messages.append(&mut messages);
         self.snapshot.saved_has_more = next_cursor.is_some();
         self.snapshot.saved_next_cursor = next_cursor;
-        self.snapshot.selected_conversation_id = None;
+        self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Saved;
         self.ui.active_pane = ActivePane::Detail;
@@ -448,8 +474,7 @@ impl App {
     ) {
         self.snapshot.notifications = notifications;
         self.snapshot.notifications_next_cursor = next_cursor;
-        self.snapshot.selected_thread_id = None;
-        self.snapshot.selected_conversation_id = None;
+        self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
         self.ui.route = Route::Notifications;
         self.ui.active_pane = ActivePane::Detail;
@@ -472,6 +497,7 @@ impl App {
     ) {
         self.snapshot.notifications.append(&mut notifications);
         self.snapshot.notifications_next_cursor = next_cursor;
+        self.clear_active_source_selection();
         self.ui.route = Route::Notifications;
         self.ui.active_pane = ActivePane::Detail;
     }

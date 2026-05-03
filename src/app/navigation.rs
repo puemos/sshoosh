@@ -349,8 +349,8 @@ impl App {
                 let changed = self.snapshot.selected_channel_id.as_deref()
                     != Some(channel_id.as_str())
                     || !matches!(self.ui.route, Route::Channel(_));
+                self.clear_conversation_source_selection();
                 self.snapshot.selected_channel_id = Some(channel_id.clone());
-                self.snapshot.selected_conversation_id = None;
                 self.ui.route = Route::Channel(channel_id);
                 self.ui.active_pane = ActivePane::Rail;
                 if changed {
@@ -365,8 +365,8 @@ impl App {
             WorkspaceRow::Thread(thread_id) => {
                 let changed =
                     self.snapshot.selected_thread_id.as_deref() != Some(thread_id.as_str());
+                self.clear_conversation_source_selection();
                 self.snapshot.selected_thread_id = Some(thread_id);
-                self.snapshot.selected_conversation_id = None;
                 self.snapshot.comments.clear();
                 if changed {
                     self.reset_detail_scroll_to_bottom();
@@ -381,16 +381,14 @@ impl App {
             WorkspaceRow::Saved => {
                 self.ui.route = Route::Saved;
                 self.ui.active_pane = ActivePane::Detail;
-                self.snapshot.selected_thread_id = None;
-                self.snapshot.selected_conversation_id = None;
+                self.clear_active_source_selection();
                 self.reset_detail_scroll();
                 self.actions.push(Action::ListSaved);
             }
             WorkspaceRow::Notifications => {
                 self.ui.route = Route::Notifications;
                 self.ui.active_pane = ActivePane::Detail;
-                self.snapshot.selected_thread_id = None;
-                self.snapshot.selected_conversation_id = None;
+                self.clear_active_source_selection();
                 self.reset_detail_scroll();
                 self.actions.push(Action::ListNotifications);
             }
@@ -401,6 +399,7 @@ impl App {
                 if let Some(conversation_id) = conversation_id {
                     let changed = self.snapshot.selected_conversation_id.as_deref()
                         != Some(conversation_id.as_str());
+                    self.clear_channel_source_selection();
                     self.snapshot.selected_conversation_id = Some(conversation_id);
                     self.ui.route = Route::Dms;
                     self.ui.active_pane = ActivePane::Rail;
@@ -475,10 +474,10 @@ impl App {
         else {
             return;
         };
-        if let (Some(channel_id), Some(thread_id)) = (result.channel_id, result.thread_id) {
-            self.select_thread(channel_id, thread_id);
-        } else if let Some(conversation_id) = result.conversation_id {
+        if let Some(conversation_id) = result.conversation_id {
             self.select_conversation(conversation_id);
+        } else if let (Some(channel_id), Some(thread_id)) = (result.channel_id, result.thread_id) {
+            self.select_thread(channel_id, thread_id);
         }
     }
 
@@ -491,14 +490,27 @@ impl App {
         else {
             return;
         };
-        let focus = match item.kind {
+        let focus = match &item.kind {
             SavedMessageKind::Comment => SourceFocus::Comment(item.source_obj_index),
             SavedMessageKind::Dm => SourceFocus::Dm(item.source_obj_index),
         };
-        if let (Some(channel_id), Some(thread_id)) = (item.channel_id, item.thread_id) {
-            self.select_thread_with_focus(channel_id, thread_id, focus);
-        } else if let Some(conversation_id) = item.conversation_id {
-            self.select_conversation_with_focus(conversation_id, focus);
+        match item.kind {
+            SavedMessageKind::Dm => {
+                if let Some(conversation_id) = item.conversation_id {
+                    self.select_conversation_with_focus(conversation_id, focus);
+                } else if let (Some(channel_id), Some(thread_id)) =
+                    (item.channel_id, item.thread_id)
+                {
+                    self.select_thread_with_focus(channel_id, thread_id, focus);
+                }
+            }
+            SavedMessageKind::Comment => {
+                if let (Some(channel_id), Some(thread_id)) = (item.channel_id, item.thread_id) {
+                    self.select_thread_with_focus(channel_id, thread_id, focus);
+                } else if let Some(conversation_id) = item.conversation_id {
+                    self.select_conversation_with_focus(conversation_id, focus);
+                }
+            }
         }
     }
 
@@ -522,7 +534,15 @@ impl App {
             Some("dm") => notification.source_obj_index.map(SourceFocus::Dm),
             _ => None,
         };
-        if let (Some(channel_id), Some(thread_id)) =
+        let is_dm_source = notification.source_kind.as_deref() == Some("dm");
+        let conversation_id = notification.conversation_id.clone();
+        if is_dm_source && let Some(conversation_id) = conversation_id.clone() {
+            if let Some(focus) = focus {
+                self.select_conversation_with_focus(conversation_id, focus);
+            } else {
+                self.select_conversation(conversation_id);
+            }
+        } else if let (Some(channel_id), Some(thread_id)) =
             (notification.channel_id, notification.thread_id)
         {
             if let Some(focus) = focus {
