@@ -15,10 +15,20 @@ mod cases {
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
             NotificationSummary, ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
+            UserPresence,
         },
     };
 
     use super::*;
+
+    fn user_presence(username: &str) -> UserPresence {
+        UserPresence {
+            username: username.to_string(),
+            display_name: username.to_string(),
+            last_seen_at: None,
+            connected: false,
+        }
+    }
 
     #[test]
     fn render_message_body_applies_inline_markdown_styles() {
@@ -114,6 +124,23 @@ mod cases {
             run_for_text(&lines, "@ShyAlter").style.fg,
             Some(theme::MENTION)
         );
+        assert_eq!(
+            run_for_text(&lines, "@ShyAlter")
+                .mention_username
+                .as_deref(),
+            Some("shyalter")
+        );
+    }
+
+    #[test]
+    fn render_message_body_records_canonical_mention_username() {
+        let valid_mentions = vec!["Alice.Smith".to_string()];
+        let lines =
+            render_message_body_with_mentions("please ask @alice.smith", 80, &valid_mentions);
+
+        let mention = run_for_text(&lines, "@alice.smith");
+        assert_eq!(mention.style.fg, Some(theme::MENTION));
+        assert_eq!(mention.mention_username.as_deref(), Some("Alice.Smith"));
     }
 
     #[test]
@@ -148,6 +175,9 @@ mod cases {
         );
         assert_eq!(mention_runs[1].style.fg, Some(theme::SUBTLE));
         assert_eq!(mention_runs[2].style.fg, Some(theme::MENTION));
+        assert_eq!(mention_runs[2].mention_username.as_deref(), Some("alice"));
+        assert_eq!(mention_runs[0].mention_username, None);
+        assert_eq!(mention_runs[1].mention_username, None);
     }
 
     #[test]
@@ -167,6 +197,23 @@ mod cases {
                 .add_modifier
                 .contains(Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn render_message_body_preserves_mention_metadata_when_wrapping() {
+        let valid_mentions = vec!["Alice".to_string()];
+        let lines = render_message_body_with_mentions("@alice ok", 3, &valid_mentions);
+
+        assert_eq!(styled_lines_text(&lines), "@al\nice\nok");
+        assert_eq!(
+            run_for_text(&lines, "@al").mention_username.as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(
+            run_for_text(&lines, "ice").mention_username.as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(run_for_text(&lines, "ok").mention_username, None);
     }
 
     #[test]
@@ -1585,6 +1632,255 @@ mod cases {
         assert_eq!(link_region.rect.x, alice_x + "Looks good ".len() as u16);
         assert_eq!(link_region.rect.y, alice_y);
         assert_eq!(link_region.rect.width, "https://example.com".len() as u16);
+    }
+
+    #[test]
+    fn render_thread_detail_registers_body_mention_hit_regions() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "owner".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![
+                user_presence("owner"),
+                user_presence("alice"),
+                user_presence("bob"),
+            ],
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: String::new(),
+                author: "owner".to_string(),
+                comment_count: 1,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            comments: vec![CommentItem {
+                id: "comment-1".to_string(),
+                author: "bob".to_string(),
+                obj_index: 1,
+                body: "Ping (@alice), ok".to_string(),
+                created_at: "2020-01-02T03:05:00Z".to_string(),
+                edited_at: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (mention_x, mention_y) =
+            position_for_text(buffer, width, height, "@alice").expect("body mention");
+        let mention_region = ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(&region.target, HitTarget::MessageMention(username) if username == "alice")
+            })
+            .expect("mention hit region");
+
+        assert_eq!(mention_region.rect.x, mention_x);
+        assert_eq!(mention_region.rect.y, mention_y);
+        assert_eq!(mention_region.rect.width, "@alice".len() as u16);
+    }
+
+    #[test]
+    fn render_thread_detail_only_registers_clickable_body_mentions() {
+        let width = 120;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "owner".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![
+                user_presence("owner"),
+                user_presence("alice"),
+                user_presence("bob"),
+                user_presence("carol"),
+            ],
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: String::new(),
+                author: "owner".to_string(),
+                comment_count: 1,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            comments: vec![CommentItem {
+                id: "comment-1".to_string(),
+                author: "bob".to_string(),
+                obj_index: 1,
+                body:
+                    "Link [@alice](https://example.com), code `@bob`, missing @missing, ok @carol"
+                        .to_string(),
+                created_at: "2020-01-02T03:05:00Z".to_string(),
+                edited_at: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+
+        let mention_targets: Vec<_> = ui
+            .hit_map
+            .entries()
+            .iter()
+            .filter_map(|region| match &region.target {
+                HitTarget::MessageMention(username) => Some(username.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(mention_targets, vec!["carol"]);
+    }
+
+    #[test]
+    fn render_thread_detail_does_not_register_self_mention_hits() {
+        let width = 100;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "owner".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![user_presence("owner"), user_presence("bob")],
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: String::new(),
+                author: "owner".to_string(),
+                comment_count: 1,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            comments: vec![CommentItem {
+                id: "comment-1".to_string(),
+                author: "bob".to_string(),
+                obj_index: 1,
+                body: "Ping @owner".to_string(),
+                created_at: "2020-01-02T03:05:00Z".to_string(),
+                edited_at: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (mention_x, mention_y) =
+            position_for_text(buffer, width, height, "@owner").expect("self mention");
+
+        assert_eq!(
+            buffer
+                .cell((mention_x, mention_y))
+                .expect("self mention")
+                .fg,
+            theme::MENTION
+        );
+        assert!(!ui.hit_map.entries().iter().any(|region| {
+            matches!(&region.target, HitTarget::MessageMention(username) if username == "owner")
+        }));
     }
 
     #[test]

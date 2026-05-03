@@ -124,6 +124,7 @@ impl App {
             Some(HitRegion {
                 target:
                     HitTarget::MessageLink(_)
+                    | HitTarget::MessageMention(_)
                     | HitTarget::ReactionChip { .. }
                     | HitTarget::ReactionAdd { .. }
                     | HitTarget::SearchResult(_)
@@ -158,7 +159,8 @@ impl App {
             | HitTarget::EditableMessage(_)
             | HitTarget::ReactionChip { .. }
             | HitTarget::ReactionAdd { .. }
-            | HitTarget::MessageLink(_) => self.move_detail(delta),
+            | HitTarget::MessageLink(_)
+            | HitTarget::MessageMention(_) => self.move_detail(delta),
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
                 for _ in 0..steps {
@@ -339,6 +341,10 @@ impl App {
             HitTarget::MessageLink(url) => {
                 self.ui.active_pane = ActivePane::Detail;
                 self.pending_link_open = Some(url);
+            }
+            HitTarget::MessageMention(username) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.actions.push(Action::OpenDm { target: username });
             }
             HitTarget::ComposerInput { scroll_y } => {
                 if self.account.activated && self.ui.mode != UiMode::Compose {
@@ -698,6 +704,7 @@ impl App {
                 hit.target,
                 HitTarget::DetailScroll
                     | HitTarget::MessageLink(_)
+                    | HitTarget::MessageMention(_)
                     | HitTarget::ReactionChip { .. }
                     | HitTarget::ReactionAdd { .. }
             ) {

@@ -90,6 +90,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let content_area = scroll_content_area(messages_area);
     let message_width = message_content_width(content_area);
     let mut link_hits = Vec::new();
+    let mut mention_hits = Vec::new();
     let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
@@ -132,6 +133,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut mention_hits,
                 &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
@@ -197,6 +199,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut mention_hits,
                 &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
@@ -231,6 +234,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
+    register_mention_hits(ui, content_area, mention_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
@@ -1063,6 +1067,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let message_width = message_content_width(content_area);
     let mut items: Vec<ListItem> = Vec::new();
     let mut link_hits = Vec::new();
+    let mut mention_hits = Vec::new();
     let mut reaction_hits = Vec::new();
     let mut card_hits = Vec::new();
     let mut selection_hits = Vec::new();
@@ -1129,6 +1134,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             append_message_card(
                 &mut items,
                 &mut link_hits,
+                &mut mention_hits,
                 &mut reaction_hits,
                 &mut card_hits,
                 &mut selection_hits,
@@ -1150,6 +1156,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_card_hits(ui, content_area, card_hits, ui.detail_scroll.offset().y);
+    register_mention_hits(ui, content_area, mention_hits, ui.detail_scroll.offset().y);
     register_reaction_hits(ui, content_area, reaction_hits, ui.detail_scroll.offset().y);
     register_link_hits(ui, content_area, link_hits, ui.detail_scroll.offset().y);
     register_message_selection_regions(
