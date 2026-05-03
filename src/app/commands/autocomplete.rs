@@ -171,6 +171,23 @@ pub(crate) fn autocomplete_mentions(
     )
 }
 
+pub(crate) fn autocomplete_labels(
+    buffer: &str,
+    cursor: usize,
+    snapshot: &Snapshot,
+) -> AutocompleteState {
+    let Some((range, prefix)) = active_label_token(buffer, cursor) else {
+        return AutocompleteState::default();
+    };
+    autocomplete_arguments(
+        range,
+        prefix,
+        label_suggestions(snapshot),
+        "Message label",
+        true,
+    )
+}
+
 pub(crate) fn autocomplete_emojis(buffer: &str, cursor: usize) -> AutocompleteState {
     autocomplete_emojis_with_options(buffer, cursor, false)
 }
@@ -261,6 +278,38 @@ fn active_mention_token(buffer: &str, cursor: usize) -> Option<(Range<usize>, &s
 
 fn is_mention_name_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
+}
+
+fn active_label_token(buffer: &str, cursor: usize) -> Option<(Range<usize>, &str)> {
+    let cursor = cursor.min(buffer.len());
+    if !buffer.is_char_boundary(cursor) {
+        return None;
+    }
+
+    let (start, _) = buffer[..cursor]
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| *ch == '$')?;
+    if !crate::service::is_label_boundary(buffer, start) {
+        return None;
+    }
+
+    let prefix_start = start + '$'.len_utf8();
+    let prefix = &buffer[prefix_start..cursor];
+    if !prefix.chars().all(is_label_name_char) {
+        return None;
+    }
+
+    let suffix_len = buffer[cursor..]
+        .chars()
+        .take_while(|ch| is_label_name_char(*ch))
+        .map(char::len_utf8)
+        .sum::<usize>();
+    Some((start..cursor + suffix_len, prefix))
+}
+
+fn is_label_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
 }
 
 fn active_emoji_token(buffer: &str, cursor: usize) -> Option<(Range<usize>, &str)> {
@@ -378,7 +427,7 @@ pub(crate) fn autocomplete_arguments_with_empty_enter(
     accept_on_enter: bool,
     accept_empty_on_enter: bool,
 ) -> AutocompleteState {
-    let arg_prefix = arg_prefix.trim_start_matches(['#', '@']);
+    let arg_prefix = arg_prefix.trim_start_matches(['#', '@', '$']);
     let mut items: Vec<_> = suggestions
         .into_iter()
         .filter_map(|(label, detail)| {

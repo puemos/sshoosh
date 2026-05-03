@@ -399,6 +399,74 @@ mod cases {
     }
 
     #[test]
+    fn label_autocomplete_replaces_active_token_in_message() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            hot_labels: vec![
+                crate::service::HotLabel {
+                    tag: "incident".to_string(),
+                    count: 12,
+                    latest_at: "2026-05-03T12:00:00Z".to_string(),
+                },
+                crate::service::HotLabel {
+                    tag: "deploy".to_string(),
+                    count: 4,
+                    latest_at: "2026-05-03T12:00:00Z".to_string(),
+                },
+            ],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("tracking $inc", 13, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "$incident");
+        assert_eq!(state.items[0].replacement_range, 9..13);
+        assert_eq!(state.items[0].detail, "12 messages");
+        assert_eq!(state.items[0].preview, "Message label");
+        assert!(state.items[0].accept_on_enter);
+        assert!(state.items[0].accept_on_tab);
+    }
+
+    #[test]
+    fn bare_label_opens_without_enter_acceptance() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            hot_labels: vec![crate::service::HotLabel {
+                tag: "incident".to_string(),
+                count: 1,
+                latest_at: "2026-05-03T12:00:00Z".to_string(),
+            }],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("$", 1, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "$incident");
+        assert_eq!(state.items[0].replacement_range, 0..1);
+        assert_eq!(state.items[0].detail, "1 message");
+        assert!(!state.items[0].accept_on_enter);
+        assert!(state.items[0].accept_on_tab);
+    }
+
+    #[test]
+    fn label_autocomplete_requires_label_boundary() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            hot_labels: vec![crate::service::HotLabel {
+                tag: "incident".to_string(),
+                count: 1,
+                latest_at: "2026-05-03T12:00:00Z".to_string(),
+            }],
+            ..Snapshot::default()
+        };
+
+        for input in ["abc$inc", "abc_$inc"] {
+            let state = registry.autocomplete(input, input.len(), &snapshot);
+            assert!(!state.open, "{input}");
+        }
+    }
+
+    #[test]
     fn mention_autocomplete_preserves_surrounding_token_range() {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {

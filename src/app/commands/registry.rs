@@ -269,6 +269,10 @@ impl CommandRegistry {
             if mention.open {
                 return mention;
             }
+            let label = autocomplete_labels(buffer, cursor, snapshot);
+            if label.open {
+                return label;
+            }
             return autocomplete_emojis(buffer, cursor);
         }
         let cursor = cursor.min(buffer.len());
