@@ -198,6 +198,18 @@ mod cases {
                     query: "deploy notes".to_string(),
                 },
             ),
+            (
+                "/label $incident",
+                Action::OpenLabel {
+                    tag: "$incident".to_string(),
+                },
+            ),
+            (
+                "/tag deploy-2026",
+                Action::OpenLabel {
+                    tag: "deploy-2026".to_string(),
+                },
+            ),
             ("/more", Action::LoadMore),
             ("/older", Action::LoadOlder),
             (
@@ -307,6 +319,37 @@ mod cases {
         assert_eq!(state.items[0].replacement, "open ");
         assert!(state.items[0].accept_on_enter);
         assert!(state.items[0].accept_on_tab);
+    }
+
+    #[test]
+    fn label_autocomplete_uses_hot_labels() {
+        let registry = CommandRegistry::default();
+        let snapshot = Snapshot {
+            hot_labels: vec![
+                crate::service::HotLabel {
+                    tag: "incident".to_string(),
+                    count: 12,
+                    latest_at: "2026-05-03T12:00:00Z".to_string(),
+                },
+                crate::service::HotLabel {
+                    tag: "deploy".to_string(),
+                    count: 4,
+                    latest_at: "2026-05-03T12:00:00Z".to_string(),
+                },
+            ],
+            ..Snapshot::default()
+        };
+
+        let state = registry.autocomplete("/label inc", 13, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "$incident");
+        assert_eq!(state.items[0].detail, "12 messages");
+        assert!(state.items[0].accept_on_enter);
+
+        let state = registry.autocomplete("/tag ", 5, &snapshot);
+        assert!(state.open);
+        assert_eq!(state.items[0].replacement, "$incident");
+        assert!(!state.items[0].accept_on_enter);
     }
 
     #[test]

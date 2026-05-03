@@ -579,6 +579,23 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                 Err(err) => Err(err),
             }
         }
+        Action::OpenLabel { tag } => {
+            let tag = crate::service::normalize_label(&tag)
+                .ok_or_else(|| anyhow::anyhow!("Label is required"))?;
+            let limit = app.lock().await.reset_label_limit();
+            match session
+                .label_feed_page_after(&account_id, &tag, PageRequest::first(limit))
+                .await
+            {
+                Ok(page) => {
+                    app.lock()
+                        .await
+                        .set_label_feed_page(tag, page.items, page.next_cursor, true);
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
         Action::ListSaved => {
             let limit = app.lock().await.reset_saved_limit();
             match session
@@ -645,27 +662,55 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                         }
                         Err(err) => Err(err),
                     }
-                } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
-                    match session
-                        .list_notifications_page(
-                            &account_id,
-                            PageRequest {
-                                limit: 50,
-                                cursor: Some(cursor),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(page) => {
-                            app.lock()
-                                .await
-                                .append_notifications(page.items, page.next_cursor);
-                            Ok(ActionResult::silent())
-                        }
-                        Err(err) => Err(err),
-                    }
                 } else {
-                    Ok(ActionResult::silent())
+                    let label_request = {
+                        let app = app.lock().await;
+                        app.label_page_request()
+                    };
+                    if let Some((tag, Some(cursor))) = label_request {
+                        match session
+                            .label_feed_page_after(
+                                &account_id,
+                                &tag,
+                                PageRequest {
+                                    limit: 50,
+                                    cursor: Some(cursor),
+                                },
+                            )
+                            .await
+                        {
+                            Ok(page) => {
+                                app.lock().await.append_label_feed(
+                                    tag,
+                                    page.items,
+                                    page.next_cursor,
+                                );
+                                Ok(ActionResult::silent())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
+                        match session
+                            .list_notifications_page(
+                                &account_id,
+                                PageRequest {
+                                    limit: 50,
+                                    cursor: Some(cursor),
+                                },
+                            )
+                            .await
+                        {
+                            Ok(page) => {
+                                app.lock()
+                                    .await
+                                    .append_notifications(page.items, page.next_cursor);
+                                Ok(ActionResult::silent())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Ok(ActionResult::silent())
+                    }
                 }
             }
         }

@@ -229,6 +229,21 @@ pub(crate) async fn create_thread(
         },
     )
     .await?;
+    let label_text = thread_label_text(title, body);
+    replace_labels_tx(
+        &mut tx,
+        LabelIndexInput {
+            source_kind: "thread",
+            source_id: &thread_id,
+            channel_id: Some(channel_id),
+            thread_id: Some(&thread_id),
+            conversation_id: None,
+            obj_index: None,
+            text: &label_text,
+            created_at: &now,
+        },
+    )
+    .await?;
     insert_event(
         &mut tx,
         Some(channel_id),
@@ -371,6 +386,20 @@ pub(crate) async fn add_comment(
             obj_index: next_index,
             title: &thread_title,
             body,
+        },
+    )
+    .await?;
+    replace_labels_tx(
+        &mut tx,
+        LabelIndexInput {
+            source_kind: "comment",
+            source_id: &comment_id,
+            channel_id: Some(&channel_id),
+            thread_id: Some(thread_id),
+            conversation_id: None,
+            obj_index: Some(next_index),
+            text: body,
+            created_at: &now,
         },
     )
     .await?;
@@ -566,6 +595,20 @@ pub(crate) async fn send_dm(
             obj_index: Some(next_index),
             title: "DM",
             body,
+        },
+    )
+    .await?;
+    replace_labels_tx(
+        &mut tx,
+        LabelIndexInput {
+            source_kind: "dm",
+            source_id: &message_id,
+            channel_id: None,
+            thread_id: None,
+            conversation_id: Some(conversation_id),
+            obj_index: Some(next_index),
+            text: body,
+            created_at: &now,
         },
     )
     .await?;

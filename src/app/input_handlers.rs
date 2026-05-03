@@ -127,13 +127,17 @@ impl App {
                     | HitTarget::ReactionChip { .. }
                     | HitTarget::ReactionAdd { .. }
                     | HitTarget::SearchResult(_)
+                    | HitTarget::LabelResult(_)
                     | HitTarget::SavedResult(_)
                     | HitTarget::NotificationResult(_)
                     | HitTarget::NotificationFilter(_)
                     | HitTarget::NotificationReadAll
                     | HitTarget::NotificationArchiveAll
                     | HitTarget::TopbarMentions
-                    | HitTarget::ListModalRow(_),
+                    | HitTarget::ListModalRow(_)
+                    | HitTarget::WorkspaceLabel(_)
+                    | HitTarget::WorkspaceLabelsMore
+                    | HitTarget::MessageLabel(_),
                 ..
             }) => PointerShape::Pointer,
             _ => PointerShape::Default,
@@ -145,11 +149,14 @@ impl App {
             HitTarget::WorkspaceScroll
             | HitTarget::WorkspaceChannel(_)
             | HitTarget::WorkspaceThread(_)
+            | HitTarget::WorkspaceLabel(_)
+            | HitTarget::WorkspaceLabelsMore
             | HitTarget::WorkspaceSaved
             | HitTarget::WorkspaceNotifications
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll
             | HitTarget::SearchResult(_)
+            | HitTarget::LabelResult(_)
             | HitTarget::SavedResult(_)
             | HitTarget::NotificationResult(_)
             | HitTarget::NotificationFilter(_)
@@ -158,7 +165,8 @@ impl App {
             | HitTarget::EditableMessage(_)
             | HitTarget::ReactionChip { .. }
             | HitTarget::ReactionAdd { .. }
-            | HitTarget::MessageLink(_) => self.move_detail(delta),
+            | HitTarget::MessageLink(_)
+            | HitTarget::MessageLabel(_) => self.move_detail(delta),
             HitTarget::AutocompleteScroll | HitTarget::AutocompleteRow(_) => {
                 let steps = delta.unsigned_abs().max(1);
                 for _ in 0..steps {
@@ -272,6 +280,8 @@ impl App {
                     self.select_thread(channel_id, thread_id);
                 }
             }
+            HitTarget::WorkspaceLabel(tag) => self.apply_workspace_row(WorkspaceRow::Label(tag)),
+            HitTarget::WorkspaceLabelsMore => self.apply_workspace_row(WorkspaceRow::LabelsMore),
             HitTarget::WorkspaceSaved => self.apply_workspace_row(WorkspaceRow::Saved),
             HitTarget::WorkspaceNotifications => {
                 self.apply_workspace_row(WorkspaceRow::Notifications)
@@ -293,6 +303,11 @@ impl App {
                 self.ui.active_pane = ActivePane::Detail;
                 self.ui.search_selected = index;
                 self.activate_search_result();
+            }
+            HitTarget::LabelResult(index) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.label_selected = index;
+                self.activate_label_result();
             }
             HitTarget::SavedResult(index) => {
                 self.ui.active_pane = ActivePane::Detail;
@@ -339,6 +354,10 @@ impl App {
             HitTarget::MessageLink(url) => {
                 self.ui.active_pane = ActivePane::Detail;
                 self.pending_link_open = Some(url);
+            }
+            HitTarget::MessageLabel(tag) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.actions.push(Action::OpenLabel { tag });
             }
             HitTarget::ComposerInput { scroll_y } => {
                 if self.account.activated && self.ui.mode != UiMode::Compose {
@@ -414,7 +433,7 @@ impl App {
     pub(crate) fn activate_result_at_mouse_position(&mut self, _rect: Rect, mouse: MouseEvent) {
         if !matches!(
             self.ui.route,
-            Route::Search | Route::Saved | Route::Notifications
+            Route::Search | Route::Label(_) | Route::Saved | Route::Notifications
         ) {
             return;
         }
@@ -426,6 +445,10 @@ impl App {
             HitTarget::SearchResult(index) if index < self.snapshot.search_results.len() => {
                 self.ui.search_selected = index;
                 self.activate_search_result();
+            }
+            HitTarget::LabelResult(index) if index < self.snapshot.label_items.len() => {
+                self.ui.label_selected = index;
+                self.activate_label_result();
             }
             HitTarget::SavedResult(index) if index < self.snapshot.saved_messages.len() => {
                 self.ui.saved_selected = index;
@@ -445,6 +468,7 @@ impl App {
         matches!(
             (&self.ui.route, target),
             (Route::Search, HitTarget::SearchResult(_))
+                | (Route::Label(_), HitTarget::LabelResult(_))
                 | (Route::Saved, HitTarget::SavedResult(_))
                 | (Route::Notifications, HitTarget::NotificationResult(_))
         )
@@ -698,6 +722,7 @@ impl App {
                 hit.target,
                 HitTarget::DetailScroll
                     | HitTarget::MessageLink(_)
+                    | HitTarget::MessageLabel(_)
                     | HitTarget::ReactionChip { .. }
                     | HitTarget::ReactionAdd { .. }
             ) {

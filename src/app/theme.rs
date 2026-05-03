@@ -176,6 +176,13 @@ pub fn message_mention() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+pub fn message_label() -> Style {
+    Style::default()
+        .fg(ACCENT)
+        .bg(CARD)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn message_link() -> Style {
     Style::default()
         .fg(ACCENT_SOFT)

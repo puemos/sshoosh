@@ -1,4 +1,7 @@
 use super::*;
+use crate::service::normalize_label;
+
+pub(crate) const LABEL_LINK_PREFIX: &str = "label:";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StyledRun {
     pub(crate) text: String,
@@ -150,11 +153,28 @@ pub(crate) fn push_text_with_mentions(
     state: &InlineMarkdownState,
     valid_mentions: &[String],
 ) {
-    while let Some((start, end)) = find_valid_mention(text, valid_mentions) {
+    loop {
+        let mention = find_valid_mention(text, valid_mentions)
+            .map(|(start, end)| (start, end, None, markdown_mention_style(state)));
+        let label = find_valid_label(text).map(|(start, end, tag)| {
+            (
+                start,
+                end,
+                Some(format!("{LABEL_LINK_PREFIX}{tag}")),
+                markdown_label_style(state),
+            )
+        });
+        let Some((start, end, link_url, style)) = [mention, label]
+            .into_iter()
+            .flatten()
+            .min_by_key(|(start, _, _, _)| *start)
+        else {
+            break;
+        };
         if start > 0 {
             push_run(runs, &text[..start], markdown_text_style(state), None);
         }
-        push_run(runs, &text[start..end], markdown_mention_style(state), None);
+        push_run(runs, &text[start..end], style, link_url.as_deref());
         text = &text[end..];
     }
     if !text.is_empty() {
@@ -184,6 +204,29 @@ pub(crate) fn find_valid_mention(text: &str, valid_mentions: &[String]) -> Optio
             .any(|valid| valid.eq_ignore_ascii_case(username))
         {
             return Some((idx, end));
+        }
+    }
+    None
+}
+
+pub(crate) fn find_valid_label(text: &str) -> Option<(usize, usize, String)> {
+    for (idx, ch) in text.char_indices() {
+        if ch != '$' || !crate::service::is_label_boundary(text, idx) {
+            continue;
+        }
+        let mut end = idx + ch.len_utf8();
+        for (offset, next) in text[end..].char_indices() {
+            if next.is_ascii_alphanumeric() || matches!(next, '_' | '-') {
+                end = idx + ch.len_utf8() + offset + next.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end == idx + ch.len_utf8() {
+            continue;
+        }
+        if let Some(tag) = normalize_label(&text[idx + ch.len_utf8()..end]) {
+            return Some((idx, end, tag));
         }
     }
     None
@@ -253,6 +296,10 @@ pub(crate) fn markdown_link_style(state: &InlineMarkdownState) -> Style {
 
 pub(crate) fn markdown_mention_style(state: &InlineMarkdownState) -> Style {
     apply_markdown_modifiers(theme::message_mention(), state)
+}
+
+pub(crate) fn markdown_label_style(state: &InlineMarkdownState) -> Style {
+    apply_markdown_modifiers(theme::message_label(), state)
 }
 
 pub(crate) fn apply_markdown_modifiers(mut style: Style, state: &InlineMarkdownState) -> Style {
@@ -347,14 +394,7 @@ pub(crate) fn push_run(
     }
 }
 
-pub(crate) fn literal_runs(line: &str) -> Vec<StyledRun> {
-    vec![StyledRun::new(line, theme::message_body())]
-}
-
 pub(crate) fn literal_runs_with_mentions(line: &str, valid_mentions: &[String]) -> Vec<StyledRun> {
-    if valid_mentions.is_empty() {
-        return literal_runs(line);
-    }
     let mut runs = Vec::new();
     push_text_with_mentions(
         &mut runs,

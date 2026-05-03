@@ -33,6 +33,10 @@ impl ServerState {
             .bind(&thread.channel_id)
             .fetch_one(&mut tx)
             .await?;
+        let created_at: String = query_scalar("SELECT created_at FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_one(&mut tx)
+            .await?;
         upsert_search_index_tx(
             &mut tx,
             SearchIndexInput {
@@ -44,6 +48,21 @@ impl ServerState {
                 title,
                 body,
                 context: &format!("#{channel_slug}"),
+            },
+        )
+        .await?;
+        let label_text = thread_label_text(title, body);
+        replace_labels_tx(
+            &mut tx,
+            LabelIndexInput {
+                source_kind: "thread",
+                source_id: thread_id,
+                channel_id: Some(&thread.channel_id),
+                thread_id: Some(thread_id),
+                conversation_id: None,
+                obj_index: None,
+                text: &label_text,
+                created_at: &created_at,
             },
         )
         .await?;
@@ -96,6 +115,10 @@ impl ServerState {
             .bind(&thread.channel_id)
             .fetch_one(&mut tx)
             .await?;
+        let created_at: String = query_scalar("SELECT created_at FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_one(&mut tx)
+            .await?;
         upsert_search_index_tx(
             &mut tx,
             SearchIndexInput {
@@ -107,6 +130,21 @@ impl ServerState {
                 title,
                 body: &thread.body,
                 context: &format!("#{channel_slug}"),
+            },
+        )
+        .await?;
+        let label_text = thread_label_text(title, &thread.body);
+        replace_labels_tx(
+            &mut tx,
+            LabelIndexInput {
+                source_kind: "thread",
+                source_id: thread_id,
+                channel_id: Some(&thread.channel_id),
+                thread_id: Some(thread_id),
+                conversation_id: None,
+                obj_index: None,
+                text: &label_text,
+                created_at: &created_at,
             },
         )
         .await?;
@@ -423,6 +461,19 @@ impl ServerState {
         request: PageRequest,
     ) -> anyhow::Result<Page<SavedMessageItem>> {
         load_saved_messages_page(self.db.read_pool(), actor_id, request).await
+    }
+
+    pub async fn hot_labels(&self, actor_id: &str, limit: i64) -> anyhow::Result<Vec<HotLabel>> {
+        load_hot_labels(self.db.read_pool(), actor_id, limit).await
+    }
+
+    pub async fn label_feed_page_after(
+        &self,
+        actor_id: &str,
+        tag: &str,
+        request: PageRequest,
+    ) -> anyhow::Result<Page<LabelFeedItem>> {
+        load_label_feed_page(self.db.read_pool(), actor_id, tag, request).await
     }
 }
 

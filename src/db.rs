@@ -23,6 +23,8 @@ use tokio::sync::Mutex;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::domain::parse_labels;
+
 const MIGRATION_INITIAL: &str = include_str!("../migrations/20260430000000_initial.sql");
 const MIGRATION_PENDING_USERNAME: &str =
     include_str!("../migrations/20260430000001_pending_username.sql");
@@ -38,6 +40,8 @@ const MIGRATION_DM_SIDEBAR_SCALE: &str =
     include_str!("../migrations/20260501000003_dm_sidebar_scale.sql");
 const MIGRATION_DEVICE_LINK_TOKENS: &str =
     include_str!("../migrations/20260501000004_device_link_tokens.sql");
+const MIGRATION_MESSAGE_LABELS: &str =
+    include_str!("../migrations/20260501000005_message_labels.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -366,6 +370,7 @@ impl Database {
                 "20260501000004_device_link_tokens",
                 MIGRATION_DEVICE_LINK_TOKENS,
             ),
+            ("20260501000005_message_labels", MIGRATION_MESSAGE_LABELS),
         ] {
             let exists: Option<String> =
                 query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")
@@ -407,8 +412,107 @@ impl Database {
                 .execute_unchecked(self)
                 .await?;
         }
+        self.backfill_message_labels_once().await?;
         self.validate_encryption(self.allow_plaintext_encryption_migration)
             .await?;
+        Ok(())
+    }
+
+    async fn backfill_message_labels_once(&self) -> anyhow::Result<()> {
+        let version = "20260501000005_message_labels_backfill";
+        let exists: Option<String> =
+            query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")
+                .bind(version)
+                .fetch_optional_unchecked(self)
+                .await?;
+        if exists.is_some() {
+            return Ok(());
+        }
+        self.backfill_message_labels().await?;
+        query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
+            .bind(version)
+            .bind(now())
+            .execute_unchecked(self)
+            .await?;
+        Ok(())
+    }
+
+    async fn backfill_message_labels(&self) -> anyhow::Result<()> {
+        let mut tx = self.transaction_unchecked().await?;
+        let rows = query(
+            "SELECT 'thread' AS source_kind,
+                    t.id AS source_id,
+                    t.channel_id,
+                    t.id AS thread_id,
+                    NULL AS conversation_id,
+                    NULL AS obj_index,
+                    t.title,
+                    t.body,
+                    t.created_at
+             FROM threads t
+             WHERE t.deleted_at IS NULL
+             UNION ALL
+             SELECT 'comment' AS source_kind,
+                    cm.id AS source_id,
+                    cm.channel_id,
+                    cm.thread_id,
+                    NULL AS conversation_id,
+                    cm.obj_index,
+                    '' AS title,
+                    cm.body,
+                    cm.created_at
+             FROM comments cm
+             JOIN threads t ON t.id = cm.thread_id
+             WHERE cm.deleted_at IS NULL AND t.deleted_at IS NULL
+             UNION ALL
+             SELECT 'dm' AS source_kind,
+                    dm.id AS source_id,
+                    NULL AS channel_id,
+                    NULL AS thread_id,
+                    dm.conversation_id,
+                    dm.obj_index,
+                    '' AS title,
+                    dm.body,
+                    dm.created_at
+             FROM conversation_messages dm
+             WHERE dm.deleted_at IS NULL",
+        )
+        .fetch_all_unchecked(&mut tx)
+        .await?;
+        for row in rows {
+            let source_kind: String = row.get("source_kind")?;
+            let source_id: String = row.get("source_id")?;
+            let channel_id: Option<String> = row.get("channel_id")?;
+            let thread_id: Option<String> = row.get("thread_id")?;
+            let conversation_id: Option<String> = row.get("conversation_id")?;
+            let obj_index: Option<i64> = row.get("obj_index")?;
+            let title: String = row.get("title")?;
+            let body: String = row.get("body")?;
+            let created_at: String = row.get("created_at")?;
+            let text = if title.is_empty() {
+                body
+            } else {
+                format!("{title}\n{body}")
+            };
+            for tag in parse_labels(&text) {
+                query(
+                    "INSERT OR IGNORE INTO message_labels
+                     (tag, source_kind, source_id, channel_id, thread_id, conversation_id, obj_index, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(tag)
+                .bind(&source_kind)
+                .bind(&source_id)
+                .bind(channel_id.as_deref())
+                .bind(thread_id.as_deref())
+                .bind(conversation_id.as_deref())
+                .bind(obj_index)
+                .bind(&created_at)
+                .execute_unchecked(&mut tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
         Ok(())
     }
 

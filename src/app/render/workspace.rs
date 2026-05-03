@@ -53,18 +53,21 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         ui.hit_map.push(saved_area, HitTarget::WorkspaceSaved);
     }
 
+    let next_y = area.y.saturating_add(3);
     let channel_header_area = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        next_y,
         area.width,
-        area.height.saturating_sub(3),
+        area.y.saturating_add(area.height).saturating_sub(next_y),
     );
     draw_workspace_header(frame, channel_header_area, "Channels", ui);
     let scroll_area = Rect::new(
         area.x,
-        area.y.saturating_add(4),
+        next_y.saturating_add(1),
         area.width,
-        area.height.saturating_sub(4),
+        area.y
+            .saturating_add(area.height)
+            .saturating_sub(next_y.saturating_add(1)),
     );
     for channel in &snapshot.channels {
         let row = items.len() as u16;
@@ -163,6 +166,43 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             },
         ));
     }
+    let (labels, labels_has_more) = workspace_label_rows(snapshot, ui);
+    if !labels.is_empty() {
+        items.push(ListItem::new(""));
+        items.push(ListItem::new(Line::from(Span::styled(
+            "Labels",
+            theme::section_header(matches!(&ui.route, Route::Label(_))),
+        ))));
+        for tag in labels {
+            let row = items.len() as u16;
+            let selected = matches!(&ui.route, Route::Label(active) if active == &tag.tag);
+            let count_badge = if tag.count > 0 {
+                format!(" {}", tag.count)
+            } else {
+                String::new()
+            };
+            let label = truncate_text(
+                format!("${}", tag.tag),
+                row_width.saturating_sub(count_badge.len()),
+            );
+            if selected {
+                selected_y = Some(row);
+            }
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(label, workspace_label_feed_style(selected)),
+                Span::styled(count_badge, theme::muted()),
+            ])));
+            row_hits.push((row, HitTarget::WorkspaceLabel(tag.tag)));
+        }
+        if labels_has_more {
+            let row = items.len() as u16;
+            items.push(ListItem::new(Line::from(Span::styled(
+                "[more]",
+                theme::muted(),
+            ))));
+            row_hits.push((row, HitTarget::WorkspaceLabelsMore));
+        }
+    }
     ensure_scroll_row_visible(&mut ui.workspace_scroll, selected_y, scroll_area.height);
     let scroll_offset_y = ui.workspace_scroll.offset().y;
     register_scroll_hits(
@@ -173,6 +213,38 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         scroll_offset_y,
     );
     render_scroll_items(frame, scroll_area, items, &mut ui.workspace_scroll);
+}
+
+const COLLAPSED_LABEL_LIMIT: usize = 5;
+
+#[derive(Clone)]
+struct WorkspaceLabelRow {
+    tag: String,
+    count: i64,
+}
+
+fn workspace_label_rows(snapshot: &Snapshot, ui: &UiState) -> (Vec<WorkspaceLabelRow>, bool) {
+    let mut rows: Vec<_> = snapshot
+        .hot_labels
+        .iter()
+        .map(|tag| WorkspaceLabelRow {
+            tag: tag.tag.clone(),
+            count: tag.count,
+        })
+        .collect();
+    if let Route::Label(active) = &ui.route
+        && !rows.iter().any(|row| row.tag == *active)
+    {
+        rows.push(WorkspaceLabelRow {
+            tag: active.clone(),
+            count: 0,
+        });
+    }
+    let has_more = !ui.labels_expanded && rows.len() > COLLAPSED_LABEL_LIMIT;
+    if has_more {
+        rows.truncate(COLLAPSED_LABEL_LIMIT);
+    }
+    (rows, has_more)
 }
 
 pub(crate) fn channel_label(visibility: &str, slug: &str) -> String {
@@ -263,6 +335,14 @@ pub(crate) fn workspace_label_style(selected: bool, unread_count: i64) -> Style 
         theme::title()
     } else if unread_count > 0 {
         theme::unread()
+    } else {
+        theme::muted()
+    }
+}
+
+pub(crate) fn workspace_label_feed_style(selected: bool) -> Style {
+    if selected {
+        theme::title()
     } else {
         theme::muted()
     }

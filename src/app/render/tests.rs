@@ -13,7 +13,7 @@ mod cases {
     use crate::{
         app::state,
         service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem,
+            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
             NotificationSummary, ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
         },
     };
@@ -127,6 +127,19 @@ mod cases {
             Some(theme::MENTION)
         );
         assert_eq!(run_for_text(&lines, "), ok").style.fg, Some(theme::TEXT));
+    }
+
+    #[test]
+    fn render_message_body_links_valid_labels() {
+        let lines = render_message_body("watch $Deploy-2026, ignore $1 and abc$bad", 80);
+
+        let tag = run_for_text(&lines, "$Deploy-2026");
+        assert_eq!(tag.style.fg, Some(theme::ACCENT));
+        assert_eq!(tag.link_url.as_deref(), Some("label:deploy-2026"));
+        assert_eq!(
+            run_for_text(&lines, " $1 and abc$bad").style.fg,
+            Some(theme::TEXT)
+        );
     }
 
     #[test]
@@ -917,6 +930,87 @@ mod cases {
                 .iter()
                 .any(|region| matches!(region.target, HitTarget::WorkspaceSaved))
         );
+    }
+
+    #[test]
+    fn workspace_labels_render_after_dms_collapsed_with_natural_style() {
+        let width = 80;
+        let height = 24;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "a".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            dm_sidebar: vec![DmSidebarItem {
+                conversation_id: None,
+                peer_username: "alice".to_string(),
+                last_message_index: 0,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            hot_labels: [
+                "incident", "deploy", "database", "security", "customer", "support",
+            ]
+            .iter()
+            .enumerate()
+            .map(|(idx, tag)| HotLabel {
+                tag: (*tag).to_string(),
+                count: 10 - idx as i64,
+                latest_at: "2026-05-03T12:00:00Z".to_string(),
+            })
+            .collect(),
+            selected_channel_id: Some("general".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (_, dms_y) = position_for_text(buffer, width, height, "DMs").unwrap();
+        let (_, labels_y) = position_for_text(buffer, width, height, "Labels").unwrap();
+        let incident = cell_for_text(buffer, width, height, "$incident");
+
+        assert!(dms_y < labels_y);
+        assert_eq!(incident.fg, theme::MUTED);
+        assert!(!incident.modifier.contains(Modifier::BOLD));
+        assert!(position_for_text(buffer, width, height, "[more]").is_some());
+        assert!(position_for_text(buffer, width, height, "$support").is_none());
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::WorkspaceLabelsMore))
+        );
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        ui.labels_expanded = true;
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(position_for_text(buffer, width, height, "$support").is_some());
+        assert!(position_for_text(buffer, width, height, "[more]").is_none());
     }
 
     #[test]

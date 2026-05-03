@@ -691,6 +691,184 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
 }
 
 #[tokio::test]
+async fn sqlite_label_feeds_track_visible_message_sources() {
+    let (_config, state) = test_state("labels").await;
+    let owner = bootstrap_owner(&state, "SHA256:hash-owner", "ssh-ed25519 owner").await;
+    let alice_invite = state
+        .create_invite(owner.id.clone())
+        .await
+        .expect("alice invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:hash-alice",
+        "ssh-ed25519 alice",
+        alice_invite,
+    )
+    .await;
+    let bob_invite = state
+        .create_invite(owner.id.clone())
+        .await
+        .expect("bob invite");
+    let bob = accept_invite_key(
+        &state,
+        "bob",
+        "SHA256:hash-bob",
+        "ssh-ed25519 bob",
+        bob_invite,
+    )
+    .await;
+
+    let private_id = state
+        .create_channel(owner.id.clone(), "label-secret".to_string(), true)
+        .await
+        .expect("private channel");
+    state
+        .add_channel_member(&owner.id, "label-secret", "alice")
+        .await
+        .expect("add alice");
+    let thread_id = state
+        .create_thread(
+            owner.id.clone(),
+            private_id.clone(),
+            "Incident $Deploy-2026".to_string(),
+        )
+        .await
+        .expect("thread");
+    state
+        .add_comment(
+            alice.id.clone(),
+            thread_id.clone(),
+            "Reply $deploy-2026 $ops_team ignore $1".to_string(),
+        )
+        .await
+        .expect("comment");
+    let dm_id = state
+        .open_dm(owner.id.clone(), "alice".to_string())
+        .await
+        .expect("open dm");
+    state
+        .send_dm(
+            owner.id.clone(),
+            dm_id.clone(),
+            "Private $deploy-2026".to_string(),
+        )
+        .await
+        .expect("send dm");
+
+    let hot = state.hot_labels(&owner.id, 20).await.expect("hot labels");
+    let deploy = hot
+        .iter()
+        .find(|tag| tag.tag == "deploy-2026")
+        .expect("deploy hot label");
+    assert_eq!(deploy.count, 3);
+    assert!(
+        hot.iter()
+            .any(|tag| tag.tag == "ops_team" && tag.count == 1)
+    );
+    assert!(!hot.iter().any(|tag| tag.tag == "1"));
+
+    let owner_feed = state
+        .label_feed_page_after(
+            &owner.id,
+            "$deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("owner feed");
+    assert_eq!(owner_feed.items.len(), 3);
+    assert!(owner_feed.items.iter().any(|item| {
+        matches!(item.kind, sshoosh::service::LabelFeedKind::Thread)
+            && item.thread_id.as_deref() == Some(&thread_id)
+    }));
+    assert!(owner_feed.items.iter().any(|item| {
+        matches!(item.kind, sshoosh::service::LabelFeedKind::Dm)
+            && item.conversation_id.as_deref() == Some(&dm_id)
+    }));
+
+    query("DELETE FROM message_labels")
+        .execute(state.db.write_pool())
+        .await
+        .expect("clear label index");
+    query(
+        "DELETE FROM _sshoosh_migrations
+         WHERE version = '20260501000005_message_labels_backfill'",
+    )
+    .execute(state.db.write_pool())
+    .await
+    .expect("clear label backfill marker");
+    state.db.init().await.expect("rerun migrations");
+    let rebuilt_feed = state
+        .label_feed_page_after(
+            &owner.id,
+            "$deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("rebuilt owner feed");
+    assert_eq!(rebuilt_feed.items.len(), 3);
+
+    let bob_feed = state
+        .label_feed_page_after(
+            &bob.id,
+            "deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("bob feed");
+    assert!(bob_feed.items.is_empty());
+    let bob_hot = state.hot_labels(&bob.id, 20).await.expect("bob hot");
+    assert!(!bob_hot.iter().any(|tag| tag.tag == "deploy-2026"));
+
+    state
+        .edit_comment(&alice.id, &thread_id, 1, "Reply $fixed")
+        .await
+        .expect("edit comment");
+    let deploy_after_edit = state
+        .label_feed_page_after(
+            &owner.id,
+            "deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("feed after edit");
+    assert_eq!(deploy_after_edit.items.len(), 2);
+    let fixed = state
+        .label_feed_page_after(&owner.id, "fixed", sshoosh::service::PageRequest::first(10))
+        .await
+        .expect("fixed feed");
+    assert_eq!(fixed.items.len(), 1);
+
+    state
+        .delete_dm(&owner.id, &dm_id, 1)
+        .await
+        .expect("delete dm");
+    let deploy_after_dm_delete = state
+        .label_feed_page_after(
+            &owner.id,
+            "deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("feed after dm delete");
+    assert_eq!(deploy_after_dm_delete.items.len(), 1);
+
+    state
+        .delete_thread(&owner.id, &thread_id)
+        .await
+        .expect("delete thread");
+    let deploy_after_thread_delete = state
+        .label_feed_page_after(
+            &owner.id,
+            "deploy-2026",
+            sshoosh::service::PageRequest::first(10),
+        )
+        .await
+        .expect("feed after thread delete");
+    assert!(deploy_after_thread_delete.items.is_empty());
+}
+
+#[tokio::test]
 async fn sqlite_unread_counters_track_reads_unreads_and_deletes() {
     let (_config, state) = test_state("unread-counters").await;
     let owner = bootstrap_owner(&state, "SHA256:counter-owner", "ssh-ed25519 owner").await;

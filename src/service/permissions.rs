@@ -404,6 +404,7 @@ pub(crate) async fn update_thread_flag(
         .await?;
     if matches!(flag, ThreadFlag::Deleted) && enabled {
         delete_search_index_tx(&mut tx, "thread", thread_id).await?;
+        delete_thread_labels_tx(&mut tx, thread_id).await?;
     }
     insert_audit(
         &mut tx,
@@ -482,6 +483,7 @@ pub(crate) struct CommentMeta {
     pub(crate) id: String,
     pub(crate) author_account_id: String,
     pub(crate) obj_index: i64,
+    pub(crate) created_at: String,
 }
 
 pub(crate) async fn load_comment_meta_tx(
@@ -490,7 +492,7 @@ pub(crate) async fn load_comment_meta_tx(
     obj_index: i64,
 ) -> anyhow::Result<CommentMeta> {
     let row = query(
-        "SELECT id, author_account_id
+        "SELECT id, author_account_id, created_at
          FROM comments
          WHERE thread_id = ? AND obj_index = ? AND deleted_at IS NULL",
     )
@@ -505,6 +507,7 @@ pub(crate) async fn load_comment_meta_tx(
         id: row.get("id")?,
         author_account_id: row.get("author_account_id")?,
         obj_index,
+        created_at: row.get("created_at")?,
     })
 }
 
@@ -548,6 +551,20 @@ pub(crate) async fn update_comment_body(
             title: &thread.title,
             body,
             context: &format!("#{}", channel.slug),
+        },
+    )
+    .await?;
+    replace_labels_tx(
+        &mut tx,
+        LabelIndexInput {
+            source_kind: "comment",
+            source_id: &row.id,
+            channel_id: Some(&thread.channel_id),
+            thread_id: Some(thread_id),
+            conversation_id: None,
+            obj_index: Some(row.obj_index),
+            text: body,
+            created_at: &row.created_at,
         },
     )
     .await?;
@@ -615,6 +632,7 @@ pub(crate) async fn soft_delete_comment(
     .execute(&mut tx)
     .await?;
     delete_search_index_tx(&mut tx, "comment", &row.id).await?;
+    delete_labels_tx(&mut tx, "comment", &row.id).await?;
     insert_audit(
         &mut tx,
         Some(actor_id),
@@ -640,6 +658,7 @@ pub(crate) struct DmMessageMeta {
     pub(crate) id: String,
     pub(crate) author_account_id: String,
     pub(crate) obj_index: i64,
+    pub(crate) created_at: String,
 }
 
 pub(crate) async fn load_dm_message_meta_tx(
@@ -657,7 +676,7 @@ pub(crate) async fn load_dm_message_meta_tx(
     .await?;
     anyhow::ensure!(is_member > 0, "Not a participant in this conversation");
     let row = query(
-        "SELECT id, author_account_id
+        "SELECT id, author_account_id, created_at
          FROM conversation_messages
          WHERE conversation_id = ? AND obj_index = ? AND deleted_at IS NULL",
     )
@@ -672,6 +691,7 @@ pub(crate) async fn load_dm_message_meta_tx(
         id: row.get("id")?,
         author_account_id: row.get("author_account_id")?,
         obj_index,
+        created_at: row.get("created_at")?,
     })
 }
 
@@ -710,6 +730,20 @@ pub(crate) async fn update_dm_body(
             title: "DM",
             body,
             context: "DM",
+        },
+    )
+    .await?;
+    replace_labels_tx(
+        &mut tx,
+        LabelIndexInput {
+            source_kind: "dm",
+            source_id: &row.id,
+            channel_id: None,
+            thread_id: None,
+            conversation_id: Some(conversation_id),
+            obj_index: Some(row.obj_index),
+            text: body,
+            created_at: &row.created_at,
         },
     )
     .await?;
@@ -765,6 +799,7 @@ pub(crate) async fn soft_delete_dm(
     .execute(&mut tx)
     .await?;
     delete_search_index_tx(&mut tx, "dm", &row.id).await?;
+    delete_labels_tx(&mut tx, "dm", &row.id).await?;
     insert_audit(
         &mut tx,
         Some(actor_id),

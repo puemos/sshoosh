@@ -281,20 +281,38 @@ async fn seed_bench_database(
         let channel = thread % channels;
         let thread_id = format!("bench-thread-{thread:06}");
         let channel_id = format!("bench-channel-{channel:04}");
+        let title = bench_thread_title(thread, channel);
+        let body = bench_thread_body(thread, channel);
         db::query(
             "INSERT INTO threads
              (id, channel_id, creator_account_id, title, body, comment_count, last_comment_index, last_activity_at, created_at, updated_at)
-             VALUES (?, ?, 'bench-user-0000', ?, '', ?, ?, ?, ?, ?)",
+             VALUES (?, ?, 'bench-user-0000', ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&thread_id)
         .bind(&channel_id)
-        .bind(format!("Benchmark thread {thread}"))
+        .bind(&title)
+        .bind(&body)
         .bind(comment_count)
         .bind(comment_count)
         .bind(&now)
         .bind(&now)
         .bind(&now)
         .execute(&mut tx)
+        .await?;
+        let thread_text = format!("{title}\n{body}");
+        insert_seed_labels(
+            &mut tx,
+            SeedLabelSource {
+                source_kind: "thread",
+                source_id: &thread_id,
+                channel_id: Some(&channel_id),
+                thread_id: Some(&thread_id),
+                conversation_id: None,
+                obj_index: None,
+                text: &thread_text,
+                created_at: &now,
+            },
+        )
         .await?;
         db::query(
             "INSERT INTO thread_reads (thread_id, account_id, last_read_index, unread_count)
@@ -311,19 +329,37 @@ async fn seed_bench_database(
         let thread = comment % threads;
         obj_index_by_thread[thread] += 1;
         let channel = thread % channels;
+        let comment_id = format!("bench-comment-{comment:08}");
+        let thread_id = format!("bench-thread-{thread:06}");
+        let channel_id = format!("bench-channel-{channel:04}");
+        let body = bench_comment_body(comment, channel);
         db::query(
             "INSERT INTO comments
              (id, thread_id, channel_id, author_account_id, obj_index, body, created_at, updated_at)
              VALUES (?, ?, ?, 'bench-user-0000', ?, ?, ?, ?)",
         )
-        .bind(format!("bench-comment-{comment:08}"))
-        .bind(format!("bench-thread-{thread:06}"))
-        .bind(format!("bench-channel-{channel:04}"))
+        .bind(&comment_id)
+        .bind(&thread_id)
+        .bind(&channel_id)
         .bind(obj_index_by_thread[thread])
-        .bind(format!("Benchmark comment {comment}"))
+        .bind(&body)
         .bind(&now)
         .bind(&now)
         .execute(&mut tx)
+        .await?;
+        insert_seed_labels(
+            &mut tx,
+            SeedLabelSource {
+                source_kind: "comment",
+                source_id: &comment_id,
+                channel_id: Some(&channel_id),
+                thread_id: Some(&thread_id),
+                conversation_id: None,
+                obj_index: Some(obj_index_by_thread[thread]),
+                text: &body,
+                created_at: &now,
+            },
+        )
         .await?;
     }
 
@@ -351,21 +387,115 @@ async fn seed_bench_database(
         .await?;
     }
     for message in 0..dms {
+        let message_id = format!("bench-dm-message-{message:08}");
+        let body = bench_dm_body(message);
         db::query(
             "INSERT INTO conversation_messages
              (id, conversation_id, author_account_id, obj_index, body, created_at, updated_at)
              VALUES (?, 'bench-dm-0000', 'bench-user-0000', ?, ?, ?, ?)",
         )
-        .bind(format!("bench-dm-message-{message:08}"))
+        .bind(&message_id)
         .bind((message + 1) as i64)
-        .bind(format!("Benchmark DM {message}"))
+        .bind(&body)
         .bind(&now)
         .bind(&now)
         .execute(&mut tx)
         .await?;
+        insert_seed_labels(
+            &mut tx,
+            SeedLabelSource {
+                source_kind: "dm",
+                source_id: &message_id,
+                channel_id: None,
+                thread_id: None,
+                conversation_id: Some("bench-dm-0000"),
+                obj_index: Some((message + 1) as i64),
+                text: &body,
+                created_at: &now,
+            },
+        )
+        .await?;
     }
 
     tx.commit().await?;
+    Ok(())
+}
+
+fn bench_thread_title(thread: usize, channel: usize) -> String {
+    let (topic, primary, secondary) = label_theme(channel);
+    format!("{topic} sync {thread} ${primary} ${secondary}")
+}
+
+fn bench_thread_body(thread: usize, channel: usize) -> String {
+    let (topic, primary, secondary) = label_theme(channel);
+    format!(
+        "{topic} owner notes for workstream {thread}. Track the handoff in ${primary} and follow-up in ${secondary}."
+    )
+}
+
+fn bench_comment_body(comment: usize, channel: usize) -> String {
+    let (topic, primary, secondary) = label_theme(channel);
+    match comment % 4 {
+        0 => format!("{topic} update {comment}: timeline checked ${primary} $status"),
+        1 => format!("{topic} update {comment}: next action assigned ${secondary} $handoff"),
+        2 => format!("{topic} update {comment}: risk is contained ${primary} $watch"),
+        _ => format!("{topic} update {comment}: closing notes captured ${secondary} $retro"),
+    }
+}
+
+fn bench_dm_body(message: usize) -> String {
+    match message % 5 {
+        0 => format!("Can you review the release window? $deploy $handoff dm={message}"),
+        1 => format!("On-call note for private follow-up. $oncall $incident dm={message}"),
+        2 => format!("Customer escalation needs a quick read. $customer $support dm={message}"),
+        3 => format!("Database backup question before the drill. $database $backup dm={message}"),
+        _ => format!("Security review thread for tomorrow. $security $audit dm={message}"),
+    }
+}
+
+fn label_theme(channel: usize) -> (&'static str, &'static str, &'static str) {
+    match channel % 6 {
+        0 => ("Incident response", "incident", "oncall"),
+        1 => ("Release rollout", "deploy", "release"),
+        2 => ("Database operations", "database", "backup"),
+        3 => ("Security review", "security", "audit"),
+        4 => ("Customer support", "customer", "support"),
+        _ => ("Infrastructure planning", "infra", "capacity"),
+    }
+}
+
+struct SeedLabelSource<'a> {
+    source_kind: &'a str,
+    source_id: &'a str,
+    channel_id: Option<&'a str>,
+    thread_id: Option<&'a str>,
+    conversation_id: Option<&'a str>,
+    obj_index: Option<i64>,
+    text: &'a str,
+    created_at: &'a str,
+}
+
+async fn insert_seed_labels(
+    tx: &mut db::DbTransaction,
+    source: SeedLabelSource<'_>,
+) -> anyhow::Result<()> {
+    for tag in service::parse_labels(source.text) {
+        db::query(
+            "INSERT OR IGNORE INTO message_labels
+             (tag, source_kind, source_id, channel_id, thread_id, conversation_id, obj_index, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(tag)
+        .bind(source.source_kind)
+        .bind(source.source_id)
+        .bind(source.channel_id)
+        .bind(source.thread_id)
+        .bind(source.conversation_id)
+        .bind(source.obj_index)
+        .bind(source.created_at)
+        .execute(&mut *tx)
+        .await?;
+    }
     Ok(())
 }
 

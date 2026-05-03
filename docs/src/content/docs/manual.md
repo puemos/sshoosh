@@ -171,6 +171,14 @@ Search only returns content you are allowed to see:
 
 Private channel content, mentions, notifications, and source links stay limited to private-channel members.
 
+Labels in messages become visible feeds. Open a feed from the workspace label list, by clicking a rendered label, or with a command:
+
+```text
+/label $deploy-2026
+```
+
+Label feeds only include thread, comment, and DM sources you can already see.
+
 ### Saved messages
 
 Save important messages from the right-click menu or with slash commands:
