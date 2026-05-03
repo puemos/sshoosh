@@ -4,6 +4,7 @@ pub(crate) struct StyledRun {
     pub(crate) text: String,
     pub(crate) style: Style,
     pub(crate) link_url: Option<String>,
+    pub(crate) mention_username: Option<String>,
 }
 
 impl StyledRun {
@@ -13,6 +14,7 @@ impl StyledRun {
             text: sanitize_terminal_visible_text(&text),
             style,
             link_url: None,
+            mention_username: None,
         }
     }
 
@@ -22,8 +24,16 @@ impl StyledRun {
             text: sanitize_terminal_visible_text(&text),
             style,
             link_url: Some(link_url.into()),
+            mention_username: None,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MentionMatch {
+    start: usize,
+    end: usize,
+    username: String,
 }
 
 #[derive(Default)]
@@ -150,11 +160,19 @@ pub(crate) fn push_text_with_mentions(
     state: &InlineMarkdownState,
     valid_mentions: &[String],
 ) {
-    while let Some((start, end)) = find_valid_mention(text, valid_mentions) {
+    while let Some(found) = find_valid_mention_with_username(text, valid_mentions) {
+        let start = found.start;
+        let end = found.end;
         if start > 0 {
             push_run(runs, &text[..start], markdown_text_style(state), None);
         }
-        push_run(runs, &text[start..end], markdown_mention_style(state), None);
+        push_run_with_metadata(
+            runs,
+            &text[start..end],
+            markdown_mention_style(state),
+            None,
+            Some(&found.username),
+        );
         text = &text[end..];
     }
     if !text.is_empty() {
@@ -162,7 +180,7 @@ pub(crate) fn push_text_with_mentions(
     }
 }
 
-pub(crate) fn find_valid_mention(text: &str, valid_mentions: &[String]) -> Option<(usize, usize)> {
+fn find_valid_mention_with_username(text: &str, valid_mentions: &[String]) -> Option<MentionMatch> {
     for (idx, ch) in text.char_indices() {
         if ch != '@' || !is_mention_boundary(text, idx) {
             continue;
@@ -179,11 +197,15 @@ pub(crate) fn find_valid_mention(text: &str, valid_mentions: &[String]) -> Optio
             continue;
         }
         let username = &text[idx + ch.len_utf8()..end];
-        if valid_mentions
+        if let Some(valid) = valid_mentions
             .iter()
-            .any(|valid| valid.eq_ignore_ascii_case(username))
+            .find(|valid| valid.eq_ignore_ascii_case(username))
         {
-            return Some((idx, end));
+            return Some(MentionMatch {
+                start: idx,
+                end,
+                username: valid.clone(),
+            });
         }
     }
     None
@@ -329,6 +351,16 @@ pub(crate) fn push_run(
     style: Style,
     link_url: Option<&str>,
 ) {
+    push_run_with_metadata(runs, text, style, link_url, None);
+}
+
+fn push_run_with_metadata(
+    runs: &mut Vec<StyledRun>,
+    text: impl Into<String>,
+    style: Style,
+    link_url: Option<&str>,
+    mention_username: Option<&str>,
+) {
     let text = sanitize_terminal_visible_text(&text.into());
     if text.is_empty() {
         return;
@@ -336,6 +368,7 @@ pub(crate) fn push_run(
     if let Some(previous) = runs.last_mut()
         && previous.style == style
         && previous.link_url.as_deref() == link_url
+        && previous.mention_username.as_deref() == mention_username
     {
         previous.text.push_str(&text);
         return;
@@ -343,7 +376,9 @@ pub(crate) fn push_run(
     if let Some(link_url) = link_url {
         runs.push(StyledRun::link(text, style, link_url));
     } else {
-        runs.push(StyledRun::new(text, style));
+        let mut run = StyledRun::new(text, style);
+        run.mention_username = mention_username.map(str::to_string);
+        runs.push(run);
     }
 }
 
@@ -422,7 +457,13 @@ pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<St
                 line_width = 0;
                 continue;
             }
-            push_run(&mut line, ch.to_string(), style, run.link_url.as_deref());
+            push_run_with_metadata(
+                &mut line,
+                ch.to_string(),
+                style,
+                run.link_url.as_deref(),
+                run.mention_username.as_deref(),
+            );
             line_width += 1;
         }
     }

@@ -346,6 +346,7 @@ pub enum HitTarget {
         target: ReactionTarget,
     },
     MessageLink(String),
+    MessageMention(String),
     ComposerInput {
         scroll_y: u16,
     },

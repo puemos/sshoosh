@@ -13,6 +13,7 @@ mod cases {
             Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
             DmSidebarItem, NotificationSummary, ReactionSummary, SavedMessageItem,
             SavedMessageKind, SearchKind, SearchResult, ServerState, Snapshot, ThreadItem,
+            UserPresence,
         },
     };
 
@@ -20,6 +21,15 @@ mod cases {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("sshoosh-app-{name}-{}", Uuid::now_v7()))
+    }
+
+    fn user_presence(username: &str) -> UserPresence {
+        UserPresence {
+            username: username.to_string(),
+            display_name: username.to_string(),
+            last_seen_at: None,
+            connected: false,
+        }
     }
 
     async fn test_app(name: &str) -> App {
@@ -1557,6 +1567,95 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn clicking_message_mention_opens_dm() {
+        let mut app = test_app("mention-clicks").await;
+        app.snapshot.users = vec![user_presence("owner"), user_presence("alice")];
+        app.snapshot.threads[0].body = "Ping @alice".to_string();
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.render().expect("render");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(&region.target, HitTarget::MessageMention(username) if username == "alice")
+            })
+            .cloned()
+            .expect("mention hit region");
+
+        click_at(&mut app, region.rect.x, region.rect.y);
+
+        assert_eq!(
+            app.actions,
+            vec![Action::OpenDm {
+                target: "alice".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn clicking_dm_message_mention_opens_that_users_dm() {
+        let mut app = test_app("dm-mention-clicks").await;
+        app.snapshot.users = vec![
+            user_presence("owner"),
+            user_presence("alice"),
+            user_presence("bob"),
+        ];
+        app.snapshot.selected_channel_id = None;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.snapshot.conversation_messages = vec![dm_message(1, "alice", "Loop in @bob")];
+        app.ui.route = Route::Dms;
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.render().expect("render");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| {
+                matches!(&region.target, HitTarget::MessageMention(username) if username == "bob")
+            })
+            .cloned()
+            .expect("dm mention hit region");
+
+        click_at(&mut app, region.rect.x, region.rect.y);
+
+        assert_eq!(
+            app.actions,
+            vec![Action::OpenDm {
+                target: "bob".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn clicking_self_mention_does_not_open_dm() {
+        let mut app = test_app("self-mention-clicks").await;
+        app.snapshot.users = vec![user_presence("owner"), user_presence("alice")];
+        app.snapshot.threads[0].body.clear();
+        app.snapshot.comments = vec![comment(2, "alice", "FYI @owner")];
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.render().expect("render");
+
+        assert!(!app.ui.hit_map.entries().iter().any(|region| {
+            matches!(&region.target, HitTarget::MessageMention(username) if username == "owner")
+        }));
+        click_region(&mut app, |target| {
+            matches!(
+                target,
+                HitTarget::EditableMessage(EditableMessageTarget::Comment(2))
+            )
+        });
+
+        assert!(app.actions.is_empty());
+    }
+
+    #[tokio::test]
     async fn clicking_inactive_reaction_chip_adds_reaction() {
         let mut app = test_app("reaction-chip-add").await;
         app.snapshot.comments = vec![CommentItem {
@@ -1722,6 +1821,31 @@ mod cases {
             .find(|region| matches!(&region.target, HitTarget::MessageLink(_)))
             .cloned()
             .expect("link hit region");
+
+        move_at(&mut app, region.rect.x, region.rect.y);
+        let output = String::from_utf8_lossy(&app.render().expect("render pointer")).into_owned();
+        assert!(output.contains("\x1b]22;pointer\x1b\\"), "{output:?}");
+
+        move_at(&mut app, 0, 0);
+        let output = String::from_utf8_lossy(&app.render().expect("render default")).into_owned();
+        assert!(output.contains("\x1b]22;default\x1b\\"), "{output:?}");
+    }
+
+    #[tokio::test]
+    async fn mouse_hover_changes_pointer_shape_for_message_mentions() {
+        let mut app = test_app("mention-hover").await;
+        app.snapshot.users = vec![user_presence("owner"), user_presence("alice")];
+        app.snapshot.threads[0].body = "Ping @alice".to_string();
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render");
+        let region = app
+            .ui
+            .hit_map
+            .entries()
+            .iter()
+            .find(|region| matches!(&region.target, HitTarget::MessageMention(_)))
+            .cloned()
+            .expect("mention hit region");
 
         move_at(&mut app, region.rect.x, region.rect.y);
         let output = String::from_utf8_lossy(&app.render().expect("render pointer")).into_owned();
