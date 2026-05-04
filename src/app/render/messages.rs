@@ -105,22 +105,43 @@ pub(crate) fn resolve_author_color(snapshot: &Snapshot, author: &str) -> Color {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn message_card<'a>(
-    snapshot: &Snapshot,
-    kind: MessageKind,
-    header_mode: HeaderMode,
-    author: &str,
-    created_at: Option<&str>,
-    edited_at: Option<&str>,
-    saved: bool,
-    reactions: &[ReactionSummary],
-    reaction_target: Option<ReactionTarget>,
-    body: &str,
-    width: usize,
-) -> MessageCard<'a> {
+pub(crate) struct MessageCardSpec<'a> {
+    pub(crate) snapshot: &'a Snapshot,
+    pub(crate) kind: MessageKind,
+    pub(crate) header_mode: HeaderMode,
+    pub(crate) author: &'a str,
+    pub(crate) created_at: Option<&'a str>,
+    pub(crate) edited_at: Option<&'a str>,
+    pub(crate) saved: bool,
+    pub(crate) reactions: &'a [ReactionSummary],
+    pub(crate) reaction_target: Option<ReactionTarget>,
+    pub(crate) body: &'a str,
+    pub(crate) width: usize,
+    /// Optional pre-styled spans rendered as a leading row above the header.
+    /// Feed views (saved/labels/notifications) use this for source breadcrumbs.
+    pub(crate) breadcrumb: Option<Vec<Span<'static>>>,
+    /// When true, paint the card with the elevated surface to indicate selection.
+    pub(crate) selected: bool,
+}
+
+pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
+    let MessageCardSpec {
+        snapshot,
+        kind,
+        header_mode,
+        author,
+        created_at,
+        edited_at,
+        saved,
+        reactions,
+        reaction_target,
+        body,
+        width,
+        breadcrumb,
+        selected,
+    } = spec;
     let current_username = snapshot.current_username.as_deref();
-    let surface = message_surface(body);
+    let surface = message_surface(body, selected);
     let author_color = resolve_author_color(snapshot, author);
     let gutter = theme::message_card_on(surface);
     let valid_mentions: Vec<String> = snapshot
@@ -134,6 +155,18 @@ pub(crate) fn message_card<'a>(
     let mut labels = Vec::new();
     let mut reaction_hits = Vec::new();
     let mut row_idx: usize = 0;
+
+    if let Some(spans) = breadcrumb {
+        let rebound: Vec<Span<'static>> = spans
+            .into_iter()
+            .map(|span| {
+                let style = span.style.bg(surface);
+                Span::styled(span.content, style)
+            })
+            .collect();
+        lines.push(message_card_line(gutter, rebound));
+        row_idx += 1;
+    }
 
     if matches!(header_mode, HeaderMode::Full) {
         lines.push(message_card_line(
@@ -400,8 +433,12 @@ fn reaction_chips(reactions: &[ReactionSummary], target: ReactionTarget) -> Vec<
     chips
 }
 
-fn message_surface(_body: &str) -> Color {
-    theme::PANEL
+fn message_surface(_body: &str, selected: bool) -> Color {
+    if selected {
+        theme::ELEVATED_PANEL
+    } else {
+        theme::PANEL
+    }
 }
 
 pub(crate) fn with_message_card_hit<'a>(

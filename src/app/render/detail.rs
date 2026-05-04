@@ -117,19 +117,21 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             if matches!(ui.pending_source_focus, Some(SourceFocus::ThreadRoot)) {
                 focused_row = Some(content_row);
             }
-            let card = message_card(
+            let card = message_card(MessageCardSpec {
                 snapshot,
-                MessageKind::ThreadRoot,
-                HeaderMode::Full,
-                &thread.author,
-                Some(&thread.created_at),
-                thread.edited_at.as_deref(),
-                false,
-                &thread.reactions,
-                Some(ReactionTarget::ThreadRoot),
-                &thread.body,
-                message_width,
-            );
+                kind: MessageKind::ThreadRoot,
+                header_mode: HeaderMode::Full,
+                author: &thread.author,
+                created_at: Some(&thread.created_at),
+                edited_at: thread.edited_at.as_deref(),
+                saved: false,
+                reactions: &thread.reactions,
+                reaction_target: Some(ReactionTarget::ThreadRoot),
+                body: &thread.body,
+                width: message_width,
+                breadcrumb: None,
+                selected: false,
+            });
             append_message_card(&mut items, &mut message_hits, &mut content_row, card);
             prev_author = Some(thread.author.clone());
             prev_kind = Some(MessageKind::ThreadRoot);
@@ -170,19 +172,21 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             if ui.pending_source_focus == Some(SourceFocus::Comment(comment.obj_index)) {
                 focused_row = Some(content_row);
             }
-            let card = message_card(
+            let card = message_card(MessageCardSpec {
                 snapshot,
-                MessageKind::Comment,
+                kind: MessageKind::Comment,
                 header_mode,
-                &comment.author,
-                Some(&comment.created_at),
-                comment.edited_at.as_deref(),
-                comment.saved_at.is_some(),
-                &comment.reactions,
-                Some(ReactionTarget::Comment(comment.obj_index)),
-                &comment.body,
-                message_width,
-            );
+                author: &comment.author,
+                created_at: Some(&comment.created_at),
+                edited_at: comment.edited_at.as_deref(),
+                saved: comment.saved_at.is_some(),
+                reactions: &comment.reactions,
+                reaction_target: Some(ReactionTarget::Comment(comment.obj_index)),
+                body: &comment.body,
+                width: message_width,
+                breadcrumb: None,
+                selected: false,
+            });
             let card = with_message_card_hit(
                 card,
                 HitTarget::EditableMessage(EditableMessageTarget::Comment(comment.obj_index)),
@@ -313,9 +317,8 @@ pub(crate) fn draw_saved_detail(
     );
     draw_thread_header(frame, area, None, "Saved", Some(&meta), ui);
     let messages_area = pane_scroll_area(area);
-    let mut items = Vec::new();
-    let mut row_hits = Vec::new();
-    let mut selected_row = None;
+    let content_area = scroll_content_area(messages_area);
+    let message_width = message_content_width(content_area);
     if snapshot.saved_messages.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
         ui.detail_scroll_metrics = DetailScrollMetrics::default();
@@ -332,48 +335,59 @@ pub(crate) fn draw_saved_detail(
         return;
     }
 
-    let row_width = messages_area.width.saturating_sub(2) as usize;
-    let body_width = row_width.max(1);
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut message_hits = MessageHits::default();
     let mut content_row = 0u16;
+    let mut selected_row = None;
     for (idx, item) in snapshot.saved_messages.iter().enumerate() {
         let selected = idx == ui.saved_selected;
-        let saved_at = format_human_timestamp(&item.saved_at);
         if selected {
             selected_row = Some(content_row);
         }
-        let item = saved_message_result_list_item(SavedMessageResultRow {
-            selected,
-            title: saved_result_title(snapshot, item),
-            meta: saved_at,
-            body: item.body.clone(),
-            body_width,
-        });
-        let height = item.height() as u16;
-        items.push(item);
-        for offset in 0..height {
-            row_hits.push((
-                content_row.saturating_add(offset),
-                HitTarget::SavedResult(idx),
-            ));
+        if idx > 0 {
+            append_plain_item(&mut items, &mut content_row, message_gap());
         }
-        content_row = content_row.saturating_add(height);
+        let kind = match item.kind {
+            SavedMessageKind::Comment => MessageKind::Comment,
+            SavedMessageKind::Dm => MessageKind::Dm,
+        };
+        let breadcrumb = breadcrumb_spans(
+            saved_breadcrumb_text(snapshot, item),
+            BreadcrumbMarker::None,
+        );
+        let card = message_card(MessageCardSpec {
+            snapshot,
+            kind,
+            header_mode: HeaderMode::Full,
+            author: &item.author,
+            created_at: Some(&item.saved_at),
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: &item.body,
+            width: message_width,
+            breadcrumb: Some(breadcrumb),
+            selected,
+        });
+        let card = with_message_card_hit(card, HitTarget::SavedResult(idx));
+        append_message_card(&mut items, &mut message_hits, &mut content_row, card);
     }
     if snapshot.saved_has_more {
-        items.push(history_prompt("More saved messages available. Use /more."));
+        append_plain_item(
+            &mut items,
+            &mut content_row,
+            history_prompt("More saved messages available. Use /more."),
+        );
     }
+    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     if ui.detail_selection_scroll_pending {
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
         ui.detail_selection_scroll_pending = false;
     }
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_scroll_hits(
-        ui,
-        messages_area,
-        HitTarget::DetailScroll,
-        row_hits,
-        ui.detail_scroll.offset().y,
-    );
+    register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
 }
 
 pub(crate) fn draw_label_detail(
@@ -405,9 +419,8 @@ pub(crate) fn draw_label_detail(
     );
     draw_thread_header(frame, area, None, &format!("${tag}"), Some(&meta), ui);
     let messages_area = pane_scroll_area(area);
-    let mut items = Vec::new();
-    let mut row_hits = Vec::new();
-    let mut selected_row = None;
+    let content_area = scroll_content_area(messages_area);
+    let message_width = message_content_width(content_area);
     if snapshot.label_items.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
         ui.detail_scroll_metrics = DetailScrollMetrics::default();
@@ -424,49 +437,60 @@ pub(crate) fn draw_label_detail(
         return;
     }
 
-    let row_width = messages_area.width.saturating_sub(2) as usize;
-    let body_width = row_width.max(1);
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut message_hits = MessageHits::default();
     let mut content_row = 0u16;
+    let mut selected_row = None;
     for (idx, item) in snapshot.label_items.iter().enumerate() {
         let selected = idx == ui.label_selected;
         if selected {
             selected_row = Some(content_row);
         }
-        let row = saved_message_result_list_item(SavedMessageResultRow {
-            selected,
-            title: label_result_title(snapshot, item),
-            meta: format_human_timestamp(&item.created_at),
-            body: item.body.clone(),
-            body_width,
-        });
-        let height = row.height() as u16;
-        items.push(row);
-        for offset in 0..height {
-            row_hits.push((
-                content_row.saturating_add(offset),
-                HitTarget::LabelResult(idx),
-            ));
+        if idx > 0 {
+            append_plain_item(&mut items, &mut content_row, message_gap());
         }
-        content_row = content_row.saturating_add(height);
+        let kind = match item.kind {
+            LabelFeedKind::Thread => MessageKind::ThreadRoot,
+            LabelFeedKind::Comment => MessageKind::Comment,
+            LabelFeedKind::Dm => MessageKind::Dm,
+        };
+        let breadcrumb = breadcrumb_spans(
+            label_breadcrumb_text(snapshot, item),
+            BreadcrumbMarker::None,
+        );
+        let card = message_card(MessageCardSpec {
+            snapshot,
+            kind,
+            header_mode: HeaderMode::Full,
+            author: &item.author,
+            created_at: Some(&item.created_at),
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: &item.body,
+            width: message_width,
+            breadcrumb: Some(breadcrumb),
+            selected,
+        });
+        let card = with_message_card_hit(card, HitTarget::LabelResult(idx));
+        append_message_card(&mut items, &mut message_hits, &mut content_row, card);
     }
     if snapshot.label_has_more {
-        items.push(history_prompt(
-            "More labeled messages available. Use /more.",
-        ));
+        append_plain_item(
+            &mut items,
+            &mut content_row,
+            history_prompt("More labeled messages available. Use /more."),
+        );
     }
+    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     if ui.detail_selection_scroll_pending {
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
         ui.detail_selection_scroll_pending = false;
     }
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_scroll_hits(
-        ui,
-        messages_area,
-        HitTarget::DetailScroll,
-        row_hits,
-        ui.detail_scroll.offset().y,
-    );
+    register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
 }
 
 pub(crate) fn draw_notifications_detail(
@@ -479,9 +503,8 @@ pub(crate) fn draw_notifications_detail(
     let area = pane_inner(area);
     draw_notifications_header(frame, area, snapshot, ui);
     let messages_area = notifications_scroll_area(area);
-    let mut items = Vec::new();
-    let mut row_hits = Vec::new();
-    let mut selected_row = None;
+    let content_area = scroll_content_area(messages_area);
+    let message_width = message_content_width(content_area);
     let visible_indices = visible_notification_indices_for_filter(snapshot, ui.notification_filter);
     if visible_indices.is_empty() {
         ui.hit_map.push(messages_area, HitTarget::DetailScroll);
@@ -508,9 +531,10 @@ pub(crate) fn draw_notifications_detail(
         return;
     }
 
-    let row_width = messages_area.width.saturating_sub(2) as usize;
-    let body_width = row_width.max(1);
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut message_hits = MessageHits::default();
     let mut content_row = 0u16;
+    let mut selected_row = None;
     for (visible_idx, idx) in visible_indices.into_iter().enumerate() {
         let Some(notification) = snapshot.notifications.get(idx) else {
             continue;
@@ -519,31 +543,54 @@ pub(crate) fn draw_notifications_detail(
         if selected {
             selected_row = Some(content_row);
         }
-        let item = notification_list_item(notification, selected, body_width);
-        let height = item.height() as u16;
-        items.push(item);
-        for offset in 0..height {
-            row_hits.push((
-                content_row.saturating_add(offset),
-                HitTarget::NotificationResult(visible_idx),
-            ));
+        if visible_idx > 0 {
+            append_plain_item(&mut items, &mut content_row, message_gap());
         }
-        content_row = content_row.saturating_add(height);
+        let unread = notification.read_at.is_none();
+        let kind = if notification.conversation_id.is_some() {
+            MessageKind::Dm
+        } else {
+            MessageKind::Comment
+        };
+        let author = notification
+            .actor_username
+            .clone()
+            .unwrap_or_else(|| notification.kind.clone());
+        let breadcrumb = breadcrumb_spans(
+            notification_breadcrumb_text(notification),
+            if unread {
+                BreadcrumbMarker::Unread
+            } else {
+                BreadcrumbMarker::Read
+            },
+        );
+        let card = message_card(MessageCardSpec {
+            snapshot,
+            kind,
+            header_mode: HeaderMode::Full,
+            author: &author,
+            created_at: Some(&notification.created_at),
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: &notification.body,
+            width: message_width,
+            breadcrumb: Some(breadcrumb),
+            selected,
+        });
+        let card = with_message_card_hit(card, HitTarget::NotificationResult(visible_idx));
+        append_message_card(&mut items, &mut message_hits, &mut content_row, card);
     }
 
+    ui.hit_map.push(messages_area, HitTarget::DetailScroll);
     if ui.detail_selection_scroll_pending {
         ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
         ui.detail_selection_scroll_pending = false;
     }
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
-    register_scroll_hits(
-        ui,
-        messages_area,
-        HitTarget::DetailScroll,
-        row_hits,
-        ui.detail_scroll.offset().y,
-    );
+    register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
 }
 
 fn visible_notification_indices_for_filter(
@@ -704,26 +751,29 @@ fn push_notification_toolbar_action(
     *cursor = cursor.saturating_add(width);
 }
 
-struct MessageResultRow {
-    selected: bool,
-    emphasized: bool,
-    leading: String,
-    actor: String,
-    source: String,
-    meta: String,
-    body: String,
-    body_width: usize,
+#[derive(Clone, Copy, Debug, Default)]
+enum BreadcrumbMarker {
+    #[default]
+    None,
+    Unread,
+    Read,
 }
 
-struct SavedMessageResultRow {
-    selected: bool,
-    title: String,
-    meta: String,
-    body: String,
-    body_width: usize,
+fn breadcrumb_spans(text: String, marker: BreadcrumbMarker) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    match marker {
+        BreadcrumbMarker::Unread => spans.push(Span::styled("● ", theme::unread())),
+        BreadcrumbMarker::Read => spans.push(Span::styled("  ", theme::muted())),
+        BreadcrumbMarker::None => {}
+    }
+    spans.push(Span::styled(
+        sanitize_terminal_visible_text(&text),
+        theme::muted(),
+    ));
+    spans
 }
 
-fn saved_result_title(snapshot: &Snapshot, item: &crate::service::SavedMessageItem) -> String {
+fn saved_breadcrumb_text(snapshot: &Snapshot, item: &crate::service::SavedMessageItem) -> String {
     match item.kind {
         SavedMessageKind::Dm => {
             let actor = snapshot
@@ -737,30 +787,21 @@ fn saved_result_title(snapshot: &Snapshot, item: &crate::service::SavedMessageIt
             format!("DM @{actor} → @{peer}")
         }
         SavedMessageKind::Comment => {
-            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
-                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
-                _ => item.source_label.replace(" · ", " / "),
-            };
-            format!("@{} on {}", item.author, source)
+            match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
+                (Some(slug), Some(title)) => format!("#{slug} › {title}"),
+                _ => item.source_label.replace(" · ", " › "),
+            }
         }
     }
 }
 
-fn label_result_title(snapshot: &Snapshot, item: &LabelFeedItem) -> String {
+fn label_breadcrumb_text(snapshot: &Snapshot, item: &LabelFeedItem) -> String {
     match item.kind {
-        LabelFeedKind::Thread => {
-            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
-                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
-                _ => item.source_label.replace(" · ", " / "),
-            };
-            format!("@{} started {}", item.author, source)
-        }
-        LabelFeedKind::Comment => {
-            let source = match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
-                (Some(slug), Some(title)) => format!("#{slug} / {title}"),
-                _ => item.source_label.replace(" · ", " / "),
-            };
-            format!("@{} on {}", item.author, source)
+        LabelFeedKind::Thread | LabelFeedKind::Comment => {
+            match (item.channel_slug.as_deref(), item.thread_title.as_deref()) {
+                (Some(slug), Some(title)) => format!("#{slug} › {title}"),
+                _ => item.source_label.replace(" · ", " › "),
+            }
         }
         LabelFeedKind::Dm => {
             let actor = snapshot
@@ -771,140 +812,27 @@ fn label_result_title(snapshot: &Snapshot, item: &LabelFeedItem) -> String {
                 .dm_peer_username
                 .as_deref()
                 .unwrap_or(item.source_label.strip_prefix("DM @").unwrap_or("DM"));
-            format!("DM @{actor} -> @{peer}")
+            format!("DM @{actor} → @{peer}")
         }
     }
 }
 
-fn saved_message_result_list_item(row: SavedMessageResultRow) -> ListItem<'static> {
-    let title_style = if row.selected {
-        theme::title()
-    } else {
-        theme::muted()
-    };
-    let body_style = if row.selected {
-        theme::message_body()
-    } else {
-        theme::muted()
-    };
-    let mut lines = vec![
-        Line::from(Span::styled(
-            sanitize_terminal_visible_text(&row.title),
-            title_style,
-        )),
-        Line::from(Span::styled(
-            sanitize_terminal_visible_text(&row.meta),
-            theme::muted(),
-        )),
-    ];
-    let body = sanitize_terminal_visible_text(&row.body);
-    for line in wrap_plain_text(&body, row.body_width) {
-        lines.push(Line::from(Span::styled(line, body_style)));
-    }
-    lines.push(Line::from(""));
-    ListItem::new(lines)
-}
-
-fn message_result_list_item(row: MessageResultRow) -> ListItem<'static> {
-    let meta_style = if row.selected {
-        theme::title()
-    } else if row.emphasized {
-        theme::unread()
-    } else {
-        theme::muted()
-    };
-    let body_style = if row.selected || row.emphasized {
-        theme::message_body()
-    } else {
-        theme::muted()
-    };
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!("{:<8}", sanitize_terminal_visible_text(&row.leading)),
-                meta_style,
-            ),
-            Span::styled(sanitize_terminal_visible_text(&row.actor), meta_style),
-            Span::styled("  ", theme::muted()),
-            Span::styled(sanitize_terminal_visible_text(&row.source), theme::muted()),
-        ]),
-        Line::from(Span::styled(
-            sanitize_terminal_visible_text(&row.meta),
-            theme::muted(),
-        )),
-    ];
-    let body = sanitize_terminal_visible_text(&row.body);
-    for line in wrap_plain_text(&body, row.body_width) {
-        lines.push(Line::from(Span::styled(line, body_style)));
-    }
-    lines.push(Line::from(""));
-    ListItem::new(lines)
-}
-
-fn notification_list_item(
-    notification: &NotificationSummary,
-    selected: bool,
-    body_width: usize,
-) -> ListItem<'static> {
-    let unread = notification.read_at.is_none();
-    let actor = notification
-        .actor_username
-        .as_ref()
-        .map(|username| format!("@{username}"))
-        .unwrap_or_else(|| notification.kind.clone());
-    let source = notification_source_label(notification);
-    let created_at = format_human_timestamp(&notification.created_at);
-    let state = if unread { "unread" } else { "read" };
-    message_result_list_item(MessageResultRow {
-        selected,
-        emphasized: unread,
-        leading: state.to_string(),
-        actor,
-        source,
-        meta: created_at,
-        body: notification.body.clone(),
-        body_width,
-    })
-}
-
-fn notification_source_label(notification: &NotificationSummary) -> String {
+fn notification_breadcrumb_text(notification: &NotificationSummary) -> String {
     if notification.conversation_id.is_some() {
-        return "DM".to_string();
+        return notification
+            .actor_username
+            .as_ref()
+            .map(|username| format!("DM @{username}"))
+            .unwrap_or_else(|| "DM".to_string());
     }
     match (
         notification.channel_slug.as_deref(),
         notification.thread_title.as_deref(),
     ) {
-        (Some(slug), Some(title)) => format!("#{slug} / {title}"),
+        (Some(slug), Some(title)) => format!("#{slug} › {title}"),
         (Some(slug), None) => format!("#{slug}"),
         _ => notification.title.clone(),
     }
-}
-
-fn wrap_plain_text(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        let word_len = word.chars().count();
-        let current_len = current.chars().count();
-        if current_len == 0 {
-            current.push_str(word);
-        } else if current_len.saturating_add(1).saturating_add(word_len) <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut current));
-            current.push_str(word);
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
 }
 
 pub(crate) fn draw_workspace_header(frame: &mut Frame, area: Rect, title: &str, ui: &UiState) {
@@ -1206,19 +1134,21 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             if ui.pending_source_focus == Some(SourceFocus::Dm(message.obj_index)) {
                 focused_row = Some(content_row);
             }
-            let card = message_card(
+            let card = message_card(MessageCardSpec {
                 snapshot,
-                MessageKind::Dm,
+                kind: MessageKind::Dm,
                 header_mode,
-                &message.author,
-                Some(&message.created_at),
-                message.edited_at.as_deref(),
-                message.saved_at.is_some(),
-                &message.reactions,
-                Some(ReactionTarget::Dm(message.obj_index)),
-                &message.body,
-                message_width,
-            );
+                author: &message.author,
+                created_at: Some(&message.created_at),
+                edited_at: message.edited_at.as_deref(),
+                saved: message.saved_at.is_some(),
+                reactions: &message.reactions,
+                reaction_target: Some(ReactionTarget::Dm(message.obj_index)),
+                body: &message.body,
+                width: message_width,
+                breadcrumb: None,
+                selected: false,
+            });
             let card = with_message_card_hit(
                 card,
                 HitTarget::EditableMessage(EditableMessageTarget::Dm(message.obj_index)),

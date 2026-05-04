@@ -266,23 +266,25 @@ mod cases {
             current_username: Some("owner".to_string()),
             ..Snapshot::default()
         };
-        let card = message_card(
-            &snapshot,
-            MessageKind::Comment,
-            HeaderMode::Full,
-            "owner",
-            Some("2020-01-02T03:04:00Z"),
-            Some("2020-01-02T03:05:00Z"),
-            false,
-            &[ReactionSummary {
+        let card = message_card(MessageCardSpec {
+            snapshot: &snapshot,
+            kind: MessageKind::Comment,
+            header_mode: HeaderMode::Full,
+            author: "owner",
+            created_at: Some("2020-01-02T03:04:00Z"),
+            edited_at: Some("2020-01-02T03:05:00Z"),
+            saved: false,
+            reactions: &[ReactionSummary {
                 emoji: "👍".to_string(),
                 count: 2,
                 reacted_by_me: false,
             }],
-            Some(ReactionTarget::Comment(1)),
-            "abcdefghij",
-            4,
-        );
+            reaction_target: Some(ReactionTarget::Comment(1)),
+            body: "abcdefghij",
+            width: 4,
+            breadcrumb: None,
+            selected: false,
+        });
 
         // header + 3 body rows (abcd, efgh, ij) + wrapped reaction/add rows.
         // Edited is inline or dropped if width is too tight.
