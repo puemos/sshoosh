@@ -261,16 +261,14 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
                 .saturating_add(1)
                 .saturating_add(EDITED_TAG.chars().count());
         }
-        if idx == 0 && !metadata_rendered {
-            if body_width >= last_visible_chars + 1 + metadata_width {
-                let pad = body_width - last_visible_chars - metadata_width;
-                content.push(Span::styled(
-                    " ".repeat(pad),
-                    theme::message_meta_on(surface),
-                ));
-                content.extend(metadata_spans.iter().cloned());
-                metadata_rendered = true;
-            }
+        if idx == 0 && !metadata_rendered && body_width >= last_visible_chars + 1 + metadata_width {
+            let pad = body_width - last_visible_chars - metadata_width;
+            content.push(Span::styled(
+                " ".repeat(pad),
+                theme::message_meta_on(surface),
+            ));
+            content.extend(metadata_spans.iter().cloned());
+            metadata_rendered = true;
         }
         lines.push(message_card_line(gutter, content));
         row_idx += 1;

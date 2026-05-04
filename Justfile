@@ -14,7 +14,7 @@ lint:
 
 # Run the full test suite.
 test:
-  cargo test
+  cargo test -- --test-threads=1
 
 # Run the Linux container daemon install/uninstall e2e.
 daemon-e2e:

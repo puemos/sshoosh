@@ -10,6 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+## [0.1.4] - 2026-05-04
+
+### Added
+- Message label feeds and label completion in the composer.
+- Direct DM navigation from clickable message mentions.
+- Clearer source navigation when opening messages from search, labels, saved items, or notifications.
+
+### Changed
+- Message feed rows are easier to scan with unified card rendering and row dividers.
+
+### Fixed
+- Prevent mouse scroll input from stalling SSH sessions.
+- Keep DM source navigation anchored to the selected conversation.
+
+### Performance
+- Reduce database query latency under larger workspaces.
+
+### Security
+- Reduce pre-authentication SSH abuse risk.
+
 ## [0.1.3] - 2026-05-03
 
 ### Added

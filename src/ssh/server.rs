@@ -121,14 +121,10 @@ pub async fn run_with_listener(
             let _admission_permit = admission_permit;
             let auth_state = Arc::new(ConnectionAuthState::default());
             let handler = ClientHandler::new(
-                server.state.clone(),
+                &server,
                 Some(peer_addr),
-                server.mouse_enabled,
-                server.auth_abuse.clone(),
                 auth_state.clone(),
                 Some(unauth_permit),
-                server.max_auth_attempts,
-                server.auth_timeout,
             );
             let session = match timeout(
                 server.auth_timeout,
@@ -314,10 +310,7 @@ impl AuthAbuseLimiter {
         let global = self.unauth_global.clone().try_acquire_owned().ok()?;
         let ip = peer_addr.ip();
         {
-            let mut per_ip = self
-                .unauth_per_ip
-                .lock()
-                .expect("unauth limiter poisoned");
+            let mut per_ip = self.unauth_per_ip.lock().expect("unauth limiter poisoned");
             let count = per_ip.entry(ip).or_insert(0);
             if *count >= self.max_unauth_per_ip {
                 return None;
@@ -332,10 +325,7 @@ impl AuthAbuseLimiter {
     }
 
     fn release_unauth_ip(&self, ip: IpAddr) {
-        let mut per_ip = self
-            .unauth_per_ip
-            .lock()
-            .expect("unauth limiter poisoned");
+        let mut per_ip = self.unauth_per_ip.lock().expect("unauth limiter poisoned");
         if let Some(count) = per_ip.get_mut(&ip) {
             *count = count.saturating_sub(1);
             if *count == 0 {
@@ -525,19 +515,15 @@ pub(crate) struct ClientHandler {
 }
 
 impl ClientHandler {
-    pub(crate) fn new(
-        state: ServerState,
+    fn new(
+        server: &Server,
         peer_addr: Option<SocketAddr>,
-        mouse_enabled: bool,
-        auth_abuse: Arc<AuthAbuseLimiter>,
         auth_state: Arc<ConnectionAuthState>,
         unauth_permit: Option<UnauthPermit>,
-        max_auth_attempts: usize,
-        auth_timeout: Duration,
     ) -> Self {
         Self {
-            state,
-            mouse_enabled,
+            state: server.state.clone(),
+            mouse_enabled: server.mouse_enabled,
             account: None,
             peer_addr,
             channel: None,
@@ -551,12 +537,12 @@ impl ClientHandler {
             render_signal: None,
             terminal_active: false,
             pending_key_auth: None,
-            auth_abuse,
+            auth_abuse: server.auth_abuse.clone(),
             auth_state,
             unauth_permit,
             auth_attempts: 0,
-            max_auth_attempts,
-            auth_deadline: Instant::now() + auth_timeout,
+            max_auth_attempts: server.max_auth_attempts,
+            auth_deadline: Instant::now() + server.auth_timeout,
         }
     }
 }
@@ -566,14 +552,10 @@ impl russh::server::Server for Server {
     fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
         let unauth_permit = peer_addr.and_then(|addr| self.auth_abuse.try_acquire_unauth(addr));
         ClientHandler::new(
-            self.state.clone(),
+            self,
             peer_addr,
-            self.mouse_enabled,
-            self.auth_abuse.clone(),
             Arc::new(ConnectionAuthState::default()),
             unauth_permit,
-            self.max_auth_attempts,
-            self.auth_timeout,
         )
     }
 }
