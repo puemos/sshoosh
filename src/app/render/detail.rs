@@ -343,13 +343,22 @@ pub(crate) fn draw_saved_detail(
     let mut message_hits = MessageHits::default();
     let mut content_row = 0u16;
     let mut selected_row = None;
+    let mut last_day: Option<String> = None;
     for (idx, item) in snapshot.saved_messages.iter().enumerate() {
         let selected = idx == ui.saved_selected;
         if selected {
             selected_row = Some(content_row);
         }
         if idx > 0 {
-            append_plain_item(&mut items, &mut content_row, message_gap());
+            append_feed_day_separator(
+                &mut items,
+                &mut content_row,
+                &mut last_day,
+                &item.saved_at,
+                message_width,
+            );
+        } else {
+            last_day = calendar_day_key(&item.saved_at);
         }
         let kind = match item.kind {
             SavedMessageKind::Comment => MessageKind::Comment,
@@ -539,6 +548,7 @@ pub(crate) fn draw_notifications_detail(
     let mut message_hits = MessageHits::default();
     let mut content_row = 0u16;
     let mut selected_row = None;
+    let mut last_day: Option<String> = None;
     for (visible_idx, idx) in visible_indices.into_iter().enumerate() {
         let Some(notification) = snapshot.notifications.get(idx) else {
             continue;
@@ -548,7 +558,15 @@ pub(crate) fn draw_notifications_detail(
             selected_row = Some(content_row);
         }
         if visible_idx > 0 {
-            append_plain_item(&mut items, &mut content_row, message_gap());
+            append_feed_day_separator(
+                &mut items,
+                &mut content_row,
+                &mut last_day,
+                &notification.created_at,
+                message_width,
+            );
+        } else {
+            last_day = calendar_day_key(&notification.created_at);
         }
         let unread = notification.read_at.is_none();
         let kind = if notification.conversation_id.is_some() {
@@ -595,6 +613,27 @@ pub(crate) fn draw_notifications_detail(
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
+}
+
+fn append_feed_day_separator(
+    items: &mut Vec<ListItem>,
+    content_row: &mut u16,
+    last_day: &mut Option<String>,
+    timestamp: &str,
+    message_width: usize,
+) {
+    let day = calendar_day_key(timestamp);
+    let day_changed = day.is_some() && last_day.is_some() && day != *last_day;
+    if day_changed && let Some(label) = calendar_day_label(timestamp) {
+        append_plain_item(items, content_row, message_gap());
+        append_plain_item(items, content_row, date_divider(&label, message_width));
+        append_plain_item(items, content_row, message_gap());
+    } else {
+        append_plain_item(items, content_row, message_group_divider(message_width));
+    }
+    if day.is_some() {
+        *last_day = day;
+    }
 }
 
 fn visible_notification_indices_for_filter(

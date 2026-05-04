@@ -14,8 +14,8 @@ mod cases {
         app::state,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
-            NotificationSummary, ReactionSummary, Role, SearchKind, SearchResult, ThreadItem,
-            UserPresence,
+            NotificationSummary, ReactionSummary, Role, SavedMessageItem, SavedMessageKind,
+            SearchKind, SearchResult, ThreadItem, UserPresence,
         },
     };
 
@@ -1315,6 +1315,74 @@ mod cases {
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("DM @alice"));
         assert!(rendered.contains("4 unread"));
+    }
+
+    #[test]
+    fn saved_and_notifications_insert_feed_dividers() {
+        let width = 140;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+        ui.route = Route::Saved;
+        ui.active_pane = ActivePane::Detail;
+        let snapshot = Snapshot {
+            saved_count: 3,
+            saved_messages: vec![
+                test_saved_message("saved-1", "Recent saved", "2026-05-01T12:00:00Z"),
+                test_saved_message("saved-2", "Same-day saved", "2026-05-01T11:00:00Z"),
+                test_saved_message("saved-3", "Older saved", "2026-04-30T12:00:00Z"),
+            ],
+            ..Snapshot::default()
+        };
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("Recent saved"));
+        assert!(rendered.contains("Same-day saved"));
+        assert!(rendered.contains("Older saved"));
+        assert!(rendered.contains("Thursday, Apr 30, 2026"));
+        let (_, same_day_saved_y) =
+            position_for_text(buffer, width, height, "Same-day saved").expect("same-day saved");
+        assert!(
+            rows_above_contain(buffer, width, same_day_saved_y, "────", 3),
+            "{rendered:?}"
+        );
+
+        ui.route = Route::Notifications;
+        ui.notifications_selected = 0;
+        let mut recent = test_notification("notification-1", "Recent notification", None);
+        recent.created_at = "2026-05-01T12:00:00Z".to_string();
+        let mut same_day = test_notification("notification-2", "Same-day notification", None);
+        same_day.created_at = "2026-05-01T11:00:00Z".to_string();
+        let mut older = test_notification("notification-3", "Older notification", None);
+        older.created_at = "2026-04-30T12:00:00Z".to_string();
+        let snapshot = Snapshot {
+            notifications: vec![recent, same_day, older],
+            notification_unread_count: 3,
+            ..Snapshot::default()
+        };
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{buffer:?}");
+        assert!(rendered.contains("Recent notification"));
+        assert!(rendered.contains("Same-day notification"));
+        assert!(rendered.contains("Older notification"));
+        assert!(rendered.contains("Thursday, Apr 30, 2026"));
+        let (_, same_day_notification_y) =
+            position_for_text(buffer, width, height, "Same-day notification")
+                .expect("same-day notification");
+        assert!(
+            rows_above_contain(buffer, width, same_day_notification_y, "────", 3),
+            "{rendered:?}"
+        );
     }
 
     #[test]
@@ -2727,6 +2795,11 @@ mod cases {
         row
     }
 
+    fn rows_above_contain(buffer: &Buffer, width: u16, y: u16, text: &str, lookback: u16) -> bool {
+        let start = y.saturating_sub(lookback);
+        (start..y).any(|row| row_text(buffer, width, row).contains(text))
+    }
+
     fn test_notification(id: &str, body: &str, read_at: Option<&str>) -> NotificationSummary {
         NotificationSummary {
             id: id.to_string(),
@@ -2744,6 +2817,25 @@ mod cases {
             body: body.to_string(),
             created_at: "2026-04-30T10:00:00Z".to_string(),
             read_at: read_at.map(ToOwned::to_owned),
+        }
+    }
+
+    fn test_saved_message(id: &str, body: &str, saved_at: &str) -> SavedMessageItem {
+        SavedMessageItem {
+            kind: SavedMessageKind::Comment,
+            source_id: id.to_string(),
+            source_obj_index: 1,
+            author: "alice".to_string(),
+            body: body.to_string(),
+            source_label: "#general · Launch notes".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("Launch notes".to_string()),
+            dm_peer_username: None,
+            saved_at: saved_at.to_string(),
+            created_at: "2026-04-29T12:00:00Z".to_string(),
+            channel_id: Some("channel".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
         }
     }
 
