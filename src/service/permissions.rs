@@ -45,30 +45,35 @@ pub(crate) async fn active_thread_name_exists(
     channel_id: Option<&str>,
     name_key: &str,
 ) -> anyhow::Result<bool> {
-    let rows = if let Some(channel_id) = channel_id {
-        query_scalar::<String>(
-            "SELECT title
+    if name_key.is_empty() {
+        return Ok(false);
+    }
+    let count: i64 = if let Some(channel_id) = channel_id {
+        query_scalar(
+            "SELECT COUNT(*)
              FROM threads
              WHERE channel_id = ?
+               AND name_key = ?
                AND deleted_at IS NULL
                AND archived_at IS NULL",
         )
         .bind(channel_id)
-        .fetch_all(&mut tx)
+        .bind(name_key)
+        .fetch_one(&mut tx)
         .await?
     } else {
-        query_scalar::<String>(
-            "SELECT title
+        query_scalar(
+            "SELECT COUNT(*)
              FROM threads
-             WHERE deleted_at IS NULL
+             WHERE name_key = ?
+               AND deleted_at IS NULL
                AND archived_at IS NULL",
         )
-        .fetch_all(&mut tx)
+        .bind(name_key)
+        .fetch_one(&mut tx)
         .await?
     };
-    Ok(rows
-        .into_iter()
-        .any(|title| normalize_name_key(&title) == name_key))
+    Ok(count > 0)
 }
 
 #[derive(Clone, Debug)]

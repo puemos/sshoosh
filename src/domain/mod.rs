@@ -4,9 +4,11 @@ mod event;
 mod ids;
 mod label;
 mod message;
+mod name;
 mod notification;
 mod search;
 
 pub use self::{
-    account::*, channel::*, event::*, ids::*, label::*, message::*, notification::*, search::*,
+    account::*, channel::*, event::*, ids::*, label::*, message::*, name::*, notification::*,
+    search::*,
 };

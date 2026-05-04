@@ -12,6 +12,7 @@ CREATE TABLE accounts (
 );
 
 CREATE INDEX idx_accounts_username_lower ON accounts(lower(username));
+CREATE INDEX idx_accounts_username_lower_id ON accounts(lower(username), id);
 
 CREATE TABLE ssh_keys (
   id TEXT PRIMARY KEY,
@@ -23,6 +24,7 @@ CREATE TABLE ssh_keys (
   last_used_at TEXT,
   revoked_at TEXT
 );
+CREATE INDEX idx_ssh_keys_account_created ON ssh_keys(account_id, created_at, id);
 
 CREATE TABLE invites (
   id TEXT PRIMARY KEY,
@@ -35,6 +37,7 @@ CREATE TABLE invites (
   revoked_at TEXT,
   accepted_at TEXT
 );
+CREATE INDEX idx_invites_created_id ON invites(created_at DESC, id DESC);
 
 CREATE TABLE bootstrap_tokens (
   id TEXT PRIMARY KEY,
@@ -97,6 +100,7 @@ CREATE TABLE threads (
   channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   creator_account_id TEXT NOT NULL REFERENCES accounts(id),
   title TEXT NOT NULL,
+  name_key TEXT,
   body TEXT NOT NULL,
   comment_count INTEGER NOT NULL DEFAULT 0,
   last_comment_index INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +116,16 @@ CREATE TABLE threads (
 CREATE INDEX idx_threads_channel_activity ON threads(channel_id, last_activity_at DESC, id DESC);
 CREATE INDEX idx_threads_channel_visibility_activity
   ON threads(channel_id, deleted_at, archived_at, pinned_at, last_activity_at DESC, id DESC);
+CREATE INDEX idx_threads_channel_list_order
+  ON threads(channel_id, deleted_at, (pinned_at IS NULL), pinned_at DESC, last_activity_at DESC, id DESC);
+CREATE INDEX idx_threads_global_active
+  ON threads(deleted_at, archived_at, channel_id, id);
+CREATE INDEX idx_threads_channel_name_key_active
+  ON threads(channel_id, name_key)
+  WHERE deleted_at IS NULL AND archived_at IS NULL;
+CREATE INDEX idx_threads_name_key_active
+  ON threads(name_key)
+  WHERE deleted_at IS NULL AND archived_at IS NULL;
 
 CREATE TABLE comments (
   id TEXT PRIMARY KEY,
@@ -130,6 +144,9 @@ CREATE TABLE comments (
 CREATE INDEX idx_comments_thread_index ON comments(thread_id, obj_index ASC);
 CREATE INDEX idx_comments_thread_unread
   ON comments(thread_id, obj_index ASC)
+  WHERE deleted_at IS NULL;
+CREATE INDEX idx_comments_thread_author_active
+  ON comments(thread_id, author_account_id)
   WHERE deleted_at IS NULL;
 
 CREATE TABLE thread_reads (
@@ -199,6 +216,12 @@ CREATE TABLE mentions (
 );
 
 CREATE INDEX idx_mentions_target ON mentions(target_account_id, read_at, created_at DESC);
+CREATE INDEX idx_mentions_target_created_id
+  ON mentions(target_account_id, created_at DESC, id DESC);
+CREATE INDEX idx_mentions_target_thread
+  ON mentions(target_account_id, thread_id, read_at, created_at DESC, id DESC);
+CREATE INDEX idx_mentions_target_conversation
+  ON mentions(target_account_id, conversation_id, read_at, created_at DESC, id DESC);
 
 CREATE TABLE reactions (
   id TEXT PRIMARY KEY,
@@ -255,6 +278,7 @@ CREATE TABLE audit_log (
 );
 
 CREATE INDEX idx_audit_log_created ON audit_log(created_at DESC);
+CREATE INDEX idx_audit_log_created_id ON audit_log(created_at DESC, id DESC);
 
 CREATE TABLE message_labels (
   tag TEXT NOT NULL,
@@ -270,12 +294,26 @@ CREATE TABLE message_labels (
 
 CREATE INDEX idx_message_labels_tag_created
   ON message_labels(tag, created_at DESC, source_id DESC);
+CREATE INDEX idx_message_labels_tag_kind_created
+  ON message_labels(tag, source_kind, created_at DESC, source_id DESC);
+CREATE INDEX idx_message_labels_source
+  ON message_labels(source_kind, source_id);
 
 CREATE INDEX idx_message_labels_thread
   ON message_labels(thread_id);
 
 CREATE INDEX idx_message_labels_conversation
   ON message_labels(conversation_id);
+
+CREATE TABLE search_documents (
+  rowid INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('thread', 'comment', 'dm')),
+  object_id TEXT NOT NULL,
+  channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
+  thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+  conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+  UNIQUE(kind, object_id)
+);
 
 CREATE VIRTUAL TABLE search_index USING fts5(
   kind,

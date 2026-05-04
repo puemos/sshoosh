@@ -297,58 +297,6 @@ pub(crate) async fn load_comments(
     Ok((comments, has_more))
 }
 
-pub(crate) async fn load_conversations(
-    pool: impl DbExecutor + Copy,
-    account_id: &str,
-) -> anyhow::Result<Vec<Conversation>> {
-    let rows = query(
-        "SELECT c.id,
-                peer.username AS peer_username,
-                c.last_message_index,
-                CASE
-                  WHEN me.muted_until IS NOT NULL AND me.muted_until > ? THEN 0
-                  ELSE me.unread_count
-                END AS unread_count,
-                c.last_activity_at,
-                me.muted_until,
-                me.saved_at,
-                (
-                    SELECT body
-                    FROM conversation_messages latest
-                    WHERE latest.conversation_id = c.id AND latest.deleted_at IS NULL
-                    ORDER BY latest.obj_index DESC
-                    LIMIT 1
-                ) AS last_message_preview
-         FROM conversations c
-         JOIN conversation_members me ON me.conversation_id = c.id AND me.account_id = ?
-         JOIN conversation_members other ON other.conversation_id = c.id AND other.account_id <> ?
-         JOIN accounts peer ON peer.id = other.account_id
-         WHERE c.archived_at IS NULL
-         ORDER BY c.last_activity_at DESC",
-    )
-    .bind(now())
-    .bind(account_id)
-    .bind(account_id)
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(Conversation {
-                id: row.get("id")?,
-                peer_username: row.get("peer_username")?,
-                last_message_index: row.get("last_message_index")?,
-                unread_count: row.get("unread_count")?,
-                last_activity_at: row.get("last_activity_at")?,
-                last_message_preview: row
-                    .get::<Option<String>>("last_message_preview")?
-                    .map(|preview| sanitize_single_line_text(&preview)),
-                muted_until: row.get("muted_until")?,
-                saved_at: row.get("saved_at")?,
-            })
-        })
-        .collect::<anyhow::Result<Vec<_>>>()
-}
-
 pub(crate) async fn load_dm_sidebar(
     pool: impl DbExecutor + Copy,
     account_id: &str,

@@ -173,13 +173,14 @@ pub(crate) async fn create_thread(
     let thread_id = id();
     query(
         "INSERT INTO threads
-         (id, channel_id, creator_account_id, title, body, last_activity_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         (id, channel_id, creator_account_id, title, name_key, body, last_activity_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread_id)
     .bind(channel_id)
     .bind(actor_id)
     .bind(title)
+    .bind(&title_key)
     .bind(body)
     .bind(&now)
     .bind(&now)
@@ -268,7 +269,9 @@ pub(crate) async fn add_comment(
     anyhow::ensure!(!body.is_empty(), "Comment body is required");
     let mut tx = begin(pool).await?;
     let row = query(
-        "SELECT channel_id, last_comment_index FROM threads WHERE id = ? AND deleted_at IS NULL",
+        "SELECT channel_id, last_comment_index, comment_count
+         FROM threads
+         WHERE id = ? AND deleted_at IS NULL",
     )
     .bind(thread_id)
     .fetch_optional(&mut tx)
@@ -278,8 +281,10 @@ pub(crate) async fn add_comment(
     };
     let channel_id: String = row.get("channel_id")?;
     let current_index: i64 = row.get("last_comment_index")?;
+    let current_comment_count: i64 = row.get("comment_count")?;
     ensure_can_view_channel(&mut tx, actor_id, &channel_id).await?;
     let next_index = current_index + 1;
+    let next_comment_count = current_comment_count + 1;
     let now = now();
     let comment_id = id();
     query(
@@ -327,14 +332,14 @@ pub(crate) async fn add_comment(
          SELECT ?,
                 m.account_id,
                 0,
-                (SELECT COUNT(*) FROM comments cm WHERE cm.thread_id = ? AND cm.deleted_at IS NULL)
+                ?
          FROM channel_members m
          WHERE m.channel_id = ? AND m.account_id <> ?
          ON CONFLICT(thread_id, account_id)
          DO UPDATE SET unread_count = thread_reads.unread_count + 1",
     )
     .bind(thread_id)
-    .bind(thread_id)
+    .bind(next_comment_count)
     .bind(&channel_id)
     .bind(actor_id)
     .execute(&mut tx)

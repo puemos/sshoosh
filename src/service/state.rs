@@ -7,11 +7,49 @@ impl ServerState {
             db,
             live_tx,
             active_connections: Arc::new(RwLock::new(HashMap::new())),
+            hot_label_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<LiveEvent> {
         self.live_tx.subscribe()
+    }
+
+    pub(crate) async fn invalidate_hot_label_cache(&self) {
+        self.hot_label_cache.write().await.clear();
+    }
+
+    pub(crate) async fn invalidate_hot_label_cache_for_event(&self, event: &LiveEvent) {
+        if hot_label_cache_event_kind(event.kind.as_str()) {
+            self.invalidate_hot_label_cache().await;
+        }
+    }
+
+    pub(crate) async fn load_hot_labels_cached(
+        &self,
+        account_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<HotLabel>> {
+        let limit = page_limit(limit, 50);
+        let event_seq: i64 = query_scalar("SELECT COALESCE(MAX(seq), 0) FROM event_log")
+            .fetch_one(self.db.read_pool())
+            .await
+            .unwrap_or(0);
+        let key = (account_id.to_string(), limit);
+        if let Some(entry) = self.hot_label_cache.read().await.get(&key)
+            && entry.event_seq == event_seq
+        {
+            return Ok(entry.labels.clone());
+        }
+        let labels = load_hot_labels(self.db.read_pool(), account_id, limit).await?;
+        self.hot_label_cache.write().await.insert(
+            key,
+            HotLabelCacheEntry {
+                event_seq,
+                labels: labels.clone(),
+            },
+        );
+        Ok(labels)
     }
 
     pub fn is_master(&self) -> bool {
@@ -563,10 +601,26 @@ impl ServerState {
         let mut active_account_ids = load_active_presence_sessions(&read_session).await?;
         active_account_ids.extend(self.active_account_ids().await);
         let users = load_user_presence(&read_session, &active_account_ids).await?;
-        let conversations = load_conversations(&read_session, account_id).await?;
         let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
+        let conversations = dm_sidebar
+            .iter()
+            .filter_map(|dm| {
+                dm.conversation_id
+                    .as_ref()
+                    .map(|conversation_id| Conversation {
+                        id: conversation_id.clone(),
+                        peer_username: dm.peer_username.clone(),
+                        last_message_index: dm.last_message_index,
+                        unread_count: dm.unread_count,
+                        last_activity_at: dm.last_activity_at.clone(),
+                        last_message_preview: dm.last_message_preview.clone(),
+                        muted_until: dm.muted_until.clone(),
+                        saved_at: dm.saved_at.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
         let saved_count = load_saved_message_count(&read_session, account_id).await?;
-        let hot_labels = load_hot_labels(&read_session, account_id, 12).await?;
+        let hot_labels = self.load_hot_labels_cached(account_id, 12).await?;
         let selected_conversation_id = selected_conversation_id
             .filter(|id| {
                 conversations
@@ -895,4 +949,32 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         send_dm(self.db.write_pool(), &actor_id, &conversation_id, &body).await
     }
+}
+
+fn hot_label_cache_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "channel.created"
+            | "channel.member_added"
+            | "channel.member_removed"
+            | "channel.left"
+            | "channel.archived"
+            | "channel.unarchived"
+            | "thread.created"
+            | "thread.edited"
+            | "thread.archived"
+            | "thread.unarchived"
+            | "thread.deleted"
+            | "comment.created"
+            | "comment.edited"
+            | "comment.deleted"
+            | "conversation.opened"
+            | "conversation.message_created"
+            | "conversation.message_edited"
+            | "conversation.message_deleted"
+            | "invite.accepted"
+            | "account.bootstrapped"
+            | "user.disabled"
+            | "user.enabled"
+    )
 }

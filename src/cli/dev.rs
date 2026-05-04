@@ -282,15 +282,17 @@ async fn seed_bench_database(
         let thread_id = format!("bench-thread-{thread:06}");
         let channel_id = format!("bench-channel-{channel:04}");
         let title = bench_thread_title(thread, channel);
+        let name_key = service::normalize_name_key(&title);
         let body = bench_thread_body(thread, channel);
         db::query(
             "INSERT INTO threads
-             (id, channel_id, creator_account_id, title, body, comment_count, last_comment_index, last_activity_at, created_at, updated_at)
-             VALUES (?, ?, 'bench-user-0000', ?, ?, ?, ?, ?, ?, ?)",
+             (id, channel_id, creator_account_id, title, name_key, body, comment_count, last_comment_index, last_activity_at, created_at, updated_at)
+             VALUES (?, ?, 'bench-user-0000', ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&thread_id)
         .bind(&channel_id)
         .bind(&title)
+        .bind(&name_key)
         .bind(&body)
         .bind(comment_count)
         .bind(comment_count)

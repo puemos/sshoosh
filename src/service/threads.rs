@@ -21,14 +21,19 @@ impl ServerState {
             ensure_thread_name_available(&mut tx, &thread.channel_id, &next_key).await?;
         }
         let now = now();
-        query("UPDATE threads SET title = ?, body = ?, updated_at = ?, edited_at = ? WHERE id = ?")
-            .bind(title)
-            .bind(body)
-            .bind(&now)
-            .bind(&now)
-            .bind(thread_id)
-            .execute(&mut tx)
-            .await?;
+        query(
+            "UPDATE threads
+             SET title = ?, name_key = ?, body = ?, updated_at = ?, edited_at = ?
+             WHERE id = ?",
+        )
+        .bind(title)
+        .bind(&next_key)
+        .bind(body)
+        .bind(&now)
+        .bind(&now)
+        .bind(thread_id)
+        .execute(&mut tx)
+        .await?;
         let channel_slug: String = query_scalar("SELECT slug FROM channels WHERE id = ?")
             .bind(&thread.channel_id)
             .fetch_one(&mut tx)
@@ -104,8 +109,9 @@ impl ServerState {
             ensure_thread_name_available(&mut tx, &thread.channel_id, &next_key).await?;
         }
         let now = now();
-        query("UPDATE threads SET title = ?, updated_at = ?, edited_at = ? WHERE id = ?")
+        query("UPDATE threads SET title = ?, name_key = ?, updated_at = ?, edited_at = ? WHERE id = ?")
             .bind(title)
+            .bind(&next_key)
             .bind(&now)
             .bind(&now)
             .bind(thread_id)
@@ -464,7 +470,7 @@ impl ServerState {
     }
 
     pub async fn hot_labels(&self, actor_id: &str, limit: i64) -> anyhow::Result<Vec<HotLabel>> {
-        load_hot_labels(self.db.read_pool(), actor_id, limit).await
+        self.load_hot_labels_cached(actor_id, limit).await
     }
 
     pub async fn label_feed_page_after(

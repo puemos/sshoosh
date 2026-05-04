@@ -312,18 +312,6 @@ pub(crate) fn normalize_slug(input: &str) -> anyhow::Result<String> {
     Ok(out)
 }
 
-pub(crate) fn normalize_name_key(input: &str) -> String {
-    let mut out = String::new();
-    for ch in input.trim().to_lowercase().chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
-        } else if matches!(ch, '-' | '_' | '.' | ' ') && !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    out.trim_matches('-').to_string()
-}
-
 pub(crate) fn sanitize_stored_text(input: &str) -> String {
     input
         .chars()
