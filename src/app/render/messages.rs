@@ -287,7 +287,15 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
     }
 
     if let Some(target) = reaction_target {
-        for row in reaction_rows(reactions, target, surface, body_width) {
+        let rows = reaction_rows(reactions, target, surface, body_width);
+        if !rows.is_empty() {
+            lines.push(message_card_line(
+                gutter,
+                blank_author_prefix_spans(surface),
+            ));
+            row_idx += 1;
+        }
+        for row in rows {
             let hit_row = row_idx.min(u16::MAX as usize) as u16;
             for hit in row.hits {
                 reaction_hits.push(MessageReactionHit {
@@ -358,7 +366,7 @@ fn author_prefix_spans<'a>(author: &str, author_color: Color, surface: Color) ->
             " ".repeat(USERNAME_WIDTH.saturating_sub(author_chars)),
             meta_style,
         ),
-        Span::styled(": ", meta_style),
+        Span::styled("  ", meta_style),
     ]
 }
 
@@ -753,6 +761,17 @@ pub(crate) fn date_divider<'a>(label: &str, width: usize) -> ListItem<'a> {
 
 pub(crate) fn message_gap<'a>() -> ListItem<'a> {
     ListItem::new(Line::from(Span::styled("", theme::message_separator()))).style(theme::panel())
+}
+
+pub(crate) fn message_group_divider<'a>(width: usize) -> ListItem<'a> {
+    ListItem::new(message_card_line(
+        theme::message_separator(),
+        vec![Span::styled(
+            "─".repeat(width.max(1)),
+            theme::message_separator(),
+        )],
+    ))
+    .style(theme::panel())
 }
 
 pub(crate) fn message_card_line<'a>(gutter: Style, content: Vec<Span<'a>>) -> Line<'a> {

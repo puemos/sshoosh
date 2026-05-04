@@ -286,9 +286,10 @@ mod cases {
             selected: false,
         });
 
-        // 3 body rows (abcd, efgh, ij) + metadata fallback + wrapped reaction/add rows.
+        // 3 body rows (abcd, efgh, ij) + metadata fallback + reaction spacer
+        // + wrapped reaction/add rows.
         // Edited is inline or dropped if the body column is too tight.
-        assert_eq!(card.height(), 6);
+        assert_eq!(card.height(), 7);
         assert_eq!(card.link_count(), 0);
     }
 
@@ -341,9 +342,17 @@ mod cases {
         let buffer = terminal.backend().buffer();
         let (short_x, _) = position_for_text(buffer, width, height, "Short body").unwrap();
         let (long_x, _) = position_for_text(buffer, width, height, "Long-name body").unwrap();
+        let (short_author_x, short_author_y) =
+            position_for_text(buffer, width, height, "@alice").unwrap();
+        let short_author_prefix = row_text(buffer, width, short_author_y)
+            .chars()
+            .skip(short_author_x as usize)
+            .take(author_prefix_width())
+            .collect::<String>();
 
         assert_eq!(short_x, author_prefix_width() as u16);
         assert_eq!(long_x, short_x);
+        assert!(!short_author_prefix.contains(':'));
         assert!(format!("{buffer:?}").contains("@alexand..."));
     }
 
@@ -1788,6 +1797,30 @@ mod cases {
             position_for_text(buffer, width, height, "@alice").expect("alice author");
         let (alice_saved_x, alice_saved_y) =
             position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
+        let separator_y = alice_y.saturating_sub(1);
+        let separator_row = row_text(buffer, width, separator_y);
+        let separator_line = separator_row
+            .chars()
+            .skip(root_author_x as usize)
+            .take((width - root_author_x) as usize)
+            .collect::<String>();
+        assert!(separator_y > root_body_y);
+        assert!(separator_line.starts_with('─'));
+        assert!(separator_line.contains("────"));
+        assert_eq!(
+            buffer
+                .cell((root_author_x, separator_y))
+                .expect("group separator author column")
+                .fg,
+            theme::MESSAGE_SEPARATOR
+        );
+        assert_eq!(
+            buffer
+                .cell((root_body_x, separator_y))
+                .expect("group separator")
+                .fg,
+            theme::MESSAGE_SEPARATOR
+        );
         assert_eq!(alice_author_x, root_author_x);
         assert_eq!(alice_x, root_author_x + author_prefix_width() as u16);
         assert_eq!(alice_y, alice_author_y);
@@ -1807,14 +1840,15 @@ mod cases {
             theme::PANEL
         );
         // (edited) renders inline at end of the last body line; reactions sit
-        // in boxed chips directly below the body.
+        // in boxed chips below a spacer row.
         assert!(row_text(buffer, width, alice_y).contains("(edited)"));
         assert!(!row_text(buffer, width, alice_y.saturating_sub(1)).contains("👍 2"));
-        assert!(row_text(buffer, width, alice_y + 1).contains("👍"));
-        assert!(row_text(buffer, width, alice_y + 1).contains("2"));
+        assert!(!row_text(buffer, width, alice_y + 1).contains("👍"));
+        assert!(row_text(buffer, width, alice_y + 2).contains("👍"));
+        assert!(row_text(buffer, width, alice_y + 2).contains("2"));
         let (reaction_x, reaction_y) =
             position_for_text(buffer, width, height, "👍").expect("reaction chip");
-        assert_eq!(reaction_y, alice_y + 1);
+        assert_eq!(reaction_y, alice_y + 2);
         assert_eq!(reaction_x, alice_x + 1);
         assert_eq!(
             buffer

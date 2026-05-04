@@ -159,7 +159,11 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 );
                 append_plain_item(&mut items, &mut content_row, message_gap());
             } else if !continue_group && !first_message {
-                append_plain_item(&mut items, &mut content_row, message_gap());
+                append_plain_item(
+                    &mut items,
+                    &mut content_row,
+                    message_group_divider(message_width),
+                );
             }
             if day.is_some() {
                 last_day = day;
@@ -1124,7 +1128,11 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 Some(&message.created_at),
             );
             if idx > 0 && !continue_group {
-                append_plain_item(&mut items, &mut content_row, message_gap());
+                append_plain_item(
+                    &mut items,
+                    &mut content_row,
+                    message_group_divider(message_width),
+                );
             }
             let header_mode = if continue_group {
                 HeaderMode::Suppressed
