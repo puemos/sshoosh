@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static INPUT_DROPPED_BYTES: AtomicU64 = AtomicU64::new(0);
 static INPUT_RESERVATION_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+static INPUT_DROPPED_WHEEL_EVENTS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn input_backpressure_drops() -> u64 {
     INPUT_DROPPED_BYTES.load(Ordering::Acquire)
@@ -10,6 +11,11 @@ pub(crate) fn input_backpressure_drops() -> u64 {
 
 pub(crate) fn input_reservation_timeouts() -> u64 {
     INPUT_RESERVATION_TIMEOUTS.load(Ordering::Acquire)
+}
+
+#[cfg(test)]
+pub(crate) fn input_mouse_wheel_drops() -> u64 {
+    INPUT_DROPPED_WHEEL_EVENTS.load(Ordering::Acquire)
 }
 impl russh::server::Handler for ClientHandler {
     type Error = anyhow::Error;
@@ -165,10 +171,16 @@ impl russh::server::Handler for ClientHandler {
             row_height as u16,
         )
         .await?;
-        let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE_CAP);
+        let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE_CAP);
+        let (key_tx, key_rx) = mpsc::channel::<Key>(KEY_QUEUE_CAP);
+        let (wheel_tx, wheel_rx) = mpsc::channel::<MouseEvent>(WHEEL_QUEUE_CAP);
         self.app = Some(Arc::new(Mutex::new(app)));
         self.input_tx = Some(input_tx);
         self.input_rx = Some(input_rx);
+        self.key_tx = Some(key_tx);
+        self.key_rx = Some(key_rx);
+        self.wheel_tx = Some(wheel_tx);
+        self.wheel_rx = Some(wheel_rx);
         session.channel_success(channel)?;
         Ok(())
     }
@@ -185,7 +197,19 @@ impl russh::server::Handler for ClientHandler {
         let Some(app) = self.app.as_ref().cloned() else {
             return Ok(());
         };
-        let Some(mut input_rx) = self.input_rx.take() else {
+        let Some(input_rx) = self.input_rx.take() else {
+            return Ok(());
+        };
+        let Some(key_tx) = self.key_tx.take() else {
+            return Ok(());
+        };
+        let Some(mut key_rx) = self.key_rx.take() else {
+            return Ok(());
+        };
+        let Some(wheel_tx) = self.wheel_tx.take() else {
+            return Ok(());
+        };
+        let Some(mut wheel_rx) = self.wheel_rx.take() else {
             return Ok(());
         };
         let channel_id = chan.id();
@@ -207,6 +231,8 @@ impl russh::server::Handler for ClientHandler {
         };
         self.terminal_active = true;
         let _ = timeout(Duration::from_millis(100), handle.data(channel_id, init)).await;
+
+        tokio::spawn(decode_input_to_queues(input_rx, key_tx, wheel_tx));
 
         let state = self.state.clone();
         let signal = Arc::new(RenderSignal::new());
@@ -256,7 +282,16 @@ impl russh::server::Handler for ClientHandler {
                 if last_render.elapsed() < MIN_RENDER_GAP {
                     tokio::time::sleep(MIN_RENDER_GAP - last_render.elapsed()).await;
                 }
-                match render_once(&app, &mut input_rx, &handle, channel_id, &signal).await {
+                match render_once(
+                    &app,
+                    &mut key_rx,
+                    &mut wheel_rx,
+                    &handle,
+                    channel_id,
+                    &signal,
+                )
+                .await
+                {
                     Ok(should_quit) => {
                         last_render = Instant::now();
                         if should_quit {
@@ -335,6 +370,7 @@ impl russh::server::Handler for ClientHandler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         self.cleanup_terminal(channel, session);
+        self.input_tx = None;
         if let Some(app) = self.app.as_ref() {
             app.lock().await.running = false;
         }
@@ -347,6 +383,7 @@ impl russh::server::Handler for ClientHandler {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         self.cleanup_terminal(channel, session);
+        self.input_tx = None;
         if let Some(app) = self.app.as_ref() {
             app.lock().await.running = false;
         }
@@ -373,6 +410,42 @@ async fn send_input_bytes(
             false
         }
     }
+}
+
+async fn decode_input_to_queues(
+    mut input_rx: mpsc::Receiver<Vec<u8>>,
+    key_tx: mpsc::Sender<Key>,
+    wheel_tx: mpsc::Sender<MouseEvent>,
+) {
+    let mut decoder = InputDecoder::default();
+    while let Some(bytes) = input_rx.recv().await {
+        for key in decoder.push(&bytes) {
+            match key {
+                Key::Mouse(mouse) if is_mouse_wheel(mouse.kind) => match wheel_tx.try_send(mouse) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        INPUT_DROPPED_WHEEL_EVENTS.fetch_add(1, Ordering::AcqRel);
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => return,
+                },
+                key => {
+                    if key_tx.send(key).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn is_mouse_wheel(kind: MouseEventKind) -> bool {
+    matches!(
+        kind,
+        MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
+    )
 }
 
 impl ClientHandler {
@@ -407,5 +480,92 @@ mod tests {
         drop(rx);
         let closed = send_input_bytes(&tx, b"closed", Duration::from_millis(20)).await;
         assert!(!closed);
+    }
+
+    #[tokio::test]
+    async fn decoder_task_decodes_bytes_into_keys() {
+        let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(8);
+        let (key_tx, mut key_rx) = mpsc::channel::<Key>(8);
+        let (wheel_tx, mut wheel_rx) = mpsc::channel::<MouseEvent>(8);
+        let decoder_handle = tokio::spawn(decode_input_to_queues(input_rx, key_tx, wheel_tx));
+
+        input_tx
+            .send(b"\x1b[<65;5;5M".to_vec())
+            .await
+            .expect("send sgr scroll bytes");
+
+        let mouse = timeout(Duration::from_millis(200), wheel_rx.recv())
+            .await
+            .expect("decoder produced a wheel event in time")
+            .expect("decoder did not drop wheel channel");
+        assert_eq!(mouse.kind, MouseEventKind::ScrollDown);
+        assert!(key_rx.try_recv().is_err());
+
+        drop(input_tx);
+        decoder_handle.await.expect("decoder task exits cleanly");
+    }
+
+    #[tokio::test]
+    async fn decoder_drops_excess_mouse_wheel_without_blocking_raw_input() {
+        let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(4);
+        let (key_tx, _key_rx) = mpsc::channel::<Key>(4);
+        let (wheel_tx, _wheel_rx) = mpsc::channel::<MouseEvent>(1);
+        wheel_tx
+            .try_send(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 5,
+                row: 5,
+                modifiers: Default::default(),
+            })
+            .expect("prefill wheel queue");
+        let before_drops = input_mouse_wheel_drops();
+        let decoder_handle = tokio::spawn(decode_input_to_queues(input_rx, key_tx, wheel_tx));
+
+        for _ in 0..32 {
+            let enqueued =
+                send_input_bytes(&input_tx, b"\x1b[<65;5;5M", Duration::from_millis(20)).await;
+            assert!(
+                enqueued,
+                "raw input should keep draining under wheel overload"
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            input_mouse_wheel_drops() > before_drops,
+            "wheel overload should be counted on the lossy path"
+        );
+        drop(input_tx);
+        decoder_handle.await.expect("decoder task exits cleanly");
+    }
+
+    #[tokio::test]
+    async fn keyboard_input_stays_reliable_while_wheel_queue_is_full() {
+        let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(4);
+        let (key_tx, mut key_rx) = mpsc::channel::<Key>(4);
+        let (wheel_tx, _wheel_rx) = mpsc::channel::<MouseEvent>(1);
+        wheel_tx
+            .try_send(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 5,
+                row: 5,
+                modifiers: Default::default(),
+            })
+            .expect("prefill wheel queue");
+        let decoder_handle = tokio::spawn(decode_input_to_queues(input_rx, key_tx, wheel_tx));
+
+        input_tx
+            .send(b"\x1b[B".to_vec())
+            .await
+            .expect("send arrow key bytes");
+
+        let key = timeout(Duration::from_millis(200), key_rx.recv())
+            .await
+            .expect("decoder produced a key in time")
+            .expect("decoder did not drop key channel");
+        assert_eq!(key, Key::Down);
+
+        drop(input_tx);
+        decoder_handle.await.expect("decoder task exits cleanly");
     }
 }

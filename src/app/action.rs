@@ -16,6 +16,14 @@ pub enum SourceFocus {
     Dm(i64),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LoadMoreRequest {
+    Search { query: String, cursor: String },
+    Label { tag: String, cursor: String },
+    Saved { cursor: String },
+    Notifications { cursor: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     CreateInvite,
@@ -175,6 +183,8 @@ pub enum Action {
         tag: String,
     },
     ListSaved,
-    LoadMore,
+    LoadMore {
+        request: Option<LoadMoreRequest>,
+    },
     LoadOlder,
 }

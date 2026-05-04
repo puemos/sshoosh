@@ -1,5 +1,29 @@
 use super::*;
+use crate::app::lifecycle::fetch_refresh;
 use crate::time_format::format_human_timestamp;
+
+pub(crate) async fn perform_refresh(app: &Arc<Mutex<App>>) -> anyhow::Result<()> {
+    let refresh_lock = {
+        let app = app.lock().await;
+        app.refresh_lock.clone()
+    };
+    let _guard = refresh_lock.lock_owned().await;
+
+    let (inputs, mut client) = {
+        let app = app.lock().await;
+        (app.refresh_inputs(), app.client_session())
+    };
+    let fetched = match fetch_refresh(&mut client, &inputs).await {
+        Ok(fetched) => fetched,
+        Err(err) => {
+            app.lock().await.running = false;
+            return Err(err);
+        }
+    };
+    let mut app = app.lock().await;
+    app.apply_refresh(inputs, fetched);
+    Ok(())
+}
 
 enum ActionResult {
     Silent,
@@ -44,7 +68,19 @@ impl ActionSelection {
     }
 }
 
+fn refresh_after_action(action: &Action) -> bool {
+    !matches!(
+        action,
+        Action::LoadMore { .. }
+            | Action::Search { .. }
+            | Action::OpenLabel { .. }
+            | Action::ListSaved
+            | Action::ListNotifications
+    )
+}
+
 pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> anyhow::Result<()> {
+    let refresh_after = refresh_after_action(&action);
     let (session, account_id) = {
         let app = app.lock().await;
         (app.client_session(), app.account.id.clone())
@@ -625,108 +661,8 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
                 Err(err) => Err(err),
             }
         }
-        Action::LoadMore => {
-            let saved_request = {
-                let app = app.lock().await;
-                app.saved_next_cursor()
-            };
-            if let Some(cursor) = saved_request {
-                match session
-                    .saved_messages_page_after(
-                        &account_id,
-                        PageRequest {
-                            limit: 50,
-                            cursor: Some(cursor),
-                        },
-                    )
-                    .await
-                {
-                    Ok(page) => {
-                        app.lock()
-                            .await
-                            .append_saved_messages(page.items, page.next_cursor);
-                        Ok(ActionResult::silent())
-                    }
-                    Err(err) => Err(err),
-                }
-            } else {
-                let search_request = {
-                    let app = app.lock().await;
-                    app.search_page_request()
-                };
-                if let Some((query, Some(cursor))) = search_request {
-                    match session
-                        .search_page_after(
-                            &account_id,
-                            &query,
-                            PageRequest {
-                                limit: 50,
-                                cursor: Some(cursor),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(page) => {
-                            app.lock().await.append_search_results(
-                                query,
-                                page.results,
-                                page.next_cursor,
-                            );
-                            Ok(ActionResult::silent())
-                        }
-                        Err(err) => Err(err),
-                    }
-                } else {
-                    let label_request = {
-                        let app = app.lock().await;
-                        app.label_page_request()
-                    };
-                    if let Some((tag, Some(cursor))) = label_request {
-                        match session
-                            .label_feed_page_after(
-                                &account_id,
-                                &tag,
-                                PageRequest {
-                                    limit: 50,
-                                    cursor: Some(cursor),
-                                },
-                            )
-                            .await
-                        {
-                            Ok(page) => {
-                                app.lock().await.append_label_feed(
-                                    tag,
-                                    page.items,
-                                    page.next_cursor,
-                                );
-                                Ok(ActionResult::silent())
-                            }
-                            Err(err) => Err(err),
-                        }
-                    } else if let Some(cursor) = app.lock().await.notifications_next_cursor() {
-                        match session
-                            .list_notifications_page(
-                                &account_id,
-                                PageRequest {
-                                    limit: 50,
-                                    cursor: Some(cursor),
-                                },
-                            )
-                            .await
-                        {
-                            Ok(page) => {
-                                app.lock()
-                                    .await
-                                    .append_notifications(page.items, page.next_cursor);
-                                Ok(ActionResult::silent())
-                            }
-                            Err(err) => Err(err),
-                        }
-                    } else {
-                        Ok(ActionResult::silent())
-                    }
-                }
-            }
+        Action::LoadMore { request } => {
+            process_load_more(app, &session, &account_id, request).await
         }
         Action::LoadOlder => {
             let mut app = app.lock().await;
@@ -739,21 +675,135 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
         }
     };
 
-    let mut app = app.lock().await;
-    match &result {
-        Ok(ActionResult::Silent) => {}
-        Ok(ActionResult::Message(message)) if message.starts_with("Invite code:") => {
-            app.set_banner_modal_ok(message)
+    {
+        let mut app = app.lock().await;
+        match &result {
+            Ok(ActionResult::Silent) => {}
+            Ok(ActionResult::Message(message)) if message.starts_with("Invite code:") => {
+                app.set_banner_modal_ok(message)
+            }
+            Ok(ActionResult::ModalMessage(message)) => app.set_banner_modal_ok(message),
+            Ok(ActionResult::Message(message)) => app.set_banner_ok(message),
+            Ok(ActionResult::List(list)) => app.set_banner_list(list.clone()),
+            Err(err) => app.set_banner_err(err.to_string()),
         }
-        Ok(ActionResult::ModalMessage(message)) => app.set_banner_modal_ok(message),
-        Ok(ActionResult::Message(message)) => app.set_banner_ok(message),
-        Ok(ActionResult::List(list)) => app.set_banner_list(list.clone()),
-        Err(err) => app.set_banner_err(err.to_string()),
     }
-    if let Err(err) = app.refresh().await {
-        app.set_banner_err(format!("refresh failed: {err}"));
+    if refresh_after && let Err(err) = perform_refresh(app).await {
+        app.lock()
+            .await
+            .set_banner_err(format!("refresh failed: {err}"));
     }
     result.map(|_| ())
+}
+
+async fn process_load_more(
+    app: &Arc<Mutex<App>>,
+    session: &ClientSession,
+    account_id: &str,
+    request: Option<LoadMoreRequest>,
+) -> anyhow::Result<ActionResult> {
+    let request = match request {
+        Some(request) => Some(request),
+        None => {
+            let app = app.lock().await;
+            app.current_load_more_request()
+        }
+    };
+    let Some(request) = request else {
+        return Ok(ActionResult::silent());
+    };
+
+    let result = match &request {
+        LoadMoreRequest::Saved { cursor } => {
+            let page = session
+                .saved_messages_page_after(
+                    account_id,
+                    PageRequest {
+                        limit: 50,
+                        cursor: Some(cursor.clone()),
+                    },
+                )
+                .await;
+            match page {
+                Ok(page) => {
+                    let mut app = app.lock().await;
+                    if app.load_more_request_is_current(&request) {
+                        app.append_saved_messages(page.items, page.next_cursor);
+                    }
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        LoadMoreRequest::Search { query, cursor } => {
+            let page = session
+                .search_page_after(
+                    account_id,
+                    query,
+                    PageRequest {
+                        limit: 50,
+                        cursor: Some(cursor.clone()),
+                    },
+                )
+                .await;
+            match page {
+                Ok(page) => {
+                    let mut app = app.lock().await;
+                    if app.load_more_request_is_current(&request) {
+                        app.append_search_results(query.clone(), page.results, page.next_cursor);
+                    }
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        LoadMoreRequest::Label { tag, cursor } => {
+            let page = session
+                .label_feed_page_after(
+                    account_id,
+                    tag,
+                    PageRequest {
+                        limit: 50,
+                        cursor: Some(cursor.clone()),
+                    },
+                )
+                .await;
+            match page {
+                Ok(page) => {
+                    let mut app = app.lock().await;
+                    if app.load_more_request_is_current(&request) {
+                        app.append_label_feed(tag.clone(), page.items, page.next_cursor);
+                    }
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
+        LoadMoreRequest::Notifications { cursor } => {
+            let page = session
+                .list_notifications_page(
+                    account_id,
+                    PageRequest {
+                        limit: 50,
+                        cursor: Some(cursor.clone()),
+                    },
+                )
+                .await;
+            match page {
+                Ok(page) => {
+                    let mut app = app.lock().await;
+                    if app.load_more_request_is_current(&request) {
+                        app.append_notifications(page.items, page.next_cursor);
+                    }
+                    Ok(ActionResult::silent())
+                }
+                Err(err) => Err(err),
+            }
+        }
+    };
+
+    app.lock().await.finish_load_more_request(&request);
+    result
 }
 
 async fn open_source_target(

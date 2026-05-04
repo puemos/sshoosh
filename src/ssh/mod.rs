@@ -23,7 +23,10 @@ use tokio::{
 };
 
 use crate::{
-    app::{Action, App, ListModal, ListModalAction, SourceFocus, SourceTarget},
+    app::{
+        Action, App, InputDecoder, Key, ListModal, ListModalAction, LoadMoreRequest, MouseEvent,
+        MouseEventKind, SourceFocus, SourceTarget,
+    },
     client::ClientSession,
     config::Config,
     output::ssh::format_audit,
@@ -36,6 +39,10 @@ use crate::{
 };
 
 const INPUT_QUEUE_CAP: usize = 256;
+const KEY_QUEUE_CAP: usize = 1024;
+const WHEEL_QUEUE_CAP: usize = 128;
+const MAX_KEYS_PER_FRAME: usize = 128;
+const MAX_WHEEL_EVENTS_PER_FRAME: usize = 128;
 const WORLD_TICK_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_RENDER_GAP: Duration = Duration::from_millis(20);
 const PRESENCE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(45);

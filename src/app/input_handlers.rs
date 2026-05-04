@@ -1,8 +1,9 @@
 use super::*;
 impl App {
+    #[cfg(test)]
     pub fn handle_input(&mut self, bytes: &[u8]) {
-        let keys = self.decoder.push(bytes);
-        for key in keys {
+        let mut decoder = InputDecoder::default();
+        for key in decoder.push(bytes) {
             self.handle_key(key);
             if !self.running {
                 break;

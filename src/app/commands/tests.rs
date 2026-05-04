@@ -210,7 +210,7 @@ mod cases {
                     tag: "deploy-2026".to_string(),
                 },
             ),
-            ("/more", Action::LoadMore),
+            ("/more", Action::LoadMore { request: None }),
             ("/older", Action::LoadOlder),
             (
                 "/notification terminal on",

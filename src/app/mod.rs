@@ -4,10 +4,11 @@ mod input;
 mod render;
 mod state;
 mod theme;
-pub use action::{Action, SourceFocus, SourceTarget};
+pub use action::{Action, LoadMoreRequest, SourceFocus, SourceTarget};
 
 use std::{
     collections::{HashSet, VecDeque},
+    sync::Arc,
     time::Duration,
 };
 
@@ -27,13 +28,15 @@ const DEFAULT_SEARCH_LIMIT: i64 = 50;
 
 use self::{
     commands::{CommandExecutor, CommandRegistry},
-    input::{InputDecoder, Key, MouseButton, MouseEvent, MouseEventKind},
+    input::MouseButton,
     state::{
         ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
         EditableMessageTarget, HitRegion, HitTarget, NotificationFilter, PaletteState,
         ReactionTarget, Route, SelectionAnchor, SelectionRange, UiMode, UiState,
     },
 };
+
+pub(crate) use self::input::{InputDecoder, Key, MouseEvent, MouseEventKind};
 
 pub use self::state::{ListModal, ListModalAction};
 pub(crate) use self::util::*;
@@ -48,7 +51,6 @@ pub struct App {
     snapshot: Snapshot,
     ui: UiState,
     commands: CommandRegistry,
-    decoder: InputDecoder,
     actions: Vec<Action>,
     refresh_requested: bool,
     pending_link_open: Option<String>,
@@ -62,6 +64,8 @@ pub struct App {
     seen_notification_ids: HashSet<String>,
     pending_terminal_notifications: VecDeque<TerminalNotification>,
     emitted_terminal_title: Option<String>,
+    pub(crate) refresh_lock: Arc<tokio::sync::Mutex<()>>,
+    pending_load_more: HashSet<LoadMoreRequest>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,7 +107,7 @@ struct TerminalNotification {
 
 mod compose;
 mod input_handlers;
-mod lifecycle;
+pub(crate) mod lifecycle;
 mod navigation;
 mod render_bridge;
 mod tests;

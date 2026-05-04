@@ -1,7 +1,8 @@
 use super::*;
 pub(crate) async fn render_once(
     app: &Arc<Mutex<App>>,
-    input_rx: &mut mpsc::Receiver<Vec<u8>>,
+    key_rx: &mut mpsc::Receiver<Key>,
+    wheel_rx: &mut mpsc::Receiver<MouseEvent>,
     handle: &russh::server::Handle,
     channel_id: ChannelId,
     signal: &RenderSignal,
@@ -9,8 +10,29 @@ pub(crate) async fn render_once(
     let (actions, needs_refresh, running) = {
         let mut app = app.lock().await;
         signal.dirty.store(false, Ordering::Release);
-        while let Ok(data) = input_rx.try_recv() {
-            app.handle_input(&data);
+        let mut drained_keys = 0;
+        while drained_keys < MAX_KEYS_PER_FRAME {
+            let Ok(key) = key_rx.try_recv() else {
+                break;
+            };
+            app.handle_key(key);
+            drained_keys += 1;
+            if !app.running {
+                break;
+            }
+        }
+        let mut drained_wheel_events = 0;
+        while app.running && drained_wheel_events < MAX_WHEEL_EVENTS_PER_FRAME {
+            let Ok(mouse) = wheel_rx.try_recv() else {
+                break;
+            };
+            app.handle_mouse(mouse);
+            drained_wheel_events += 1;
+        }
+        if drained_keys == MAX_KEYS_PER_FRAME || drained_wheel_events == MAX_WHEEL_EVENTS_PER_FRAME
+        {
+            signal.dirty.store(true, Ordering::Release);
+            signal.notify.notify_one();
         }
         let live_changed = app.drain_live_events();
         let refresh_requested = app.take_refresh_requested();
@@ -26,15 +48,24 @@ pub(crate) async fn render_once(
         process_action(app, action).await.ok();
     }
 
+    if needs_refresh && let Err(err) = perform_refresh(app).await {
+        app.lock()
+            .await
+            .set_banner_err(format!("refresh failed: {err}"));
+    }
+
+    {
+        let mut app = app.lock().await;
+        if app.drain_live_events() || app.take_refresh_requested() {
+            signal.dirty.store(true, Ordering::Release);
+            signal.notify.notify_one();
+        }
+    }
+
     let frame = {
         let mut app = app.lock().await;
         if !app.running {
             return Ok(true);
-        }
-        let needs_refresh =
-            needs_refresh || app.drain_live_events() || app.take_refresh_requested();
-        if needs_refresh && let Err(err) = app.refresh().await {
-            app.set_banner_err(format!("refresh failed: {err}"));
         }
         app.render()?
     };

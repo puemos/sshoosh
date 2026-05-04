@@ -235,12 +235,9 @@ impl App {
 
     fn queue_result_list_page_if_available(&mut self) {
         if self.can_load_more_result_list()
-            && !self
-                .actions
-                .iter()
-                .any(|action| matches!(action, Action::LoadMore))
+            && let Some(request) = self.current_load_more_request()
         {
-            self.actions.push(Action::LoadMore);
+            self.queue_load_more_request(request);
         }
     }
 

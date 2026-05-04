@@ -11,9 +11,9 @@ mod cases {
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
-            DmSidebarItem, HotLabel, NotificationSummary, ReactionSummary, SavedMessageItem,
-            SavedMessageKind, SearchKind, SearchResult, ServerState, Snapshot, ThreadItem,
-            UserPresence,
+            DmSidebarItem, HotLabel, LabelFeedItem, LabelFeedKind, NotificationSummary,
+            ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind, SearchResult,
+            ServerState, Snapshot, ThreadItem, UserPresence,
         },
     };
 
@@ -900,14 +900,15 @@ mod cases {
         app.ui.route = Route::Saved;
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render saved screen");
-        let saved_hit_rows = app
+        let saved_hit_height: u16 = app
             .ui
             .hit_map
             .entries()
             .iter()
             .filter(|region| matches!(region.target, HitTarget::SavedResult(0)))
-            .count();
-        assert!(saved_hit_rows >= 2);
+            .map(|region| region.rect.height)
+            .sum();
+        assert!(saved_hit_height >= 2);
 
         app.activate_selection();
 
@@ -1031,9 +1032,10 @@ mod cases {
 
         assert!(output.contains("DM @shy → @alice"), "{output:?}");
         assert!(
-            output.contains("@shy on #support / Search quality pass"),
+            output.contains("#support › Search quality pass"),
             "{output:?}"
         );
+        assert!(output.contains("@shy"), "{output:?}");
         assert!(!output.contains("saved   @"), "{output:?}");
     }
 
@@ -2034,7 +2036,14 @@ mod cases {
             .expect("detail region");
 
         scroll_down_at(&mut app, detail_region.rect.x, detail_region.rect.y);
-        assert_eq!(app.actions, vec![Action::LoadMore]);
+        assert_eq!(
+            app.actions,
+            vec![Action::LoadMore {
+                request: Some(LoadMoreRequest::Saved {
+                    cursor: "saved-cursor".to_string(),
+                }),
+            }]
+        );
 
         app.actions.clear();
         app.snapshot.notifications = vec![notification(1, "reply")];
@@ -2044,7 +2053,17 @@ mod cases {
         app.render().expect("render notifications");
 
         app.handle_input(b"\x1b[B");
-        assert_eq!(app.actions, vec![Action::LoadMore]);
+        assert_eq!(
+            app.actions,
+            vec![Action::LoadMore {
+                request: Some(LoadMoreRequest::Notifications {
+                    cursor: "notification-cursor".to_string(),
+                }),
+            }]
+        );
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.actions.len(), 1);
     }
 
     #[tokio::test]
@@ -2077,7 +2096,7 @@ mod cases {
         app.snapshot.comments_has_more = true;
         let app = Arc::new(Mutex::new(app));
 
-        crate::ssh::process_action(&app, Action::LoadMore)
+        crate::ssh::process_action(&app, Action::LoadMore { request: None })
             .await
             .expect("process load more");
         assert_eq!(app.lock().await.history_limit, DEFAULT_HISTORY_LIMIT);
@@ -2740,5 +2759,116 @@ mod cases {
 
         let second = String::from_utf8_lossy(&app.render().expect("second render")).into_owned();
         assert!(!second.contains("\x1b]99;"));
+    }
+
+    #[tokio::test]
+    async fn apply_refresh_preserves_route_specific_view_state() {
+        use crate::app::lifecycle::RefreshFetched;
+
+        let mut app = test_app("apply-refresh-routes").await;
+
+        let preserved_search = vec![SearchResult {
+            kind: SearchKind::Comment,
+            label: "#general · Deploy notes".to_string(),
+            context: "preserved search context".to_string(),
+            snippet: "preserved search".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        let preserved_saved = vec![saved_message(11)];
+        let preserved_labels = vec![LabelFeedItem {
+            kind: LabelFeedKind::Comment,
+            source_id: "comment-label".to_string(),
+            source_obj_index: Some(13),
+            author: "alice".to_string(),
+            body: "preserved label".to_string(),
+            source_label: "#general · Deploy notes".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("Deploy notes".to_string()),
+            dm_peer_username: None,
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        let preserved_notifications = vec![notification(17, "preserved notification")];
+
+        let make_fetched = |app: &App| RefreshFetched {
+            account: app.account.clone(),
+            snapshot: Snapshot {
+                channels: app.snapshot.channels.clone(),
+                ..Snapshot::default()
+            },
+            terminal_notifications_enabled: false,
+        };
+
+        // Search route preserves search results across the merge.
+        app.snapshot.search_query = Some("foo".to_string());
+        app.snapshot.search_results = preserved_search.clone();
+        app.snapshot.search_has_more = true;
+        app.snapshot.search_next_cursor = Some("cursor-search".to_string());
+        app.ui.route = Route::Search;
+        let inputs = app.refresh_inputs();
+        let fetched = make_fetched(&app);
+        app.apply_refresh(inputs, fetched);
+        assert_eq!(app.snapshot.search_results.len(), 1);
+        assert_eq!(app.snapshot.search_results[0].snippet, "preserved search");
+        assert_eq!(app.snapshot.search_query.as_deref(), Some("foo"));
+        assert_eq!(
+            app.snapshot.search_next_cursor.as_deref(),
+            Some("cursor-search")
+        );
+
+        // Saved route preserves saved messages across the merge.
+        app.snapshot.saved_messages = preserved_saved.clone();
+        app.snapshot.saved_has_more = true;
+        app.snapshot.saved_next_cursor = Some("cursor-saved".to_string());
+        app.ui.route = Route::Saved;
+        let inputs = app.refresh_inputs();
+        let fetched = make_fetched(&app);
+        app.apply_refresh(inputs, fetched);
+        assert_eq!(app.snapshot.saved_messages.len(), 1);
+        assert_eq!(app.snapshot.saved_messages[0].source_id, "comment-11");
+        assert_eq!(
+            app.snapshot.saved_next_cursor.as_deref(),
+            Some("cursor-saved")
+        );
+
+        // Label route preserves the label feed.
+        app.snapshot.label_query = Some("ship".to_string());
+        app.snapshot.label_items = preserved_labels.clone();
+        app.snapshot.label_has_more = false;
+        app.snapshot.label_next_cursor = None;
+        app.ui.route = Route::Label("ship".to_string());
+        let inputs = app.refresh_inputs();
+        let fetched = make_fetched(&app);
+        app.apply_refresh(inputs, fetched);
+        assert_eq!(app.snapshot.label_items.len(), 1);
+        assert_eq!(app.snapshot.label_items[0].source_id, "comment-label");
+        assert_eq!(app.snapshot.label_query.as_deref(), Some("ship"));
+
+        // Notifications route preserves the notification list.
+        app.snapshot.notifications = preserved_notifications.clone();
+        app.snapshot.notifications_next_cursor = Some("cursor-notif".to_string());
+        app.ui.route = Route::Notifications;
+        let inputs = app.refresh_inputs();
+        let fetched = make_fetched(&app);
+        app.apply_refresh(inputs, fetched);
+        assert_eq!(app.snapshot.notifications.len(), 1);
+        assert_eq!(app.snapshot.notifications[0].id, "notification-17");
+        assert_eq!(
+            app.snapshot.notifications_next_cursor.as_deref(),
+            Some("cursor-notif")
+        );
+
+        // Channel route uses whatever the fetched snapshot returned (no preservation).
+        app.snapshot.search_results = preserved_search.clone();
+        app.ui.route = Route::Channel("general".to_string());
+        let inputs = app.refresh_inputs();
+        let fetched = make_fetched(&app);
+        app.apply_refresh(inputs, fetched);
+        assert!(app.snapshot.search_results.is_empty());
+        assert!(app.snapshot.notifications.is_empty());
     }
 }

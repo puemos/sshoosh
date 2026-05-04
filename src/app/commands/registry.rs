@@ -250,7 +250,7 @@ impl CommandRegistry {
                     saved: false,
                 })
             }),
-            "more" => Ok(Some(Action::LoadMore)),
+            "more" => Ok(Some(Action::LoadMore { request: None })),
             "older" => Ok(Some(Action::LoadOlder)),
             "help" => Ok(None),
             "quit" => Ok(None),

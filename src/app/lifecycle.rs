@@ -1,4 +1,55 @@
+use std::sync::Arc;
+
 use super::*;
+
+pub(crate) struct RefreshInputs {
+    was_activated: bool,
+    history_limit: i64,
+    selected_channel_id: Option<String>,
+    selected_thread_id: Option<String>,
+    selected_conversation_id: Option<String>,
+    search_query: Option<String>,
+    search_results: Vec<SearchResult>,
+    search_has_more: bool,
+    search_next_cursor: Option<String>,
+    saved_messages: Vec<SavedMessageItem>,
+    saved_has_more: bool,
+    saved_next_cursor: Option<String>,
+    label_query: Option<String>,
+    label_items: Vec<LabelFeedItem>,
+    label_has_more: bool,
+    label_next_cursor: Option<String>,
+    notifications: Vec<NotificationSummary>,
+    notifications_next_cursor: Option<String>,
+}
+
+pub(crate) struct RefreshFetched {
+    pub(crate) account: Account,
+    pub(crate) snapshot: Snapshot,
+    pub(crate) terminal_notifications_enabled: bool,
+}
+
+pub(crate) async fn fetch_refresh(
+    client: &mut ClientSession,
+    inputs: &RefreshInputs,
+) -> anyhow::Result<RefreshFetched> {
+    let account = client.refresh_account().await?;
+    let snapshot = client
+        .snapshot(
+            inputs.selected_channel_id.as_deref(),
+            inputs.selected_thread_id.as_deref(),
+            inputs.selected_conversation_id.as_deref(),
+            inputs.history_limit,
+        )
+        .await?;
+    let terminal_notifications_enabled = client.terminal_notifications_enabled(&account.id).await?;
+    Ok(RefreshFetched {
+        account,
+        snapshot,
+        terminal_notifications_enabled,
+    })
+}
+
 impl App {
     pub async fn new(
         account: Account,
@@ -35,7 +86,6 @@ impl App {
             snapshot,
             ui,
             commands: CommandRegistry::default(),
-            decoder: InputDecoder::default(),
             actions: Vec::new(),
             refresh_requested: false,
             pending_link_open: None,
@@ -49,80 +99,73 @@ impl App {
             seen_notification_ids,
             pending_terminal_notifications: VecDeque::new(),
             emitted_terminal_title: None,
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
+            pending_load_more: HashSet::new(),
         })
     }
 
-    pub async fn refresh(&mut self) -> anyhow::Result<()> {
-        let was_activated = self.account.activated;
-        self.account = match self.client.refresh_account().await {
-            Ok(account) => account,
-            Err(err) => {
-                self.running = false;
-                return Err(err);
-            }
-        };
-        let search_query = self.snapshot.search_query.clone();
-        let search_results = self.snapshot.search_results.clone();
-        let search_has_more = self.snapshot.search_has_more;
-        let search_next_cursor = self.snapshot.search_next_cursor.clone();
-        let saved_messages = self.snapshot.saved_messages.clone();
-        let saved_has_more = self.snapshot.saved_has_more;
-        let saved_next_cursor = self.snapshot.saved_next_cursor.clone();
-        let label_query = self.snapshot.label_query.clone();
-        let label_items = self.snapshot.label_items.clone();
-        let label_has_more = self.snapshot.label_has_more;
-        let label_next_cursor = self.snapshot.label_next_cursor.clone();
-        let notifications = self.snapshot.notifications.clone();
-        let notifications_next_cursor = self.snapshot.notifications_next_cursor.clone();
-        self.snapshot = self
-            .client
-            .snapshot(
-                self.snapshot.selected_channel_id.as_deref(),
-                self.snapshot.selected_thread_id.as_deref(),
-                self.snapshot.selected_conversation_id.as_deref(),
-                self.history_limit,
-            )
-            .await?;
-        if !was_activated && self.account.activated {
+    pub(crate) fn refresh_inputs(&self) -> RefreshInputs {
+        RefreshInputs {
+            was_activated: self.account.activated,
+            history_limit: self.history_limit,
+            selected_channel_id: self.snapshot.selected_channel_id.clone(),
+            selected_thread_id: self.snapshot.selected_thread_id.clone(),
+            selected_conversation_id: self.snapshot.selected_conversation_id.clone(),
+            search_query: self.snapshot.search_query.clone(),
+            search_results: self.snapshot.search_results.clone(),
+            search_has_more: self.snapshot.search_has_more,
+            search_next_cursor: self.snapshot.search_next_cursor.clone(),
+            saved_messages: self.snapshot.saved_messages.clone(),
+            saved_has_more: self.snapshot.saved_has_more,
+            saved_next_cursor: self.snapshot.saved_next_cursor.clone(),
+            label_query: self.snapshot.label_query.clone(),
+            label_items: self.snapshot.label_items.clone(),
+            label_has_more: self.snapshot.label_has_more,
+            label_next_cursor: self.snapshot.label_next_cursor.clone(),
+            notifications: self.snapshot.notifications.clone(),
+            notifications_next_cursor: self.snapshot.notifications_next_cursor.clone(),
+        }
+    }
+
+    pub(crate) fn apply_refresh(&mut self, inputs: RefreshInputs, fetched: RefreshFetched) {
+        self.account = fetched.account;
+        self.snapshot = fetched.snapshot;
+        if !inputs.was_activated && self.account.activated {
             self.ui.route = Route::Notifications;
             self.ui.active_pane = ActivePane::Detail;
             self.ui.composer.reset_input();
             self.ui.show_startup_splash(Duration::from_millis(2400));
         }
-        let terminal_notifications_enabled = self
-            .client
-            .terminal_notifications_enabled(&self.account.id)
-            .await?;
-        self.queue_new_terminal_notifications(terminal_notifications_enabled);
+        self.queue_new_terminal_notifications(fetched.terminal_notifications_enabled);
         if self.ui.route == Route::Search {
-            self.snapshot.search_query = search_query;
-            self.snapshot.search_results = search_results;
-            self.snapshot.search_has_more = search_has_more;
-            self.snapshot.search_next_cursor = search_next_cursor;
+            self.snapshot.search_query = inputs.search_query;
+            self.snapshot.search_results = inputs.search_results;
+            self.snapshot.search_has_more = inputs.search_has_more;
+            self.snapshot.search_next_cursor = inputs.search_next_cursor;
             self.ui.search_selected = self
                 .ui
                 .search_selected
                 .min(self.snapshot.search_results.len().saturating_sub(1));
         } else if self.ui.route == Route::Saved {
-            self.snapshot.saved_messages = saved_messages;
-            self.snapshot.saved_has_more = saved_has_more;
-            self.snapshot.saved_next_cursor = saved_next_cursor;
+            self.snapshot.saved_messages = inputs.saved_messages;
+            self.snapshot.saved_has_more = inputs.saved_has_more;
+            self.snapshot.saved_next_cursor = inputs.saved_next_cursor;
             self.ui.saved_selected = self
                 .ui
                 .saved_selected
                 .min(self.snapshot.saved_messages.len().saturating_sub(1));
         } else if matches!(self.ui.route, Route::Label(_)) {
-            self.snapshot.label_query = label_query;
-            self.snapshot.label_items = label_items;
-            self.snapshot.label_has_more = label_has_more;
-            self.snapshot.label_next_cursor = label_next_cursor;
+            self.snapshot.label_query = inputs.label_query;
+            self.snapshot.label_items = inputs.label_items;
+            self.snapshot.label_has_more = inputs.label_has_more;
+            self.snapshot.label_next_cursor = inputs.label_next_cursor;
             self.ui.label_selected = self
                 .ui
                 .label_selected
                 .min(self.snapshot.label_items.len().saturating_sub(1));
         } else if self.ui.route == Route::Notifications {
-            self.snapshot.notifications = notifications;
-            self.snapshot.notifications_next_cursor = notifications_next_cursor;
+            self.snapshot.notifications = inputs.notifications;
+            self.snapshot.notifications_next_cursor = inputs.notifications_next_cursor;
             let visible_len = self.visible_notification_indices().len();
             self.ui.notifications_selected = self
                 .ui
@@ -138,6 +181,20 @@ impl App {
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
         self.refresh_requested = false;
+    }
+
+    #[cfg(test)]
+    pub async fn refresh(&mut self) -> anyhow::Result<()> {
+        let inputs = self.refresh_inputs();
+        let mut client = self.client.clone();
+        let fetched = match fetch_refresh(&mut client, &inputs).await {
+            Ok(fetched) => fetched,
+            Err(err) => {
+                self.running = false;
+                return Err(err);
+            }
+        };
+        self.apply_refresh(inputs, fetched);
         Ok(())
     }
 
@@ -273,26 +330,67 @@ impl App {
         self.ui.route == Route::Notifications
     }
 
-    pub fn search_page_request(&self) -> Option<(String, Option<String>)> {
-        self.search_query()
-            .map(|query| (query, self.snapshot.search_next_cursor.clone()))
+    pub(crate) fn current_load_more_request(&self) -> Option<LoadMoreRequest> {
+        if self.saved_active() {
+            return self
+                .snapshot
+                .saved_next_cursor
+                .clone()
+                .map(|cursor| LoadMoreRequest::Saved { cursor });
+        }
+        if let Some(query) = self.search_query()
+            && let Some(cursor) = self.snapshot.search_next_cursor.clone()
+        {
+            return Some(LoadMoreRequest::Search { query, cursor });
+        }
+        if let Some(tag) = self.label_query()
+            && let Some(cursor) = self.snapshot.label_next_cursor.clone()
+        {
+            return Some(LoadMoreRequest::Label { tag, cursor });
+        }
+        if self.notifications_active() {
+            return self
+                .snapshot
+                .notifications_next_cursor
+                .clone()
+                .map(|cursor| LoadMoreRequest::Notifications { cursor });
+        }
+        None
     }
 
-    pub fn saved_next_cursor(&self) -> Option<String> {
-        self.saved_active()
-            .then(|| self.snapshot.saved_next_cursor.clone())
-            .flatten()
+    pub(crate) fn queue_load_more_request(&mut self, request: LoadMoreRequest) -> bool {
+        if self.pending_load_more.contains(&request) {
+            return false;
+        }
+        self.pending_load_more.insert(request.clone());
+        self.actions.push(Action::LoadMore {
+            request: Some(request),
+        });
+        true
     }
 
-    pub fn label_page_request(&self) -> Option<(String, Option<String>)> {
-        self.label_query()
-            .map(|tag| (tag, self.snapshot.label_next_cursor.clone()))
+    pub(crate) fn finish_load_more_request(&mut self, request: &LoadMoreRequest) {
+        self.pending_load_more.remove(request);
     }
 
-    pub fn notifications_next_cursor(&self) -> Option<String> {
-        self.notifications_active()
-            .then(|| self.snapshot.notifications_next_cursor.clone())
-            .flatten()
+    pub(crate) fn load_more_request_is_current(&self, request: &LoadMoreRequest) -> bool {
+        match request {
+            LoadMoreRequest::Saved { cursor } => {
+                self.saved_active() && self.snapshot.saved_next_cursor.as_deref() == Some(cursor)
+            }
+            LoadMoreRequest::Search { query, cursor } => {
+                self.search_query().as_deref() == Some(query.as_str())
+                    && self.snapshot.search_next_cursor.as_deref() == Some(cursor)
+            }
+            LoadMoreRequest::Label { tag, cursor } => {
+                self.label_query().as_deref() == Some(tag.as_str())
+                    && self.snapshot.label_next_cursor.as_deref() == Some(cursor)
+            }
+            LoadMoreRequest::Notifications { cursor } => {
+                self.notifications_active()
+                    && self.snapshot.notifications_next_cursor.as_deref() == Some(cursor)
+            }
+        }
     }
 
     pub fn reset_search_limit(&mut self) -> i64 {
