@@ -57,6 +57,7 @@ pub(crate) fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun
     render_message_body_with_mentions(body, width, &[])
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn render_message_body_with_mentions(
     body: &str,
     width: usize,
@@ -484,9 +485,20 @@ pub(crate) fn starts_ordered_list_item(trimmed: &str) -> bool {
 }
 
 pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<StyledRun>> {
+    wrap_styled_runs_with_first_width(runs, width, width)
+}
+
+pub(crate) fn wrap_styled_runs_with_first_width(
+    runs: Vec<StyledRun>,
+    first_width: usize,
+    rest_width: usize,
+) -> Vec<Vec<StyledRun>> {
     let mut wrapped = Vec::new();
     let mut line = Vec::new();
     let mut line_width = 0;
+    let first_width = first_width.max(1);
+    let rest_width = rest_width.max(1);
+    let mut width = first_width;
 
     for run in runs {
         let style = run.style;
@@ -494,6 +506,7 @@ pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<St
             if line_width == width {
                 wrapped.push(std::mem::take(&mut line));
                 line_width = 0;
+                width = rest_width;
             }
             if line_width == 0 && ch == ' ' {
                 continue;
@@ -501,6 +514,7 @@ pub(crate) fn wrap_styled_runs(runs: Vec<StyledRun>, width: usize) -> Vec<Vec<St
             if ch == ' ' && line_width + 1 == width {
                 wrapped.push(std::mem::take(&mut line));
                 line_width = 0;
+                width = rest_width;
                 continue;
             }
             push_run_with_metadata(

@@ -5,7 +5,9 @@ use crate::time_format::format_human_timestamp;
 use ratatui::style::Color;
 
 const MESSAGE_PREFIX: &str = "";
-const MESSAGE_PREFIX_WIDTH: u16 = 0;
+const USERNAME_WIDTH: usize = 10;
+const AUTHOR_PREFIX_WIDTH: usize = USERNAME_WIDTH + 3;
+const AUTHOR_PREFIX_WIDTH_U16: u16 = AUTHOR_PREFIX_WIDTH as u16;
 pub(crate) const SAVED_MARKER: &str = "◆";
 
 pub(crate) struct MessageCard<'a> {
@@ -18,13 +20,17 @@ pub(crate) struct MessageCard<'a> {
 }
 
 #[cfg(test)]
-impl MessageCard<'_> {
+impl<'a> MessageCard<'a> {
     pub(crate) fn height(&self) -> usize {
         self.item.height()
     }
 
     pub(crate) fn link_count(&self) -> usize {
         self.links.len()
+    }
+
+    pub(crate) fn into_item(self) -> ListItem<'a> {
+        self.item
     }
 }
 
@@ -117,7 +123,7 @@ pub(crate) struct MessageCardSpec<'a> {
     pub(crate) reaction_target: Option<ReactionTarget>,
     pub(crate) body: &'a str,
     pub(crate) width: usize,
-    /// Optional pre-styled spans rendered as a leading row above the header.
+    /// Optional pre-styled spans rendered as a leading row above the message.
     /// Feed views (saved/labels/notifications) use this for source breadcrumbs.
     pub(crate) breadcrumb: Option<Vec<Span<'static>>>,
     /// When true, paint the card with the elevated surface to indicate selection.
@@ -168,29 +174,27 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
         row_idx += 1;
     }
 
-    if matches!(header_mode, HeaderMode::Full) {
-        lines.push(message_card_line(
-            gutter,
-            header_spans(
-                kind,
-                author,
-                author_color,
-                created_at,
-                saved,
-                surface,
-                width,
-            ),
-        ));
-        row_idx += 1;
-    }
-
-    let body_rows: Vec<_> = render_message_body_with_mentions(body, width, &valid_mentions)
-        .into_iter()
-        .collect();
+    let metadata_spans = message_metadata_spans(kind, created_at, saved, surface);
+    let metadata_width = spans_width(&metadata_spans);
+    let body_width = width.saturating_sub(AUTHOR_PREFIX_WIDTH).max(1);
+    let first_body_width = if metadata_width > 0 && body_width > metadata_width + 1 {
+        body_width - metadata_width - 1
+    } else {
+        body_width
+    };
+    let body_rows: Vec<_> =
+        render_message_body_rows(body, first_body_width, body_width, &valid_mentions)
+            .into_iter()
+            .collect();
     let last_body_idx = body_rows.len().saturating_sub(1);
+    let mut metadata_rendered = metadata_spans.is_empty();
     for (idx, row) in body_rows.into_iter().enumerate() {
-        let mut col = MESSAGE_PREFIX_WIDTH;
-        let mut content = Vec::new();
+        let mut col = AUTHOR_PREFIX_WIDTH_U16;
+        let mut content = if idx == 0 && matches!(header_mode, HeaderMode::Full) {
+            author_prefix_spans(author, author_color, surface)
+        } else {
+            blank_author_prefix_spans(surface)
+        };
         let mut last_visible_chars: usize = 0;
         for run in row {
             let style = run.style.bg(surface);
@@ -239,32 +243,63 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
             last_visible_chars = last_visible_chars.saturating_add(chars);
             content.push(Span::styled(run.text, style));
         }
+        let row_body_width = if idx == 0 {
+            first_body_width
+        } else {
+            body_width
+        };
         // Append "(edited)" inline at end of the last body line.
         if idx == last_body_idx
             && edited_at.is_some()
-            && last_visible_chars + 1 + EDITED_TAG.chars().count() <= width
+            && last_visible_chars + 1 + EDITED_TAG.chars().count() <= row_body_width
         {
             content.push(Span::styled(
                 format!(" {EDITED_TAG}"),
                 theme::message_meta_on(surface),
             ));
+            last_visible_chars = last_visible_chars
+                .saturating_add(1)
+                .saturating_add(EDITED_TAG.chars().count());
         }
+        if idx == 0 && !metadata_rendered {
+            if body_width >= last_visible_chars + 1 + metadata_width {
+                let pad = body_width - last_visible_chars - metadata_width;
+                content.push(Span::styled(
+                    " ".repeat(pad),
+                    theme::message_meta_on(surface),
+                ));
+                content.extend(metadata_spans.iter().cloned());
+                metadata_rendered = true;
+            }
+        }
+        lines.push(message_card_line(gutter, content));
+        row_idx += 1;
+    }
+    if !metadata_rendered {
+        let mut content = if metadata_width <= body_width {
+            blank_author_prefix_spans(surface)
+        } else {
+            Vec::new()
+        };
+        content.extend(metadata_spans.iter().cloned());
         lines.push(message_card_line(gutter, content));
         row_idx += 1;
     }
 
     if let Some(target) = reaction_target {
-        for row in reaction_rows(reactions, target, surface, width) {
+        for row in reaction_rows(reactions, target, surface, body_width) {
             let hit_row = row_idx.min(u16::MAX as usize) as u16;
             for hit in row.hits {
                 reaction_hits.push(MessageReactionHit {
                     row: hit_row,
-                    col: hit.col,
+                    col: AUTHOR_PREFIX_WIDTH_U16.saturating_add(hit.col),
                     width: hit.width,
                     target: hit.target,
                 });
             }
-            lines.push(message_card_line(gutter, row.spans));
+            let mut content = blank_author_prefix_spans(surface);
+            content.extend(row.spans);
+            lines.push(message_card_line(gutter, content));
             row_idx += 1;
         }
     }
@@ -281,75 +316,115 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
 
 const EDITED_TAG: &str = "(edited)";
 
-#[allow(clippy::too_many_arguments)]
-fn header_spans<'a>(
+fn render_message_body_rows(
+    body: &str,
+    first_width: usize,
+    rest_width: usize,
+    valid_mentions: &[String],
+) -> Vec<Vec<StyledRun>> {
+    let mut wrapped = Vec::new();
+    let mut first = true;
+    for raw in body.lines() {
+        let runs = parse_inline_markdown(raw, valid_mentions);
+        let rows = if first {
+            wrap_styled_runs_with_first_width(runs, first_width, rest_width)
+        } else {
+            wrap_styled_runs(runs, rest_width)
+        };
+        first = false;
+        wrapped.extend(rows);
+    }
+
+    if wrapped.is_empty() {
+        wrapped.push(vec![StyledRun {
+            text: String::new(),
+            style: theme::message_body(),
+            link_url: None,
+            mention_username: None,
+        }]);
+    }
+    wrapped
+}
+
+fn author_prefix_spans<'a>(author: &str, author_color: Color, surface: Color) -> Vec<Span<'a>> {
+    let author_style = theme::message_author_on(author_color, surface);
+    let meta_style = theme::message_meta_on(surface);
+    let author_text = truncate_author_name(author);
+    let author_chars = author_text.chars().count();
+    vec![
+        Span::styled("@", author_style),
+        Span::styled(author_text, author_style),
+        Span::styled(
+            " ".repeat(USERNAME_WIDTH.saturating_sub(author_chars)),
+            meta_style,
+        ),
+        Span::styled(": ", meta_style),
+    ]
+}
+
+fn blank_author_prefix_spans<'a>(surface: Color) -> Vec<Span<'a>> {
+    vec![Span::styled(
+        " ".repeat(AUTHOR_PREFIX_WIDTH),
+        theme::message_card_on(surface),
+    )]
+}
+
+fn truncate_author_name(author: &str) -> String {
+    let author = sanitize_terminal_visible_text(author);
+    if author.chars().count() <= USERNAME_WIDTH {
+        return author;
+    }
+    if USERNAME_WIDTH <= 3 {
+        return ".".repeat(USERNAME_WIDTH);
+    }
+    let mut truncated = author.chars().take(USERNAME_WIDTH - 3).collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+fn message_metadata_spans<'a>(
     kind: MessageKind,
-    author: &str,
-    author_color: Color,
     created_at: Option<&str>,
     saved: bool,
     surface: Color,
-    width: usize,
 ) -> Vec<Span<'a>> {
-    let author_text = format!("@{}", sanitize_terminal_visible_text(author));
-    let author_chars = author_text.chars().count();
-
-    let mut right_parts: Vec<String> = Vec::new();
+    let mut spans = Vec::new();
     if let Some(created_at) = created_at {
-        right_parts.push(format_human_timestamp(created_at));
-    }
-    if matches!(kind, MessageKind::ThreadRoot) {
-        right_parts.push("thread root".to_string());
-    }
-    let right = right_parts.join(" · ");
-    let saved_prefix = if saved && !right.is_empty() {
-        " · "
-    } else {
-        ""
-    };
-    let saved_width = if saved {
-        SAVED_MARKER.chars().count()
-    } else {
-        0
-    };
-    let right_chars = right
-        .chars()
-        .count()
-        .saturating_add(saved_prefix.chars().count())
-        .saturating_add(saved_width);
-
-    let mut spans = vec![Span::styled(
-        author_text,
-        theme::message_author_on(author_color, surface),
-    )];
-    let used = author_chars.saturating_add(right_chars);
-    if width > used && !right.is_empty() {
-        let pad = width - used;
         spans.push(Span::styled(
-            " ".repeat(pad),
+            format_human_timestamp(created_at),
             theme::message_meta_on(surface),
         ));
-        if !right.is_empty() {
-            spans.push(Span::styled(right, theme::message_meta_on(surface)));
-        }
-        if saved {
-            spans.push(Span::styled(saved_prefix, theme::message_meta_on(surface)));
-            spans.push(Span::styled(SAVED_MARKER, theme::message_saved_on(surface)));
-        }
-    } else if !right.is_empty() || saved {
-        // Not enough room to right-align — fall back to inline.
-        if !right.is_empty() {
-            spans.push(Span::styled(
-                format!(" · {right}"),
-                theme::message_meta_on(surface),
-            ));
-        }
-        if saved {
-            spans.push(Span::styled(saved_prefix, theme::message_meta_on(surface)));
-            spans.push(Span::styled(SAVED_MARKER, theme::message_saved_on(surface)));
-        }
+    }
+    if matches!(kind, MessageKind::ThreadRoot) {
+        push_metadata_separator(&mut spans, surface);
+        spans.push(Span::styled(
+            "thread root".to_string(),
+            theme::message_meta_on(surface),
+        ));
+    }
+    if saved {
+        push_metadata_separator(&mut spans, surface);
+        spans.push(Span::styled(
+            SAVED_MARKER.to_string(),
+            theme::message_saved_on(surface),
+        ));
     }
     spans
+}
+
+fn push_metadata_separator(spans: &mut Vec<Span<'_>>, surface: Color) {
+    if !spans.is_empty() {
+        spans.push(Span::styled(" · ", theme::message_meta_on(surface)));
+    }
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+#[cfg(test)]
+pub(crate) fn author_prefix_width() -> usize {
+    AUTHOR_PREFIX_WIDTH
 }
 
 struct ReactionRow<'a> {

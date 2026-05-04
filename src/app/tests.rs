@@ -8,6 +8,7 @@ mod cases {
     use uuid::Uuid;
 
     use crate::{
+        app::render::author_prefix_width,
         db::Database,
         service::{
             Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
@@ -915,7 +916,7 @@ mod cases {
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
         app.render().expect("render focused thread");
-        assert_eq!(app.ui.detail_scroll.offset().y, 17);
+        assert_eq!(app.ui.detail_scroll.offset().y, 13);
         assert_eq!(app.ui.pending_source_focus, None);
     }
 
@@ -955,7 +956,7 @@ mod cases {
         assert!(app.snapshot.selected_channel_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
         app.render().expect("render focused dm");
-        assert_eq!(app.ui.detail_scroll.offset().y, 16);
+        assert_eq!(app.ui.detail_scroll.offset().y, 12);
         assert_eq!(app.ui.pending_source_focus, None);
     }
 
@@ -1573,12 +1574,12 @@ mod cases {
     #[tokio::test]
     async fn link_text_is_hyperlinked_and_click_requests_open() {
         let mut app = test_app("link-clicks").await;
-        app.snapshot.threads[0].body = "https://openai.com".to_string();
+        app.snapshot.threads[0].body = "https://o.ai".to_string();
         app.ui.active_pane = ActivePane::Detail;
 
         let output = String::from_utf8_lossy(&app.render().expect("render")).into_owned();
         assert!(
-            output.contains("\x1b]8;;https://openai.com\x1b\\https://openai.com\x1b]8;;\x1b\\"),
+            output.contains("\x1b]8;;https://o.ai\x1b\\https://o.ai\x1b]8;;\x1b\\"),
             "{output:?}"
         );
         let region = app
@@ -1587,14 +1588,14 @@ mod cases {
             .entries()
             .iter()
             .find(|region| {
-                matches!(&region.target, HitTarget::MessageLink(url) if url == "https://openai.com")
+                matches!(&region.target, HitTarget::MessageLink(url) if url == "https://o.ai")
             })
             .cloned()
             .expect("link hit region");
 
         click_at(&mut app, region.rect.x, region.rect.y);
 
-        assert_eq!(app.pending_link_open.as_deref(), Some("https://openai.com"));
+        assert_eq!(app.pending_link_open.as_deref(), Some("https://o.ai"));
     }
 
     #[tokio::test]
@@ -2166,12 +2167,12 @@ mod cases {
             .last()
             .expect("message selection region");
         let start = Position {
-            x: message_region.rect.x + 4,
-            y: message_region.rect.y + 1,
+            x: message_region.rect.x + author_prefix_width() as u16 + 4,
+            y: message_region.rect.y,
         };
         let end = Position {
             x: message_region.rect.x + message_region.rect.width + 20,
-            y: message_region.rect.y + 1,
+            y: message_region.rect.y,
         };
 
         drag_at(&mut app, start, end);

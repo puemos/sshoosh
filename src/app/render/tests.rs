@@ -261,7 +261,7 @@ mod cases {
     }
 
     #[test]
-    fn message_card_renders_metadata_before_body_and_wraps_for_gutter_padding() {
+    fn message_card_wraps_after_fixed_author_column() {
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
             ..Snapshot::default()
@@ -281,15 +281,147 @@ mod cases {
             }],
             reaction_target: Some(ReactionTarget::Comment(1)),
             body: "abcdefghij",
-            width: 4,
+            width: author_prefix_width() + 4,
             breadcrumb: None,
             selected: false,
         });
 
-        // header + 3 body rows (abcd, efgh, ij) + wrapped reaction/add rows.
-        // Edited is inline or dropped if width is too tight.
+        // 3 body rows (abcd, efgh, ij) + metadata fallback + wrapped reaction/add rows.
+        // Edited is inline or dropped if the body column is too tight.
         assert_eq!(card.height(), 6);
         assert_eq!(card.link_count(), 0);
+    }
+
+    #[test]
+    fn message_card_uses_fixed_author_column_and_truncates_long_names() {
+        let width = 80;
+        let height = 4;
+        let snapshot = Snapshot::default();
+        let alice = message_card(MessageCardSpec {
+            snapshot: &snapshot,
+            kind: MessageKind::Comment,
+            header_mode: HeaderMode::Full,
+            author: "alice",
+            created_at: None,
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: "Short body",
+            width: width as usize,
+            breadcrumb: None,
+            selected: false,
+        });
+        let long = message_card(MessageCardSpec {
+            snapshot: &snapshot,
+            kind: MessageKind::Comment,
+            header_mode: HeaderMode::Full,
+            author: "alexander_the_great",
+            created_at: None,
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: "Long-name body",
+            width: width as usize,
+            breadcrumb: None,
+            selected: false,
+        });
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    List::new(vec![alice.into_item(), long.into_item()]),
+                    frame.area(),
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (short_x, _) = position_for_text(buffer, width, height, "Short body").unwrap();
+        let (long_x, _) = position_for_text(buffer, width, height, "Long-name body").unwrap();
+
+        assert_eq!(short_x, author_prefix_width() as u16);
+        assert_eq!(long_x, short_x);
+        assert!(format!("{buffer:?}").contains("@alexand..."));
+    }
+
+    #[test]
+    fn message_card_uses_blank_author_column_for_suppressed_headers() {
+        let width = 80;
+        let height = 2;
+        let snapshot = Snapshot::default();
+        let card = message_card(MessageCardSpec {
+            snapshot: &snapshot,
+            kind: MessageKind::Comment,
+            header_mode: HeaderMode::Suppressed,
+            author: "alice",
+            created_at: Some("5m ago"),
+            edited_at: None,
+            saved: false,
+            reactions: &[],
+            reaction_target: None,
+            body: "Grouped body",
+            width: width as usize,
+            breadcrumb: None,
+            selected: false,
+        });
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(List::new(vec![card.into_item()]), frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (body_x, body_y) = position_for_text(buffer, width, height, "Grouped body").unwrap();
+
+        assert_eq!(body_x, author_prefix_width() as u16);
+        assert_eq!(body_y, 0);
+        assert!(!row_text(buffer, width, body_y).contains("@alice"));
+    }
+
+    #[test]
+    fn message_card_right_aligns_metadata_on_first_body_row() {
+        let width = 80;
+        let height = 2;
+        let snapshot = Snapshot::default();
+        let card = message_card(MessageCardSpec {
+            snapshot: &snapshot,
+            kind: MessageKind::ThreadRoot,
+            header_mode: HeaderMode::Full,
+            author: "alice",
+            created_at: Some("5m ago"),
+            edited_at: None,
+            saved: true,
+            reactions: &[],
+            reaction_target: None,
+            body: "Metadata stays out of the sentence",
+            width: width as usize,
+            breadcrumb: None,
+            selected: false,
+        });
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(List::new(vec![card.into_item()]), frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let metadata = "5m ago · thread root · ◆";
+        let (body_x, body_y) = position_for_text(buffer, width, height, "Metadata stays").unwrap();
+        let (meta_x, meta_y) = position_for_text(buffer, width, height, metadata).unwrap();
+        let (saved_x, saved_y) =
+            position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
+
+        assert_eq!(body_x, author_prefix_width() as u16);
+        assert_eq!(meta_y, body_y);
+        assert_eq!(meta_x, width - metadata.chars().count() as u16);
+        assert_eq!(saved_y, body_y);
+        assert_eq!(
+            buffer.cell((saved_x, saved_y)).expect("saved marker").fg,
+            theme::SAVED
+        );
     }
 
     #[test]
@@ -1631,8 +1763,8 @@ mod cases {
         let (root_body_x, root_body_y) =
             position_for_text(buffer, width, height, "Original post").expect("root body");
         assert_eq!(root_author_y, root_meta_y);
-        assert_eq!(root_body_x, root_author_x);
-        assert_eq!(root_body_y, root_meta_y + 1);
+        assert_eq!(root_body_x, root_author_x + author_prefix_width() as u16);
+        assert_eq!(root_body_y, root_meta_y);
         assert!(!row_text(buffer, width, root_author_y).contains("▏"));
         assert!(!row_text(buffer, width, root_body_y).contains("▏"));
         assert_eq!(
@@ -1657,8 +1789,8 @@ mod cases {
         let (alice_saved_x, alice_saved_y) =
             position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
         assert_eq!(alice_author_x, root_author_x);
-        assert_eq!(alice_x, root_author_x);
-        assert_eq!(alice_y, alice_author_y + 1);
+        assert_eq!(alice_x, root_author_x + author_prefix_width() as u16);
+        assert_eq!(alice_y, alice_author_y);
         assert_eq!(alice_saved_y, alice_author_y);
         assert!(alice_saved_x > alice_author_x);
         assert_eq!(
@@ -1683,6 +1815,7 @@ mod cases {
         let (reaction_x, reaction_y) =
             position_for_text(buffer, width, height, "👍").expect("reaction chip");
         assert_eq!(reaction_y, alice_y + 1);
+        assert_eq!(reaction_x, alice_x + 1);
         assert_eq!(
             buffer
                 .cell((reaction_x, reaction_y))
@@ -1693,12 +1826,12 @@ mod cases {
 
         let (owner_x, owner_y) =
             position_for_text(buffer, width, height, "I would").expect("owner body");
-        assert_eq!(owner_x, root_author_x);
+        assert_eq!(owner_x, root_author_x + author_prefix_width() as u16);
         assert!(!row_text(buffer, width, owner_y).contains("▏"));
 
         let (error_x, error_y) =
             position_for_text(buffer, width, height, "Error from provider").expect("error body");
-        assert_eq!(error_x, root_author_x);
+        assert_eq!(error_x, root_author_x + author_prefix_width() as u16);
         assert!(!row_text(buffer, width, error_y).contains("▏"));
         assert_eq!(
             buffer.cell((error_x, error_y)).expect("error body").bg,
@@ -2769,7 +2902,11 @@ mod cases {
             position_for_text(buffer, width, height, metadata).expect("full metadata");
         let (saved_x, saved_y) =
             position_for_text(buffer, width, height, SAVED_MARKER).expect("saved marker");
-        let (body_x, body_y) = position_for_text(buffer, width, height, body).expect("body line");
+        let (body_x, body_y) =
+            position_for_text(buffer, width, height, "abcdefghijklmnopqrstuvwxyzABCDEFG")
+                .expect("first wrapped body line");
+        let (tail_x, tail_y) =
+            position_for_text(buffer, width, height, "HIJKLMNOPQRST").expect("wrapped body tail");
         let scrollbar_x = width - 2;
         let padding_x = scrollbar_x - 1;
         let content_right = padding_x - 1;
@@ -2785,7 +2922,9 @@ mod cases {
                 .symbol(),
             " "
         );
-        assert!(body_x + body.chars().count() as u16 <= content_right + 1);
+        assert!(body_x <= content_right);
+        assert_eq!(tail_x, body_x);
+        assert_eq!(tail_y, body_y + 1);
         assert_eq!(
             buffer
                 .cell((padding_x, body_y))
