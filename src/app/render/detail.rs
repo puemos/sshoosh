@@ -95,6 +95,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     let message_width = message_content_width(content_area);
     let mut message_hits = MessageHits::default();
     let mut focused_row = None;
+    let mut highlighted_row = None;
     let mut content_row = 0u16;
     if let Some(thread) = selected {
         if snapshot.comments_has_more {
@@ -114,8 +115,13 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
 
         if !thread.body.trim().is_empty() {
             last_day = calendar_day_key(&thread.created_at);
-            if matches!(ui.pending_source_focus, Some(SourceFocus::ThreadRoot)) {
+            let focus = SourceFocus::ThreadRoot;
+            if ui.pending_source_focus == Some(focus) {
                 focused_row = Some(content_row);
+            }
+            let highlighted = ui.source_highlight == Some(focus);
+            if highlighted {
+                highlighted_row = Some(content_row);
             }
             let card = message_card(MessageCardSpec {
                 snapshot,
@@ -130,7 +136,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 body: &thread.body,
                 width: message_width,
                 breadcrumb: None,
-                selected: false,
+                selected: highlighted,
             });
             append_message_card(&mut items, &mut message_hits, &mut content_row, card);
             prev_author = Some(thread.author.clone());
@@ -173,8 +179,13 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             } else {
                 HeaderMode::Full
             };
-            if ui.pending_source_focus == Some(SourceFocus::Comment(comment.obj_index)) {
+            let focus = SourceFocus::Comment(comment.obj_index);
+            if ui.pending_source_focus == Some(focus) {
                 focused_row = Some(content_row);
+            }
+            let highlighted = ui.source_highlight == Some(focus);
+            if highlighted {
+                highlighted_row = Some(content_row);
             }
             let card = message_card(MessageCardSpec {
                 snapshot,
@@ -189,7 +200,7 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
                 body: &comment.body,
                 width: message_width,
                 breadcrumb: None,
-                selected: false,
+                selected: highlighted,
             });
             let card = with_message_card_hit(
                 card,
@@ -221,6 +232,10 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
             Some(SourceFocus::ThreadRoot | SourceFocus::Comment(_))
         ) && snapshot.comments_has_more,
     );
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, highlighted_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
+    }
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
@@ -1135,6 +1150,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
     let mut items: Vec<ListItem> = Vec::new();
     let mut message_hits = MessageHits::default();
     let mut focused_row = None;
+    let mut highlighted_row = None;
     let mut content_row = 0u16;
     if snapshot.conversation_messages_has_more {
         append_plain_item(
@@ -1178,8 +1194,13 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
             } else {
                 HeaderMode::Full
             };
-            if ui.pending_source_focus == Some(SourceFocus::Dm(message.obj_index)) {
+            let focus = SourceFocus::Dm(message.obj_index);
+            if ui.pending_source_focus == Some(focus) {
                 focused_row = Some(content_row);
+            }
+            let highlighted = ui.source_highlight == Some(focus);
+            if highlighted {
+                highlighted_row = Some(content_row);
             }
             let card = message_card(MessageCardSpec {
                 snapshot,
@@ -1194,7 +1215,7 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
                 body: &message.body,
                 width: message_width,
                 breadcrumb: None,
-                selected: false,
+                selected: highlighted,
             });
             let card = with_message_card_hit(
                 card,
@@ -1213,6 +1234,10 @@ pub(crate) fn draw_dm_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         matches!(ui.pending_source_focus, Some(SourceFocus::Dm(_)))
             && snapshot.conversation_messages_has_more,
     );
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, highlighted_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
+    }
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
@@ -1224,6 +1249,7 @@ fn apply_pending_source_focus(ui: &mut UiState, focused_row: Option<u16>, capped
         ui.pending_source_focus = None;
     } else if capped {
         ui.pending_source_focus = None;
+        ui.source_highlight = None;
         ui.banner = Some(Banner::err("Message is older than loaded history"));
     }
 }

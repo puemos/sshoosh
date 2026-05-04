@@ -298,6 +298,7 @@ impl App {
     pub(crate) fn clear_active_source_selection(&mut self) {
         self.clear_channel_source_selection();
         self.clear_conversation_source_selection();
+        self.ui.source_highlight = None;
     }
 
     pub(crate) fn terminal_title_update(&mut self) -> Option<Vec<u8>> {
@@ -424,6 +425,7 @@ impl App {
         self.snapshot.threads.clear();
         self.snapshot.comments.clear();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.reset_detail_scroll_to_bottom();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::List;
@@ -437,6 +439,7 @@ impl App {
         self.snapshot.selected_channel_id = Some(channel_id.clone());
         self.snapshot.selected_thread_id = Some(thread_id);
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.reset_detail_scroll_to_bottom();
         self.ui.route = Route::Channel(channel_id);
         self.ui.active_pane = ActivePane::Detail;
@@ -465,6 +468,7 @@ impl App {
         self.clear_channel_source_selection();
         self.snapshot.selected_conversation_id = Some(conversation_id);
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.reset_detail_scroll();
         self.ui.route = Route::Dms;
         self.ui.active_pane = ActivePane::Detail;
@@ -482,6 +486,7 @@ impl App {
             self.history_limit = MAX_HISTORY_LIMIT;
         }
         self.ui.pending_source_focus = Some(focus);
+        self.ui.source_highlight = Some(focus);
     }
 
     pub fn select_conversation_at_bottom(&mut self, conversation_id: String) {
@@ -504,6 +509,7 @@ impl App {
         }
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Search;
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {
@@ -530,6 +536,7 @@ impl App {
         }
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Saved;
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {
@@ -559,6 +566,7 @@ impl App {
         self.snapshot.selected_thread_id = None;
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Label(tag);
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {
@@ -601,6 +609,7 @@ impl App {
         self.snapshot.search_next_cursor = next_cursor;
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Search;
         self.ui.active_pane = ActivePane::Detail;
     }
@@ -638,6 +647,7 @@ impl App {
         self.snapshot.saved_next_cursor = next_cursor;
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Saved;
         self.ui.active_pane = ActivePane::Detail;
     }
@@ -660,6 +670,7 @@ impl App {
         self.snapshot.selected_thread_id = None;
         self.snapshot.selected_conversation_id = None;
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Label(tag);
         self.ui.active_pane = ActivePane::Detail;
     }
@@ -674,6 +685,7 @@ impl App {
         self.snapshot.notifications_next_cursor = next_cursor;
         self.clear_active_source_selection();
         self.ui.pending_source_focus = None;
+        self.ui.source_highlight = None;
         self.ui.route = Route::Notifications;
         self.ui.active_pane = ActivePane::Detail;
         if reset_selection {
@@ -696,6 +708,7 @@ impl App {
         self.snapshot.notifications.append(&mut notifications);
         self.snapshot.notifications_next_cursor = next_cursor;
         self.clear_active_source_selection();
+        self.ui.source_highlight = None;
         self.ui.route = Route::Notifications;
         self.ui.active_pane = ActivePane::Detail;
     }

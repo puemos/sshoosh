@@ -915,9 +915,43 @@ mod cases {
 
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(5)));
         app.render().expect("render focused thread");
-        assert_eq!(app.ui.detail_scroll.offset().y, 13);
+        assert!(app.ui.detail_scroll.offset().y > 0);
         assert_eq!(app.ui.pending_source_focus, None);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(5)));
+    }
+
+    #[tokio::test]
+    async fn label_screen_activates_selected_label_message_with_highlight() {
+        let mut app = test_app("label-screen-focus").await;
+        app.snapshot.comments = vec![
+            comment(1, "alice", "First labeled comment"),
+            comment(2, "bob", "Focused labeled comment"),
+        ];
+        app.snapshot.label_items = vec![LabelFeedItem {
+            kind: LabelFeedKind::Comment,
+            source_id: "comment-2".to_string(),
+            source_obj_index: Some(2),
+            author: "bob".to_string(),
+            body: "Focused labeled comment".to_string(),
+            source_label: "#general · Deploy notes".to_string(),
+            channel_slug: Some("general".to_string()),
+            thread_title: Some("Deploy notes".to_string()),
+            dm_peer_username: None,
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            channel_id: Some("general".to_string()),
+            thread_id: Some("thread".to_string()),
+            conversation_id: None,
+        }];
+        app.ui.route = Route::Label("deploy".to_string());
+        app.ui.active_pane = ActivePane::Detail;
+
+        app.activate_selection();
+
+        assert_eq!(app.ui.route, Route::Channel("general".to_string()));
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(2)));
     }
 
     #[tokio::test]
@@ -955,9 +989,11 @@ mod cases {
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert!(app.snapshot.selected_channel_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(5)));
         app.render().expect("render focused dm");
-        assert_eq!(app.ui.detail_scroll.offset().y, 12);
+        assert!(app.ui.detail_scroll.offset().y > 0);
         assert_eq!(app.ui.pending_source_focus, None);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(5)));
     }
 
     #[tokio::test]
@@ -981,8 +1017,10 @@ mod cases {
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert!(app.snapshot.selected_channel_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(3)));
         app.render().expect("render focused dm");
         assert_eq!(app.ui.pending_source_focus, None);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(3)));
     }
 
     #[tokio::test]
@@ -1230,8 +1268,10 @@ mod cases {
 
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(3)));
         app.render().expect("render focused thread");
         assert_eq!(app.ui.pending_source_focus, None);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(3)));
     }
 
     #[tokio::test]
@@ -1939,9 +1979,14 @@ mod cases {
         app.render().expect("render");
 
         app.handle_input(b"\x1b[B");
-        assert_eq!(app.ui.detail_scroll.offset().y, 1);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::ThreadRoot));
+        assert_eq!(app.ui.detail_scroll.offset().y, 0);
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(1)));
+        app.render().expect("render highlighted message");
+        assert_eq!(app.ui.detail_scroll.offset().y, 0);
         app.handle_input(b"\x1b[6~");
-        assert!(app.ui.detail_scroll.offset().y > 1);
+        assert!(app.ui.detail_scroll.offset().y > 0);
 
         app.ui.detail_scroll.scroll_to_top();
         app.ui.active_pane = ActivePane::List;
@@ -1950,6 +1995,33 @@ mod cases {
 
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
+    }
+
+    #[tokio::test]
+    async fn keyboard_moves_dm_detail_focus_by_message() {
+        let mut app = test_app("dm-keyboard-focus").await;
+        app.resize(100, 8).expect("resize");
+        app.snapshot.selected_channel_id = None;
+        app.snapshot.selected_thread_id = None;
+        app.snapshot.selected_conversation_id = Some("dm".to_string());
+        app.snapshot.conversation_messages = (1..=8)
+            .map(|idx| dm_message(idx, "alice", &format!("dm {idx}\nsecond line")))
+            .collect();
+        app.ui.route = Route::Dms;
+        app.ui.active_pane = ActivePane::Detail;
+        app.render().expect("render dm detail");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(1)));
+        for _ in 0..7 {
+            app.handle_input(b"\x1b[B");
+        }
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(8)));
+        app.render().expect("render moved dm focus");
+
+        assert!(app.ui.detail_scroll.offset().y > 0);
+        assert_eq!(app.ui.pending_source_focus, None);
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(8)));
     }
 
     #[tokio::test]

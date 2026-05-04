@@ -2924,6 +2924,162 @@ mod cases {
     }
 
     #[test]
+    fn source_highlight_marks_opened_thread_message() {
+        let width = 100;
+        let height = 16;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            channels: vec![Channel {
+                id: "general".to_string(),
+                slug: "general".to_string(),
+                name: "general".to_string(),
+                visibility: "public".to_string(),
+                topic: None,
+                unread_count: 0,
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Deploy notes".to_string(),
+                body: "Original post".to_string(),
+                author: "owner".to_string(),
+                comment_count: 2,
+                last_comment_index: 2,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            comments: vec![
+                CommentItem {
+                    id: "c1".to_string(),
+                    author: "alice".to_string(),
+                    obj_index: 1,
+                    body: "Plain comment".to_string(),
+                    created_at: "2020-01-02T03:05:00Z".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+                CommentItem {
+                    id: "c2".to_string(),
+                    author: "bob".to_string(),
+                    obj_index: 2,
+                    body: "Focused comment".to_string(),
+                    created_at: "2020-01-02T03:06:00Z".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+            ],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+        ui.pending_source_focus = Some(crate::app::SourceFocus::Comment(2));
+        ui.source_highlight = Some(crate::app::SourceFocus::Comment(2));
+
+        terminal
+            .draw(|frame| draw_detail(frame, Rect::new(0, 0, width, height), &snapshot, &mut ui))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let focused = position_for_text(buffer, width, height, "Focused comment")
+            .expect("focused comment position");
+        let original =
+            position_for_text(buffer, width, height, "Original post").expect("thread root");
+
+        assert_eq!(
+            buffer.cell(focused).expect("focused cell").bg,
+            theme::ELEVATED_PANEL
+        );
+        assert_eq!(
+            buffer.cell(original).expect("thread root cell").bg,
+            theme::PANEL
+        );
+        assert_eq!(ui.pending_source_focus, None);
+        assert_eq!(
+            ui.source_highlight,
+            Some(crate::app::SourceFocus::Comment(2))
+        );
+    }
+
+    #[test]
+    fn source_highlight_marks_opened_dm_message() {
+        let width = 100;
+        let height = 12;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            conversations: vec![Conversation {
+                id: "dm".to_string(),
+                peer_username: "maya".to_string(),
+                last_message_index: 2,
+                unread_count: 0,
+                last_activity_at: None,
+                last_message_preview: None,
+                muted_until: None,
+                saved_at: None,
+            }],
+            conversation_messages: vec![
+                ConversationMessage {
+                    id: "m1".to_string(),
+                    author: "maya".to_string(),
+                    obj_index: 1,
+                    body: "Plain DM".to_string(),
+                    created_at: "2020-01-02T03:04:00Z".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+                ConversationMessage {
+                    id: "m2".to_string(),
+                    author: "owner".to_string(),
+                    obj_index: 2,
+                    body: "Focused DM".to_string(),
+                    created_at: "2020-01-02T03:05:00Z".to_string(),
+                    edited_at: None,
+                    saved_at: None,
+                    reactions: Vec::new(),
+                },
+            ],
+            selected_conversation_id: Some("dm".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Dms;
+        ui.active_pane = ActivePane::Detail;
+        ui.pending_source_focus = Some(crate::app::SourceFocus::Dm(2));
+        ui.source_highlight = Some(crate::app::SourceFocus::Dm(2));
+
+        terminal
+            .draw(|frame| draw_dm_detail(frame, Rect::new(0, 0, width, height), &snapshot, &mut ui))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let focused =
+            position_for_text(buffer, width, height, "Focused DM").expect("focused dm position");
+        let plain = position_for_text(buffer, width, height, "Plain DM").expect("plain dm");
+
+        assert_eq!(
+            buffer.cell(focused).expect("focused dm cell").bg,
+            theme::ELEVATED_PANEL
+        );
+        assert_eq!(buffer.cell(plain).expect("plain dm cell").bg, theme::PANEL);
+        assert_eq!(ui.pending_source_focus, None);
+        assert_eq!(ui.source_highlight, Some(crate::app::SourceFocus::Dm(2)));
+    }
+
+    #[test]
     fn render_scroll_items_handles_large_row_offsets() {
         let width = 32;
         let height = 6;

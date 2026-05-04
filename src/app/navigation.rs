@@ -18,6 +18,9 @@ impl App {
             return;
         }
         if self.ui.active_pane == ActivePane::Detail {
+            if self.move_detail_message_focus(delta) {
+                return;
+            }
             self.move_detail(delta);
         } else {
             self.move_workspace(delta);
@@ -56,6 +59,48 @@ impl App {
                 self.ui.detail_scroll.scroll_down();
             }
         }
+    }
+
+    pub(crate) fn move_detail_message_focus(&mut self, delta: isize) -> bool {
+        let focuses = self.detail_message_focuses();
+        if focuses.is_empty() {
+            return false;
+        }
+
+        let current = self
+            .ui
+            .source_highlight
+            .and_then(|focus| focuses.iter().position(|candidate| *candidate == focus));
+        let next = if let Some(current) = current {
+            let next = clamp_index(current, delta, focuses.len());
+            if next == current {
+                if delta < 0 && current == 0 {
+                    self.queue_older_history_if_available();
+                }
+                return true;
+            }
+            next
+        } else if delta > 0 && self.detail_at_top() {
+            0
+        } else if delta < 0 && self.detail_at_top() {
+            self.queue_older_history_if_available();
+            return true;
+        } else if delta < 0 && self.detail_at_bottom() {
+            focuses.len() - 1
+        } else if let Some(visible) = self.visible_detail_message_focus(delta) {
+            focuses
+                .iter()
+                .position(|candidate| *candidate == visible)
+                .unwrap_or_else(|| if delta < 0 { focuses.len() - 1 } else { 0 })
+        } else if delta < 0 {
+            focuses.len() - 1
+        } else {
+            0
+        };
+
+        self.ui.source_highlight = Some(focuses[next]);
+        self.ui.detail_selection_scroll_pending = true;
+        true
     }
 
     pub(crate) fn page_detail(&mut self, down: bool) {
@@ -172,35 +217,89 @@ impl App {
     }
 
     fn first_visible_message_focus(&self) -> Option<SourceFocus> {
+        self.visible_detail_message_focuses().into_iter().next()
+    }
+
+    fn visible_detail_message_focus(&self, delta: isize) -> Option<SourceFocus> {
+        let visible = self.visible_detail_message_focuses();
+        if delta < 0 {
+            visible.last().copied()
+        } else {
+            visible.first().copied()
+        }
+    }
+
+    fn visible_detail_message_focuses(&self) -> Vec<SourceFocus> {
         let viewport_height = self.ui.detail_scroll_metrics.viewport_height.max(1);
-        let top = (0..u16::MAX).find(|row| {
+        let Some(top) = (0..u16::MAX).find(|row| {
             self.ui
                 .hit_map
                 .hit_row_matching(*row, |target| matches!(target, HitTarget::DetailScroll))
                 .is_some()
-        })?;
+        }) else {
+            return Vec::new();
+        };
         let bottom = top.saturating_add(viewport_height);
+        let mut visible = Vec::new();
         for row in top..bottom {
             let Some(region) = self.ui.hit_map.hit_row_matching(row, |target| {
                 matches!(target, HitTarget::EditableMessage(_))
             }) else {
                 continue;
             };
-            match region.target {
+            let focus = match region.target {
                 HitTarget::EditableMessage(EditableMessageTarget::Comment(index))
                     if matches!(self.ui.route, Route::Channel(_)) =>
                 {
-                    return Some(SourceFocus::Comment(index));
+                    Some(SourceFocus::Comment(index))
                 }
                 HitTarget::EditableMessage(EditableMessageTarget::Dm(index))
                     if matches!(self.ui.route, Route::Dms) =>
                 {
-                    return Some(SourceFocus::Dm(index));
+                    Some(SourceFocus::Dm(index))
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some(focus) = focus
+                && visible.last().copied() != Some(focus)
+            {
+                visible.push(focus);
             }
         }
-        None
+        visible
+    }
+
+    fn detail_message_focuses(&self) -> Vec<SourceFocus> {
+        match self.ui.route {
+            Route::Channel(_) if self.snapshot.selected_thread_id.is_some() => {
+                let mut focuses = Vec::new();
+                if self
+                    .snapshot
+                    .threads
+                    .iter()
+                    .find(|thread| {
+                        self.snapshot.selected_thread_id.as_deref() == Some(thread.id.as_str())
+                    })
+                    .is_some_and(|thread| !thread.body.trim().is_empty())
+                {
+                    focuses.push(SourceFocus::ThreadRoot);
+                }
+                focuses.extend(
+                    self.snapshot
+                        .comments
+                        .iter()
+                        .map(|comment| SourceFocus::Comment(comment.obj_index)),
+                );
+                focuses
+            }
+            Route::Dms if self.snapshot.selected_conversation_id.is_some() => self
+                .snapshot
+                .conversation_messages
+                .iter()
+                .map(|message| SourceFocus::Dm(message.obj_index))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn can_load_more_result_list(&self) -> bool {
