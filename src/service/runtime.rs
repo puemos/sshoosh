@@ -22,8 +22,7 @@ impl ServerRuntime {
             .unwrap_or(0);
         let cursor = Arc::new(RwLock::new(max_seq));
         let lease_handle = start_master_lease_manager(state.db.clone());
-        let handle =
-            start_event_poller(state.db.read_pool().clone(), state.live_tx.clone(), cursor);
+        let handle = start_event_poller(state.clone(), cursor);
         Ok(Self {
             handles: vec![lease_handle, handle],
         })
@@ -38,11 +37,7 @@ impl Drop for ServerRuntime {
     }
 }
 
-fn start_event_poller(
-    pool: Database,
-    live_tx: broadcast::Sender<LiveEvent>,
-    cursor: Arc<RwLock<i64>>,
-) -> JoinHandle<()> {
+fn start_event_poller(state: ServerState, cursor: Arc<RwLock<i64>>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -57,7 +52,7 @@ fn start_event_poller(
                  LIMIT 100",
             )
             .bind(last_seq)
-            .fetch_all(&pool)
+            .fetch_all(state.db.read_pool())
             .await
             {
                 Ok(rows) => rows,
@@ -91,7 +86,8 @@ fn start_event_poller(
                 };
                 match live_event_from_row(row, seq, payload) {
                     Ok(event) => {
-                        let _ = live_tx.send(event);
+                        state.invalidate_hot_label_cache_for_event(&event).await;
+                        let _ = state.live_tx.send(event);
                     }
                     Err(err) => {
                         tracing::warn!(error = ?err, seq, "dropping malformed event row");

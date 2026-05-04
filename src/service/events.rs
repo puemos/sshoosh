@@ -124,16 +124,50 @@ pub(crate) async fn upsert_search_index_tx(
     let title = sanitize_single_line_text(input.title);
     let body = sanitize_stored_text(input.body);
     let context = sanitize_single_line_text(input.context);
-    query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
-        .bind(input.kind)
-        .bind(input.object_id)
+    let rowid = if let Some(rowid) =
+        query_scalar::<i64>("SELECT rowid FROM search_documents WHERE kind = ? AND object_id = ?")
+            .bind(input.kind)
+            .bind(input.object_id)
+            .fetch_optional(&mut tx)
+            .await?
+    {
+        query(
+            "UPDATE search_documents
+             SET channel_id = ?, thread_id = ?, conversation_id = ?
+             WHERE rowid = ?",
+        )
+        .bind(input.channel_id)
+        .bind(input.thread_id)
+        .bind(input.conversation_id)
+        .bind(rowid)
         .execute(&mut tx)
         .await?;
+        query("DELETE FROM search_index WHERE rowid = ?")
+            .bind(rowid)
+            .execute(&mut tx)
+            .await?;
+        rowid
+    } else {
+        query(
+            "INSERT INTO search_documents
+             (kind, object_id, channel_id, thread_id, conversation_id)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(input.kind)
+        .bind(input.object_id)
+        .bind(input.channel_id)
+        .bind(input.thread_id)
+        .bind(input.conversation_id)
+        .execute(&mut tx)
+        .await?
+        .last_insert_rowid()
+    };
     query(
         "INSERT INTO search_index
-         (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         (rowid, kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
+    .bind(rowid)
     .bind(input.kind)
     .bind(input.object_id)
     .bind(input.channel_id)
@@ -152,11 +186,28 @@ pub(crate) async fn delete_search_index_tx(
     kind: &str,
     object_id: &str,
 ) -> anyhow::Result<()> {
-    query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
-        .bind(kind)
-        .bind(object_id)
-        .execute(&mut tx)
-        .await?;
+    if let Some(rowid) =
+        query_scalar::<i64>("SELECT rowid FROM search_documents WHERE kind = ? AND object_id = ?")
+            .bind(kind)
+            .bind(object_id)
+            .fetch_optional(&mut tx)
+            .await?
+    {
+        query("DELETE FROM search_index WHERE rowid = ?")
+            .bind(rowid)
+            .execute(&mut tx)
+            .await?;
+        query("DELETE FROM search_documents WHERE rowid = ?")
+            .bind(rowid)
+            .execute(&mut tx)
+            .await?;
+    } else {
+        query("DELETE FROM search_index WHERE kind = ? AND object_id = ?")
+            .bind(kind)
+            .bind(object_id)
+            .execute(&mut tx)
+            .await?;
+    }
     Ok(())
 }
 

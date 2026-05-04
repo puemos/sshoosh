@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use url::Url;
 use zeroize::Zeroizing;
 
-use crate::domain::parse_labels;
+use crate::domain::{normalize_name_key, parse_labels};
 
 const MIGRATION_INITIAL: &str = include_str!("../migrations/20260430000000_initial.sql");
 const MIGRATION_PENDING_USERNAME: &str =
@@ -42,6 +42,8 @@ const MIGRATION_DEVICE_LINK_TOKENS: &str =
     include_str!("../migrations/20260501000004_device_link_tokens.sql");
 const MIGRATION_MESSAGE_LABELS: &str =
     include_str!("../migrations/20260501000005_message_labels.sql");
+const MIGRATION_QUERY_PERFORMANCE: &str =
+    include_str!("../migrations/20260501000006_query_performance.sql");
 const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";
 
 #[derive(Clone, Debug)]
@@ -371,6 +373,10 @@ impl Database {
                 MIGRATION_DEVICE_LINK_TOKENS,
             ),
             ("20260501000005_message_labels", MIGRATION_MESSAGE_LABELS),
+            (
+                "20260501000006_query_performance",
+                MIGRATION_QUERY_PERFORMANCE,
+            ),
         ] {
             let exists: Option<String> =
                 query_scalar("SELECT version FROM _sshoosh_migrations WHERE version = ?")
@@ -398,6 +404,15 @@ impl Database {
             if version == "20260501000002_performance_counters"
                 && self.performance_counter_columns_exist().await?
             {
+                query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
+                    .bind(version)
+                    .bind(now())
+                    .execute_unchecked(self)
+                    .await?;
+                continue;
+            }
+            if version == "20260501000006_query_performance" {
+                self.apply_query_performance_migration(sql).await?;
                 query("INSERT INTO _sshoosh_migrations (version, applied_at) VALUES (?, ?)")
                     .bind(version)
                     .bind(now())
@@ -545,6 +560,49 @@ impl Database {
         Ok(thread_count > 0 && conversation_count > 0)
     }
 
+    async fn threads_name_key_column_exists(&self) -> anyhow::Result<bool> {
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM pragma_table_info('threads')
+             WHERE name = 'name_key'",
+        )
+        .fetch_one_unchecked(self)
+        .await?;
+        Ok(count > 0)
+    }
+
+    async fn apply_query_performance_migration(&self, sql: &str) -> anyhow::Result<()> {
+        if !self.threads_name_key_column_exists().await? {
+            self.execute_batch_unchecked("ALTER TABLE threads ADD COLUMN name_key TEXT;")
+                .await?;
+        }
+        self.backfill_thread_name_keys().await?;
+        self.execute_batch_unchecked(sql).await?;
+        Ok(())
+    }
+
+    async fn backfill_thread_name_keys(&self) -> anyhow::Result<()> {
+        let mut tx = self.transaction_unchecked().await?;
+        let rows = query(
+            "SELECT id, title
+             FROM threads
+             WHERE name_key IS NULL OR name_key = ''",
+        )
+        .fetch_all_unchecked(&mut tx)
+        .await?;
+        for row in rows {
+            let id: String = row.get("id")?;
+            let title: String = row.get("title")?;
+            query("UPDATE threads SET name_key = ? WHERE id = ?")
+                .bind(normalize_name_key(&title))
+                .bind(&id)
+                .execute_unchecked(&mut tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn doctor(&self) -> anyhow::Result<DoctorReport> {
         query_scalar::<i64>("SELECT 1")
             .fetch_one_unchecked(self)
@@ -572,33 +630,70 @@ impl Database {
     pub async fn repair_search_index(&self) -> anyhow::Result<()> {
         let mut tx = self.transaction().await?;
         query("DELETE FROM search_index").execute(&mut tx).await?;
+        query("DELETE FROM search_documents")
+            .execute(&mut tx)
+            .await?;
         query(
-            "INSERT INTO search_index
-             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
-             SELECT 'thread', t.id, t.channel_id, t.id, NULL, t.title, t.body, '#' || c.slug
+            "INSERT INTO search_documents
+             (kind, object_id, channel_id, thread_id, conversation_id)
+             SELECT 'thread', t.id, t.channel_id, t.id, NULL
              FROM threads t
-             JOIN channels c ON c.id = t.channel_id
              WHERE t.deleted_at IS NULL",
         )
         .execute(&mut tx)
         .await?;
         query(
             "INSERT INTO search_index
-             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
-             SELECT 'comment', cm.id, cm.channel_id, cm.thread_id, NULL, t.title, cm.body, '#' || c.slug
+             (rowid, kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT d.rowid, d.kind, d.object_id, d.channel_id, d.thread_id, d.conversation_id,
+                    t.title, t.body, '#' || c.slug
+             FROM search_documents d
+             JOIN threads t ON t.id = d.object_id
+             JOIN channels c ON c.id = t.channel_id
+             WHERE d.kind = 'thread'",
+        )
+        .execute(&mut tx)
+        .await?;
+        query(
+            "INSERT INTO search_documents
+             (kind, object_id, channel_id, thread_id, conversation_id)
+             SELECT 'comment', cm.id, cm.channel_id, cm.thread_id, NULL
              FROM comments cm
              JOIN threads t ON t.id = cm.thread_id
-             JOIN channels c ON c.id = cm.channel_id
              WHERE cm.deleted_at IS NULL AND t.deleted_at IS NULL",
         )
         .execute(&mut tx)
         .await?;
         query(
             "INSERT INTO search_index
-             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
-             SELECT 'dm', m.id, NULL, NULL, m.conversation_id, 'DM', m.body, 'DM'
+             (rowid, kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT d.rowid, d.kind, d.object_id, d.channel_id, d.thread_id, d.conversation_id,
+                    t.title, cm.body, '#' || c.slug
+             FROM search_documents d
+             JOIN comments cm ON cm.id = d.object_id
+             JOIN threads t ON t.id = cm.thread_id
+             JOIN channels c ON c.id = cm.channel_id
+             WHERE d.kind = 'comment'",
+        )
+        .execute(&mut tx)
+        .await?;
+        query(
+            "INSERT INTO search_documents
+             (kind, object_id, channel_id, thread_id, conversation_id)
+             SELECT 'dm', m.id, NULL, NULL, m.conversation_id
              FROM conversation_messages m
              WHERE m.deleted_at IS NULL",
+        )
+        .execute(&mut tx)
+        .await?;
+        query(
+            "INSERT INTO search_index
+             (rowid, kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             SELECT d.rowid, d.kind, d.object_id, d.channel_id, d.thread_id, d.conversation_id,
+                    'DM', m.body, 'DM'
+             FROM search_documents d
+             JOIN conversation_messages m ON m.id = d.object_id
+             WHERE d.kind = 'dm'",
         )
         .execute(&mut tx)
         .await?;
@@ -2195,6 +2290,11 @@ fn random_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
+
+    fn temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("sshoosh-db-{name}-{}", Uuid::now_v7()))
+    }
 
     #[test]
     fn non_local_http_database_urls_are_rejected() {
@@ -2242,5 +2342,119 @@ mod tests {
     fn unsupported_database_url_schemes_are_rejected() {
         let err = validate_database_url("ftp://localhost/db").expect_err("reject ftp");
         assert!(err.to_string().contains("unsupported database URL scheme"));
+    }
+
+    #[tokio::test]
+    async fn query_performance_schema_exists_on_fresh_database() -> anyhow::Result<()> {
+        let db = Database::connect(&temp_path("query-performance-fresh")).await?;
+        db.init().await?;
+
+        let name_key_columns: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM pragma_table_info('threads')
+             WHERE name = 'name_key'",
+        )
+        .fetch_one(db.read_pool())
+        .await?;
+        assert_eq!(name_key_columns, 1);
+
+        let search_documents_tables: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM sqlite_master
+             WHERE type = 'table' AND name = 'search_documents'",
+        )
+        .fetch_one(db.read_pool())
+        .await?;
+        assert_eq!(search_documents_tables, 1);
+
+        for index_name in [
+            "idx_notifications_account_thread",
+            "idx_mentions_target_thread",
+            "idx_message_labels_source",
+            "idx_saved_messages_account_kind_saved",
+            "idx_threads_channel_name_key_active",
+            "idx_ssh_keys_account_created",
+        ] {
+            let count: i64 = query_scalar(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'index' AND name = ?",
+            )
+            .bind(index_name)
+            .fetch_one(db.read_pool())
+            .await?;
+            assert_eq!(count, 1, "missing index {index_name}");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_performance_backfills_search_documents_and_thread_name_keys()
+    -> anyhow::Result<()> {
+        let db = Database::connect(&temp_path("query-performance-backfill")).await?;
+        db.init().await?;
+        let now = now();
+        query(
+            "INSERT INTO accounts
+             (id, username, display_name, role, settings_json, created_at, updated_at, activated_at)
+             VALUES ('owner', 'owner', 'owner', 'owner', '{}', ?, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(db.write_pool())
+        .await?;
+        query(
+            "INSERT INTO channels
+             (id, slug, name, visibility, created_by_account_id, created_at, updated_at)
+             VALUES ('general', 'general', 'general', 'public', 'owner', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(db.write_pool())
+        .await?;
+        query(
+            "INSERT INTO threads
+             (id, channel_id, creator_account_id, title, body, last_activity_at, created_at, updated_at)
+             VALUES ('thread-1', 'general', 'owner', 'Release Plan', 'body', ?, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(db.write_pool())
+        .await?;
+        query(
+            "INSERT INTO search_index
+             (kind, object_id, channel_id, thread_id, conversation_id, title, body, context)
+             VALUES ('thread', 'thread-1', 'general', 'thread-1', NULL, 'Release Plan', 'body', '#general')",
+        )
+        .execute(db.write_pool())
+        .await?;
+        query("DELETE FROM search_documents")
+            .execute(db.write_pool())
+            .await?;
+        query("UPDATE threads SET name_key = NULL WHERE id = 'thread-1'")
+            .execute(db.write_pool())
+            .await?;
+
+        db.apply_query_performance_migration(MIGRATION_QUERY_PERFORMANCE)
+            .await?;
+
+        let mapped_rows: i64 = query_scalar(
+            "SELECT COUNT(*)
+             FROM search_documents
+             WHERE kind = 'thread' AND object_id = 'thread-1'",
+        )
+        .fetch_one(db.read_pool())
+        .await?;
+        assert_eq!(mapped_rows, 1);
+
+        let name_key: String = query_scalar("SELECT name_key FROM threads WHERE id = 'thread-1'")
+            .fetch_one(db.read_pool())
+            .await?;
+        assert_eq!(name_key, "release-plan");
+
+        Ok(())
     }
 }
