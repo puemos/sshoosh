@@ -6,7 +6,7 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -78,6 +78,8 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-24.04
     needs: build
+    permissions:
+      contents: write
     steps:
       - name: Download packaged binaries
         uses: actions/download-artifact@v4

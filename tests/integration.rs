@@ -51,6 +51,13 @@ async fn test_state(name: &str) -> (Config, ServerState) {
         port: 0,
         max_connections: 256,
         max_connections_per_ip: 32,
+        auth_timeout: Duration::from_secs(30),
+        max_auth_attempts: 3,
+        max_unauth_connections: 32,
+        max_unauth_connections_per_ip: 4,
+        auth_failure_window: Duration::from_secs(300),
+        auth_failures_before_penalty: 5,
+        auth_penalty: Duration::from_secs(60),
         server_key_path: key_path,
         mouse_enabled: true,
     };

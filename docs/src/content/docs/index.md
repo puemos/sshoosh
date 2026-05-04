@@ -174,11 +174,27 @@ SSHOOSH_HOST=0.0.0.0
 SSHOOSH_PORT=2222
 SSHOOSH_MAX_CONNECTIONS=256
 SSHOOSH_MAX_CONNECTIONS_PER_IP=32
+SSHOOSH_AUTH_TIMEOUT_SECS=30
+SSHOOSH_MAX_AUTH_ATTEMPTS=3
+SSHOOSH_MAX_UNAUTH_CONNECTIONS=32
+SSHOOSH_MAX_UNAUTH_CONNECTIONS_PER_IP=4
+SSHOOSH_AUTH_FAILURE_WINDOW_SECS=300
+SSHOOSH_AUTH_FAILURES_BEFORE_PENALTY=5
+SSHOOSH_AUTH_PENALTY_SECS=60
 SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
 SSHOOSH_NO_MOUSE=false
 ```
 
 Use `--no-mouse` or `SSHOOSH_NO_MOUSE=true` if your terminal has problematic mouse reporting. UTF-8 support is required. Mouse support, bracketed paste, OSC52 copy, OSC8 hyperlinks, and cursor shape hints improve the experience but are optional.
+
+For production, prefer a VPN, private network, or firewall allowlist in front of the SSH port. The in-app limits above protect the process from common brute-force and connection-abuse patterns, but provider firewalls or upstream DDoS controls are still required for volumetric attacks. `sshoosh` emits structured security logs such as `auth_failed`, `token_redeem_failed`, `connection_rejected`, and `auth_penalty_applied`; those messages are intended to be usable from tools such as fail2ban without exposing plaintext tokens.
+
+Example fail2ban filter pattern:
+
+```text
+failregex = .*(auth_failed|token_redeem_failed|connection_rejected|auth_penalty_applied).*peer_ip=<HOST>.*
+ignoreregex =
+```
 
 ## Commands
 
@@ -349,7 +365,7 @@ sudo sshoosh daemon install --binary /usr/local/bin/sshoosh
 sudo sshoosh daemon uninstall
 ```
 
-On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
+On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd unit runs as the dedicated `sshoosh` user, uses owner-only state permissions, limits memory/tasks/open files, and restricts filesystem and kernel access while keeping `/var/lib/sshoosh` writable. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
 
 ## Development
 

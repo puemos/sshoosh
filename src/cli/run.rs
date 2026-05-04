@@ -26,6 +26,13 @@ pub async fn run() -> anyhow::Result<()> {
         port: cli.port,
         max_connections: cli.max_connections,
         max_connections_per_ip: cli.max_connections_per_ip,
+        auth_timeout: Duration::from_secs(cli.auth_timeout_secs),
+        max_auth_attempts: cli.max_auth_attempts,
+        max_unauth_connections: cli.max_unauth_connections,
+        max_unauth_connections_per_ip: cli.max_unauth_connections_per_ip,
+        auth_failure_window: Duration::from_secs(cli.auth_failure_window_secs),
+        auth_failures_before_penalty: cli.auth_failures_before_penalty,
+        auth_penalty: Duration::from_secs(cli.auth_penalty_secs),
         server_key_path: cli.server_key.clone().into(),
         mouse_enabled: !cli.no_mouse,
     };

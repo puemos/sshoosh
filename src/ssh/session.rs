@@ -25,6 +25,9 @@ impl russh::server::Handler for ClientHandler {
         user: &str,
         key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
+        if self.auth_deadline_expired() {
+            return Ok(self.reject_auth_timeout(user, None));
+        }
         let fingerprint = key.fingerprint(keys::HashAlg::Sha256).to_string();
         let public_key = key
             .to_openssh()
@@ -38,6 +41,7 @@ impl russh::server::Handler for ClientHandler {
                     activated = account.activated,
                     "public key auth accepted (known key)"
                 );
+                self.mark_authenticated(&account.username, Some(&fingerprint));
                 self.account = Some(account);
                 self.pending_key_auth = None;
                 return Ok(Auth::Accept);
@@ -58,14 +62,27 @@ impl russh::server::Handler for ClientHandler {
         }
 
         self.pending_key_auth = Some(PendingKeyAuth {
-            fingerprint,
+            fingerprint: fingerprint.clone(),
             public_key,
         });
         tracing::info!(
-            peer = ?self.peer_addr,
-            username = %user,
+            peer_ip = %self.peer_ip_label(),
+            username = %safe_log_field(user),
+            key_fp = %fingerprint,
             "unknown public key; requesting access token via keyboard-interactive"
         );
+        self.auth_attempts = self.auth_attempts.saturating_add(1);
+        tracing::warn!(
+            peer_ip = %self.peer_ip_label(),
+            username = %safe_log_field(user),
+            key_fp = %fingerprint,
+            reason = "unknown_key",
+            attempts = self.auth_attempts,
+            "auth_failed"
+        );
+        if self.auth_attempts >= self.max_auth_attempts {
+            return Ok(self.reject_no_more_methods());
+        }
         Ok(Auth::Reject {
             proceed_with_methods: Some(russh::MethodSet::from(
                 &[russh::MethodKind::KeyboardInteractive][..],
@@ -74,8 +91,11 @@ impl russh::server::Handler for ClientHandler {
         })
     }
 
-    async fn auth_password(&mut self, _user: &str, _password: &str) -> Result<Auth, Self::Error> {
-        Ok(reject_publickey_only())
+    async fn auth_password(&mut self, user: &str, _password: &str) -> Result<Auth, Self::Error> {
+        if self.auth_deadline_expired() {
+            return Ok(self.reject_auth_timeout(user, None));
+        }
+        Ok(self.record_auth_failure(user, None, "password_disabled", true))
     }
 
     async fn auth_keyboard_interactive(
@@ -84,12 +104,16 @@ impl russh::server::Handler for ClientHandler {
         _submethods: &str,
         response: Option<russh::server::Response<'_>>,
     ) -> Result<Auth, Self::Error> {
+        if self.auth_deadline_expired() {
+            return Ok(self.reject_auth_timeout(user, None));
+        }
         if self.pending_key_auth.is_none() {
-            tracing::warn!(
-                peer = ?self.peer_addr,
-                "keyboard-interactive without prior public key offer"
-            );
-            return Ok(reject_publickey_only());
+            return Ok(self.record_auth_failure(
+                user,
+                None,
+                "keyboard_interactive_without_pubkey",
+                true,
+            ));
         }
 
         let Some(mut response) = response else {
@@ -97,18 +121,13 @@ impl russh::server::Handler for ClientHandler {
         };
 
         let Some(answer) = response.next() else {
-            tracing::warn!(
-                peer = ?self.peer_addr,
-                "keyboard-interactive responded without a token"
-            );
             self.pending_key_auth = None;
-            return Ok(reject_publickey_only());
+            return Ok(self.record_auth_failure(user, None, "token_missing", true));
         };
         let token = String::from_utf8_lossy(&answer).trim().to_string();
         if token.is_empty() {
-            tracing::warn!(peer = ?self.peer_addr, "empty invite token submitted");
             self.pending_key_auth = None;
-            return Ok(reject_publickey_only());
+            return Ok(self.record_auth_failure(user, None, "token_empty", true));
         }
 
         let pending = self
@@ -122,20 +141,29 @@ impl russh::server::Handler for ClientHandler {
         {
             Ok(account) => {
                 tracing::info!(
-                    peer = ?self.peer_addr,
+                    peer_ip = %self.peer_ip_label(),
                     username = %account.username,
                     "keyboard-interactive token redemption accepted"
                 );
+                self.mark_authenticated(&account.username, Some(&pending.fingerprint));
                 self.account = Some(account);
                 Ok(Auth::Accept)
             }
             Err(err) => {
                 tracing::warn!(
-                    peer = ?self.peer_addr,
+                    peer_ip = %self.peer_ip_label(),
+                    username = %safe_log_field(user),
+                    key_fp = %pending.fingerprint,
                     error = ?err,
-                    "keyboard-interactive token redemption rejected"
+                    reason = "invalid_token",
+                    "token_redeem_failed"
                 );
-                Ok(reject_publickey_only())
+                Ok(self.record_auth_failure(
+                    user,
+                    Some(&pending.fingerprint),
+                    "invalid_token",
+                    true,
+                ))
             }
         }
     }
@@ -449,6 +477,79 @@ fn is_mouse_wheel(kind: MouseEventKind) -> bool {
 }
 
 impl ClientHandler {
+    fn peer_ip_label(&self) -> String {
+        self.peer_addr
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn auth_deadline_expired(&self) -> bool {
+        self.account.is_none() && Instant::now() >= self.auth_deadline
+    }
+
+    fn mark_authenticated(&mut self, username: &str, key_fp: Option<&str>) {
+        self.auth_state.mark_authenticated();
+        self.unauth_permit.take();
+        self.auth_abuse.clear_source(self.peer_addr);
+        tracing::info!(
+            peer_ip = %self.peer_ip_label(),
+            username = %safe_log_field(username),
+            key_fp = %key_fp.map(safe_log_field).unwrap_or_default(),
+            "auth_success"
+        );
+    }
+
+    fn reject_no_more_methods(&self) -> Auth {
+        Auth::Reject {
+            proceed_with_methods: None,
+            partial_success: false,
+        }
+    }
+
+    fn reject_auth_timeout(&mut self, user: &str, key_fp: Option<&str>) -> Auth {
+        tracing::warn!(
+            peer_ip = %self.peer_ip_label(),
+            username = %safe_log_field(user),
+            key_fp = %key_fp.map(safe_log_field).unwrap_or_default(),
+            reason = "auth_timeout",
+            "auth_failed"
+        );
+        self.reject_no_more_methods()
+    }
+
+    fn record_auth_failure(
+        &mut self,
+        user: &str,
+        key_fp: Option<&str>,
+        reason: &'static str,
+        penalize: bool,
+    ) -> Auth {
+        self.auth_attempts = self.auth_attempts.saturating_add(1);
+        let penalty_applied =
+            penalize && self.auth_abuse.record_failure(self.peer_addr, user, key_fp);
+        tracing::warn!(
+            peer_ip = %self.peer_ip_label(),
+            username = %safe_log_field(user),
+            key_fp = %key_fp.map(safe_log_field).unwrap_or_default(),
+            reason,
+            attempts = self.auth_attempts,
+            "auth_failed"
+        );
+        if penalty_applied {
+            tracing::warn!(
+                peer_ip = %self.peer_ip_label(),
+                failures = self.auth_attempts,
+                penalty_secs = self.auth_abuse.penalty.as_secs(),
+                "auth_penalty_applied"
+            );
+        }
+        if self.auth_attempts >= self.max_auth_attempts {
+            self.reject_no_more_methods()
+        } else {
+            reject_publickey_only()
+        }
+    }
+
     fn cleanup_terminal(&mut self, channel: ChannelId, session: &mut Session) {
         if !self.terminal_active {
             return;

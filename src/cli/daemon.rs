@@ -406,8 +406,16 @@ fn render_systemd_unit(paths: &DaemonPaths) -> anyhow::Result<String> {
     unit.push_str("UMask=0077\n");
     unit.push_str("NoNewPrivileges=true\n");
     unit.push_str("PrivateTmp=true\n");
-    unit.push_str("ProtectSystem=full\n");
+    unit.push_str("ProtectSystem=strict\n");
     unit.push_str("ProtectHome=true\n");
+    unit.push_str("ProtectKernelTunables=true\n");
+    unit.push_str("ProtectKernelModules=true\n");
+    unit.push_str("ProtectControlGroups=true\n");
+    unit.push_str("RestrictSUIDSGID=true\n");
+    unit.push_str("LockPersonality=true\n");
+    unit.push_str("MemoryMax=256M\n");
+    unit.push_str("TasksMax=128\n");
+    unit.push_str("LimitNOFILE=4096\n");
     writeln!(unit, "ReadWritePaths={}", paths.state_dir.display())?;
     unit.push('\n');
     unit.push_str("[Install]\n");
@@ -515,6 +523,41 @@ fn render_env_file(cfg: &config::Config) -> anyhow::Result<String> {
         &mut out,
         "SSHOOSH_MAX_CONNECTIONS_PER_IP",
         &cfg.max_connections_per_ip.to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_AUTH_TIMEOUT_SECS",
+        &cfg.auth_timeout.as_secs().to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_MAX_AUTH_ATTEMPTS",
+        &cfg.max_auth_attempts.to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_MAX_UNAUTH_CONNECTIONS",
+        &cfg.max_unauth_connections.to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_MAX_UNAUTH_CONNECTIONS_PER_IP",
+        &cfg.max_unauth_connections_per_ip.to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_AUTH_FAILURE_WINDOW_SECS",
+        &cfg.auth_failure_window.as_secs().to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_AUTH_FAILURES_BEFORE_PENALTY",
+        &cfg.auth_failures_before_penalty.to_string(),
+    )?;
+    push_env(
+        &mut out,
+        "SSHOOSH_AUTH_PENALTY_SECS",
+        &cfg.auth_penalty.as_secs().to_string(),
     )?;
     push_env(
         &mut out,
@@ -962,6 +1005,13 @@ mod tests {
             port: 2222,
             max_connections: 256,
             max_connections_per_ip: 32,
+            auth_timeout: Duration::from_secs(30),
+            max_auth_attempts: 3,
+            max_unauth_connections: 32,
+            max_unauth_connections_per_ip: 4,
+            auth_failure_window: Duration::from_secs(300),
+            auth_failures_before_penalty: 5,
+            auth_penalty: Duration::from_secs(60),
             server_key_path: DEFAULT_SERVER_KEY_FILE.into(),
             mouse_enabled: true,
         }

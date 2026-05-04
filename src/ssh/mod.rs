@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result};
 use getrandom::SysRng;
 use russh::{
-    Channel, ChannelId,
+    Channel, ChannelId, Disconnect,
     keys::{self, PrivateKey, signature::rand_core::UnwrapErr},
     server::{Auth, Msg, Session},
 };

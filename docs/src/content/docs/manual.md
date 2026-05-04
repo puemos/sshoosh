@@ -330,6 +330,13 @@ SSHOOSH_HOST=0.0.0.0
 SSHOOSH_PORT=2222
 SSHOOSH_MAX_CONNECTIONS=256
 SSHOOSH_MAX_CONNECTIONS_PER_IP=32
+SSHOOSH_AUTH_TIMEOUT_SECS=30
+SSHOOSH_MAX_AUTH_ATTEMPTS=3
+SSHOOSH_MAX_UNAUTH_CONNECTIONS=32
+SSHOOSH_MAX_UNAUTH_CONNECTIONS_PER_IP=4
+SSHOOSH_AUTH_FAILURE_WINDOW_SECS=300
+SSHOOSH_AUTH_FAILURES_BEFORE_PENALTY=5
+SSHOOSH_AUTH_PENALTY_SECS=60
 SSHOOSH_SERVER_KEY=/var/lib/sshoosh/sshoosh_server_ed25519
 SSHOOSH_NO_MOUSE=false
 ```
@@ -337,6 +344,15 @@ SSHOOSH_NO_MOUSE=false
 `SSHOOSH_DATABASE_URL` overrides `SSHOOSH_DB`. Remote libSQL/Turso deployments also need `SSHOOSH_DATABASE_AUTH_TOKEN`. Multiple nodes can share the same remote database, but use stable `SSHOOSH_NODE_ID` values so master lease fencing remains predictable.
 
 Keep `SSHOOSH_DB`, `SSHOOSH_SERVER_KEY`, `SSHOOSH_DATABASE_AUTH_TOKEN`, and `SSHOOSH_ENCRYPTION_KEY` protected. Losing the SSH host key causes SSH clients to warn that the server identity changed. Losing the encryption key makes encrypted source content unreadable.
+
+For production, put the SSH port behind a VPN, private network, cloud firewall, or IP allowlist whenever possible. The built-in auth limits cap unauthenticated sessions, limit failed auth attempts, and temporarily penalize sources that repeatedly submit bad tokens, but they are not a replacement for upstream DDoS protection. Security logs use stable event names such as `auth_failed`, `token_redeem_failed`, `connection_rejected`, and `auth_penalty_applied`; plaintext bootstrap, invite, and device-link tokens are never logged.
+
+Example fail2ban filter pattern:
+
+```text
+failregex = .*(auth_failed|token_redeem_failed|connection_rejected|auth_penalty_applied).*peer_ip=<HOST>.*
+ignoreregex =
+```
 
 ## Recovery And Resilience
 

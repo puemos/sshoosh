@@ -63,6 +63,62 @@ pub(crate) struct Cli {
 
     #[arg(
         long,
+        env = "SSHOOSH_AUTH_TIMEOUT_SECS",
+        default_value_t = 30,
+        global = true
+    )]
+    pub(crate) auth_timeout_secs: u64,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MAX_AUTH_ATTEMPTS",
+        default_value_t = 3,
+        global = true
+    )]
+    pub(crate) max_auth_attempts: usize,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MAX_UNAUTH_CONNECTIONS",
+        default_value_t = 32,
+        global = true
+    )]
+    pub(crate) max_unauth_connections: usize,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_MAX_UNAUTH_CONNECTIONS_PER_IP",
+        default_value_t = 4,
+        global = true
+    )]
+    pub(crate) max_unauth_connections_per_ip: usize,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_AUTH_FAILURE_WINDOW_SECS",
+        default_value_t = 300,
+        global = true
+    )]
+    pub(crate) auth_failure_window_secs: u64,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_AUTH_FAILURES_BEFORE_PENALTY",
+        default_value_t = 5,
+        global = true
+    )]
+    pub(crate) auth_failures_before_penalty: usize,
+
+    #[arg(
+        long,
+        env = "SSHOOSH_AUTH_PENALTY_SECS",
+        default_value_t = 60,
+        global = true
+    )]
+    pub(crate) auth_penalty_secs: u64,
+
+    #[arg(
+        long,
         env = "SSHOOSH_SERVER_KEY",
         default_value = "./sshoosh_server_ed25519",
         global = true
