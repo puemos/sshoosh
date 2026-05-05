@@ -102,13 +102,30 @@ ssh -N -R <public-port>:localhost:2222 user@bastion.example.com
 ssh -p <public-port> bastion.example.com
 ```
 
-For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and service manager files:
+For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and service manager files. Provision a Linux VM with a public IPv4 (SSH cannot be proxied through HTTP/HTTPS edges), open the host SSH port and the sshoosh port, and block everything else:
+
+```sh
+sudo apt update && sudo apt -y install ufw
+sudo ufw allow 22/tcp
+sudo ufw allow 2222/tcp
+sudo ufw --force enable
+```
+
+Install the binary, install the daemon, then mint the one-time bootstrap token:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sudo sh -s -- --dir /usr/local/bin
 sudo /usr/local/bin/sshoosh daemon install --binary /usr/local/bin/sshoosh
 sudo sh -c 'set -a; . /etc/sshoosh/sshoosh.env; set +a; exec sudo -E -u sshoosh /usr/local/bin/sshoosh bootstrap-token'
 ```
+
+For a friendly hostname, point an A record at the VM's IPv4. On Cloudflare DNS the record must be **DNS only** (gray cloud); the proxied (orange cloud) mode does not pass raw SSH/TCP and will break connections.
+
+```sh
+ssh -p 2222 sshoosh.example.com
+```
+
+Paste the printed bootstrap token at the masked `Token:` prompt and choose your username in the TUI. Subsequent connections from the same SSH key skip the token prompt.
 
 Docker:
 
