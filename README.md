@@ -23,7 +23,7 @@
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/ed13483e-90d0-4e4b-876c-a972eab8b4c0" width="420" controls loop autorun/>
+  <video src="https://github.com/user-attachments/assets/3ed979ae-2ba2-4514-afd2-a38e5d62237f" width="420" controls/>
 </p>
 
 ## Quick start
