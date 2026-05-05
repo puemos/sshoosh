@@ -1530,7 +1530,18 @@ mod cases {
                 pinned_at: None,
                 muted_until: None,
                 saved_at: None,
-                reactions: Vec::new(),
+                reactions: vec![
+                    ReactionSummary {
+                        emoji: "👀".to_string(),
+                        count: 2,
+                        reacted_by_me: false,
+                    },
+                    ReactionSummary {
+                        emoji: "✅".to_string(),
+                        count: 1,
+                        reacted_by_me: true,
+                    },
+                ],
             }],
             selected_channel_id: Some("general".to_string()),
             selected_thread_id: Some("thread".to_string()),
@@ -1550,6 +1561,8 @@ mod cases {
         assert!(!rendered.contains("@owner"));
         assert!(!rendered.contains("3 comments"));
         assert!(!rendered.contains("2026-04-30"));
+        assert!(!rendered.contains("👀"));
+        assert!(!rendered.contains("✅"));
         assert!(!rendered.contains(">"));
         let channel_cell = cell_for_text(buffer, width, height, "#general");
         assert_eq!(channel_cell.fg, theme::TEXT);
