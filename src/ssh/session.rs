@@ -173,8 +173,59 @@ impl russh::server::Handler for ClientHandler {
         channel: Channel<Msg>,
         _session: &mut Session,
     ) -> Result<bool, Self::Error> {
+        if self.account.is_none() || self.channel.is_some() || self.terminal_active {
+            tracing::debug!("unsupported ssh session channel rejected");
+            return Ok(false);
+        }
         self.channel = Some(channel);
         Ok(true)
+    }
+
+    async fn channel_open_x11(
+        &mut self,
+        _channel: Channel<Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("x11 forwarding channel rejected");
+        Ok(false)
+    }
+
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _host_to_connect: &str,
+        _port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("direct tcp forwarding channel rejected");
+        Ok(false)
+    }
+
+    async fn channel_open_forwarded_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _host_to_connect: &str,
+        _port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("forwarded tcp channel rejected");
+        Ok(false)
+    }
+
+    async fn channel_open_direct_streamlocal(
+        &mut self,
+        _channel: Channel<Msg>,
+        _socket_path: &str,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("direct streamlocal channel rejected");
+        Ok(false)
     }
 
     async fn pty_request(
@@ -218,28 +269,35 @@ impl russh::server::Handler for ClientHandler {
         channel: ChannelId,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        session.channel_success(channel)?;
         let Some(chan) = self.channel.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(app) = self.app.as_ref().cloned() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(input_rx) = self.input_rx.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(key_tx) = self.key_tx.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(mut key_rx) = self.key_rx.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(wheel_tx) = self.wheel_tx.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
         let Some(mut wheel_rx) = self.wheel_rx.take() else {
+            session.channel_failure(channel)?;
             return Ok(());
         };
+        session.channel_success(channel)?;
         let channel_id = chan.id();
         let handle = session.handle();
         let mouse_enabled = self.mouse_enabled;
@@ -345,6 +403,102 @@ impl russh::server::Handler for ClientHandler {
             }
         });
         Ok(())
+    }
+
+    async fn x11_request(
+        &mut self,
+        channel: ChannelId,
+        _single_connection: bool,
+        _x11_auth_protocol: &str,
+        _x11_auth_cookie: &str,
+        _x11_screen_number: u32,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        tracing::debug!("ssh x11 request rejected");
+        session.channel_failure(channel)?;
+        Ok(())
+    }
+
+    async fn env_request(
+        &mut self,
+        channel: ChannelId,
+        _variable_name: &str,
+        _variable_value: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        tracing::debug!("ssh env request rejected");
+        session.channel_failure(channel)?;
+        Ok(())
+    }
+
+    async fn exec_request(
+        &mut self,
+        channel: ChannelId,
+        _data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        tracing::debug!("ssh exec request rejected");
+        session.channel_failure(channel)?;
+        Ok(())
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        _name: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        tracing::debug!("ssh subsystem request rejected");
+        session.channel_failure(channel)?;
+        Ok(())
+    }
+
+    async fn agent_request(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("ssh agent forwarding request rejected");
+        session.channel_failure(channel)?;
+        Ok(false)
+    }
+
+    async fn tcpip_forward(
+        &mut self,
+        _address: &str,
+        _port: &mut u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("reverse tcp forwarding request rejected");
+        Ok(false)
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        _address: &str,
+        _port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("reverse tcp forwarding cancellation rejected");
+        Ok(false)
+    }
+
+    async fn streamlocal_forward(
+        &mut self,
+        _socket_path: &str,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("streamlocal forwarding request rejected");
+        Ok(false)
+    }
+
+    async fn cancel_streamlocal_forward(
+        &mut self,
+        _socket_path: &str,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        tracing::debug!("streamlocal forwarding cancellation rejected");
+        Ok(false)
     }
 
     async fn data(

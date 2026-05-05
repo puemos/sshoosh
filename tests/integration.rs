@@ -2757,18 +2757,140 @@ async fn connect_with_random_key(
         )
         .expect("client key"),
     );
+    let (session, priv_with_hash) = connect_with_key(addr, key.clone()).await;
+    (session, priv_with_hash, key)
+}
+
+async fn connect_with_key(
+    addr: SocketAddr,
+    key: Arc<PrivateKey>,
+) -> (russh::client::Handle<TestClient>, PrivateKeyWithHashAlg) {
     let session = client::connect(Arc::new(client::Config::default()), addr, TestClient)
         .await
         .expect("connect");
     let priv_with_hash = PrivateKeyWithHashAlg::new(
-        key.clone(),
+        key,
         session
             .best_supported_rsa_hash()
             .await
             .expect("rsa hash")
             .flatten(),
     );
-    (session, priv_with_hash, key)
+    (session, priv_with_hash)
+}
+
+fn assert_request_denied<T>(result: Result<T, russh::Error>, label: &str) {
+    match result {
+        Ok(_) => panic!("{label} unexpectedly succeeded"),
+        Err(russh::Error::RequestDenied) => {}
+        Err(err) => panic!("{label} failed with unexpected error: {err:?}"),
+    }
+}
+
+fn assert_channel_open_denied<T>(result: Result<T, russh::Error>, label: &str) {
+    match result {
+        Ok(_) => panic!("{label} unexpectedly opened a channel"),
+        Err(russh::Error::ChannelOpenFailure(_)) => {}
+        Err(err) => panic!("{label} failed with unexpected error: {err:?}"),
+    }
+}
+
+async fn expect_channel_failure(channel: &mut russh::Channel<russh::client::Msg>, label: &str) {
+    let msg = timeout(Duration::from_secs(5), channel.wait())
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {label} rejection"))
+        .unwrap_or_else(|| panic!("{label} channel closed before rejection"));
+    assert!(
+        matches!(msg, ChannelMsg::Failure),
+        "{label} expected CHANNEL_FAILURE, got {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn ssh_rejects_non_tui_capabilities() {
+    let (config, state) = test_state("ssh-deny-capabilities").await;
+    let key = Arc::new(
+        PrivateKey::random(
+            &mut UnwrapErr(SysRng),
+            russh::keys::ssh_key::Algorithm::Ed25519,
+        )
+        .expect("client key"),
+    );
+    let public = key.public_key();
+    let fingerprint = public.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+    let public_key = public.to_openssh().expect("public key");
+    bootstrap_owner(&state, &fingerprint, &public_key).await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let (mut session, priv_key) = connect_with_key(addr, key).await;
+    let auth = session
+        .authenticate_publickey("owner", priv_key)
+        .await
+        .expect("publickey auth");
+    assert!(auth.success(), "registered key should authenticate");
+
+    assert_channel_open_denied(
+        session
+            .channel_open_direct_tcpip("127.0.0.1", 22, "127.0.0.1", 49152)
+            .await,
+        "direct tcp forwarding",
+    );
+    assert_channel_open_denied(
+        session
+            .channel_open_direct_streamlocal("/tmp/sshoosh-test.sock")
+            .await,
+        "direct streamlocal forwarding",
+    );
+    assert_request_denied(
+        session.tcpip_forward("127.0.0.1", 0).await,
+        "reverse tcp forwarding",
+    );
+    assert_request_denied(
+        session.streamlocal_forward("/tmp/sshoosh-test.sock").await,
+        "streamlocal forwarding",
+    );
+
+    let mut channel = session.channel_open_session().await.expect("channel");
+    channel
+        .set_env(true, "LD_PRELOAD", "/tmp/lib.so")
+        .await
+        .expect("send env request");
+    expect_channel_failure(&mut channel, "env").await;
+    channel
+        .request_x11(true, false, "MIT-MAGIC-COOKIE-1", "cookie", 0)
+        .await
+        .expect("send x11 request");
+    expect_channel_failure(&mut channel, "x11 forwarding").await;
+    channel
+        .agent_forward(true)
+        .await
+        .expect("send agent forwarding request");
+    expect_channel_failure(&mut channel, "agent forwarding").await;
+    channel
+        .exec(true, b"id".to_vec())
+        .await
+        .expect("send exec request");
+    expect_channel_failure(&mut channel, "exec").await;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .expect("send subsystem request");
+    expect_channel_failure(&mut channel, "subsystem").await;
+    channel
+        .request_shell(true)
+        .await
+        .expect("send shell request");
+    expect_channel_failure(&mut channel, "shell without pty").await;
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
 }
 
 #[tokio::test]

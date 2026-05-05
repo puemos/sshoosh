@@ -80,9 +80,19 @@ For complete deployment, configuration, and command details, read the docs site:
 | --------------------- | -------------------------- | ----- |
 | Local or LAN          | `0.0.0.0:2222` on private network | Bind to your host IP and keep firewall rules tight. |
 | Temporary sharing     | Tunnel `sshoosh` TCP port   | Works with ngrok, Cloudflare Tunnel, Tailscale, or SSH reverse tunnels. |
-| Production            | VPS + systemd              | Use durable storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`. |
-| Docker                | GHCR image + persistent volume | Use `ghcr.io/puemos/sshoosh` and expose raw TCP port 2222. |
+| Production            | VPS + systemd              | Use `sudo sshoosh daemon install` so the service runs as the locked-down `sshoosh` user. |
+| Docker                | GHCR image + persistent volume | Run as the image's non-root user, persist `/data`, and drop container capabilities. |
 | PaaS/container hosts  | Use only raw TCP paths       | Avoid HTTP-only hosts. |
+
+VPS quick path:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sudo sh -s -- --dir /usr/local/bin
+sudo /usr/local/bin/sshoosh daemon install --binary /usr/local/bin/sshoosh
+sudo sh -c 'set -a; . /etc/sshoosh/sshoosh.env; set +a; exec sudo -E -u sshoosh /usr/local/bin/sshoosh bootstrap-token'
+ssh -p 2222 sshoosh.example.com
+# Paste the bootstrap token at the masked "Token:" prompt.
+```
 
 Docker quick start:
 
@@ -90,6 +100,8 @@ Docker quick start:
 docker volume create sshoosh-data
 docker run --rm -v sshoosh-data:/data ghcr.io/puemos/sshoosh:latest bootstrap-token
 docker run -d --name sshoosh --restart unless-stopped \
+  --cap-drop=ALL \
+  --security-opt no-new-privileges \
   -p 2222:2222 \
   -v sshoosh-data:/data \
   ghcr.io/puemos/sshoosh:latest

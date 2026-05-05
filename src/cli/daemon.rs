@@ -405,14 +405,22 @@ fn render_systemd_unit(paths: &DaemonPaths) -> anyhow::Result<String> {
     unit.push_str("StateDirectoryMode=0700\n");
     unit.push_str("UMask=0077\n");
     unit.push_str("NoNewPrivileges=true\n");
+    unit.push_str("CapabilityBoundingSet=\n");
     unit.push_str("PrivateTmp=true\n");
+    unit.push_str("PrivateDevices=true\n");
     unit.push_str("ProtectSystem=strict\n");
     unit.push_str("ProtectHome=true\n");
+    unit.push_str("ProtectClock=true\n");
+    unit.push_str("ProtectHostname=true\n");
     unit.push_str("ProtectKernelTunables=true\n");
     unit.push_str("ProtectKernelModules=true\n");
+    unit.push_str("ProtectKernelLogs=true\n");
     unit.push_str("ProtectControlGroups=true\n");
     unit.push_str("RestrictSUIDSGID=true\n");
+    unit.push_str("RestrictNamespaces=true\n");
     unit.push_str("LockPersonality=true\n");
+    unit.push_str("SystemCallArchitectures=native\n");
+    unit.push_str("RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n");
     unit.push_str("MemoryMax=256M\n");
     unit.push_str("TasksMax=128\n");
     unit.push_str("LimitNOFILE=4096\n");
@@ -1044,6 +1052,14 @@ mod tests {
 
         assert!(unit.contains("EnvironmentFile=/etc/sshoosh/sshoosh.env"));
         assert!(unit.contains("ExecStart=/usr/local/bin/sshoosh serve"));
+        assert!(unit.contains("NoNewPrivileges=true"));
+        assert!(unit.contains("CapabilityBoundingSet=\n"));
+        assert!(unit.contains("PrivateDevices=true"));
+        assert!(unit.contains("ProtectSystem=strict"));
+        assert!(unit.contains("ProtectKernelLogs=true"));
+        assert!(unit.contains("RestrictNamespaces=true"));
+        assert!(unit.contains("SystemCallArchitectures=native"));
+        assert!(unit.contains("RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"));
         assert!(!unit.contains("secret-token"));
         assert!(!unit.contains("secret-key"));
         assert!(env.contains("SSHOOSH_DATABASE_AUTH_TOKEN='secret-token'"));

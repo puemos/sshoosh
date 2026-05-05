@@ -177,5 +177,6 @@ cat <<EOF
 Next:
   sshoosh bootstrap-token
   SSHOOSH_DB=./sshoosh.sqlite SSHOOSH_SERVER_KEY=./sshoosh_server_ed25519 sshoosh serve --host 0.0.0.0 --port 2222
-  ssh -p 2222 "\$USER+TOKEN@127.0.0.1"
+  ssh -p 2222 127.0.0.1
+  # Paste the bootstrap token at the masked "Token:" prompt.
 EOF

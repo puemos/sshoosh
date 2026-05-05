@@ -295,11 +295,15 @@ sshoosh serve --host 0.0.0.0 --port 2222
 Run the production daemon installer on a VPS:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh | sudo sh -s -- --dir /usr/local/bin
 sudo /usr/local/bin/sshoosh daemon install --binary /usr/local/bin/sshoosh
+sudo sh -c 'set -a; . /etc/sshoosh/sshoosh.env; set +a; exec sudo -E -u sshoosh /usr/local/bin/sshoosh bootstrap-token'
+ssh -p 2222 sshoosh.example.com
+# Paste the bootstrap token at the masked "Token:" prompt.
 sudo systemctl status sshoosh
 ```
 
-On Linux, daemon install writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. On macOS, it writes a root LaunchDaemon and keeps runtime state under `/var/lib/sshoosh`. Uninstall preserves data unless `--purge-data` is passed.
+On Linux, daemon install writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd service runs as the dedicated `sshoosh` user, keeps state owner-only, and restricts capabilities, devices, writable paths, kernel surfaces, namespaces, and address families. On macOS, it writes a root LaunchDaemon and keeps runtime state under `/var/lib/sshoosh`. Uninstall preserves data unless `--purge-data` is passed.
 
 Run with Docker:
 
@@ -307,12 +311,14 @@ Run with Docker:
 docker volume create sshoosh-data
 docker run --rm -v sshoosh-data:/data ghcr.io/puemos/sshoosh:latest bootstrap-token
 docker run -d --name sshoosh --restart unless-stopped \
+  --cap-drop=ALL \
+  --security-opt no-new-privileges \
   -p 2222:2222 \
   -v sshoosh-data:/data \
   ghcr.io/puemos/sshoosh:latest
 ```
 
-The Docker image listens on `0.0.0.0:2222` and stores the database plus SSH host key under `/data`.
+The Docker image listens on `0.0.0.0:2222`, runs as the non-root `sshoosh` user, and stores the database plus SSH host key under `/data`. Keep the published TCP port behind a host firewall, provider firewall, VPN, or IP allowlist when the VPS is internet-facing.
 
 ### Configuration
 

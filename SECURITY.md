@@ -8,6 +8,9 @@ The V1 security boundary is the SSH server, SQLite database, account/key lifecyc
 
 ## Operational Guidance
 
+- `sshoosh` is its own SSH server, not a shell wrapper around system `sshd`. It accepts the TUI session path only; command execution, subsystems such as SFTP, agent/X11 forwarding, TCP forwarding, and streamlocal forwarding are not supported.
+- For VPS production installs, prefer `sudo sshoosh daemon install` over a hand-written service. The generated Linux systemd unit runs as the dedicated `sshoosh` user, keeps state owner-only, drops capabilities, and restricts writable paths, devices, kernel surfaces, namespaces, and address families.
+- For Docker on a VPS, persist `/data`, keep the published raw TCP port behind a firewall, VPN, or IP allowlist where possible, and run with `--cap-drop=ALL --security-opt no-new-privileges`.
 - Protect `SSHOOSH_DB`, `SSHOOSH_DATABASE_AUTH_TOKEN`, `SSHOOSH_ENCRYPTION_KEY`, and `SSHOOSH_SERVER_KEY`.
 - Treat exports, SQLite backups, remote database backups, and provider snapshots as sensitive data.
 - App-level encryption protects source content fields when `SSHOOSH_ENCRYPTION_KEY` is set, but `search_index` remains plaintext by design so full-text search continues to work.

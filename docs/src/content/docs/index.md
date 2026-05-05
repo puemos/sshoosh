@@ -102,7 +102,7 @@ ssh -N -R <public-port>:localhost:2222 user@bastion.example.com
 ssh -p <public-port> bastion.example.com
 ```
 
-For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and service manager files. Provision a Linux VM with a public IPv4 (SSH cannot be proxied through HTTP/HTTPS edges), open the host SSH port and the sshoosh port, and block everything else:
+For a VPS, install the binary and then let `sshoosh` install the production daemon. The daemon command creates the dedicated service account, locked state/config paths, and a systemd unit that runs without extra Linux capabilities and restricts filesystem, device, kernel, namespace, and address-family access. Provision a Linux VM with a public IPv4 (SSH cannot be proxied through HTTP/HTTPS edges), open the host SSH port and the sshoosh port, and block everything else:
 
 ```sh
 sudo apt update && sudo apt -y install ufw
@@ -133,6 +133,8 @@ Docker:
 docker volume create sshoosh-data
 docker run --rm -v sshoosh-data:/data ghcr.io/puemos/sshoosh:latest bootstrap-token
 docker run -d --name sshoosh --restart unless-stopped \
+  --cap-drop=ALL \
+  --security-opt no-new-privileges \
   -p 2222:2222 \
   -v sshoosh-data:/data \
   ghcr.io/puemos/sshoosh:latest
@@ -142,7 +144,7 @@ ssh -p 2222 127.0.0.1
 # then choose your username in the TUI.
 ```
 
-The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`.
+The image runs as a non-root `sshoosh` user, listens on `0.0.0.0:2222`, and stores the SQLite database plus SSH host key under `/data`. Named Docker volumes inherit the image permissions automatically; for bind mounts, make the directory writable by UID/GID `10001`. Keep the published TCP port behind a host firewall, provider firewall, VPN, or IP allowlist when the VPS is internet-facing.
 
 On Railway, set a fixed internal port such as `SSHOOSH_PORT=2222`, mount persistent storage for `SSHOOSH_DB` and `SSHOOSH_SERVER_KEY`, then enable TCP Proxy to that port and connect to the generated proxy host and port. On Fly, use a persistent volume such as `/data`, set `SSHOOSH_DB=/data/sshoosh.sqlite` and `SSHOOSH_SERVER_KEY=/data/sshoosh_server_ed25519`, and configure a raw TCP pass-through service with no HTTP/TLS handlers or PROXY protocol in front of `sshoosh`.
 
@@ -382,7 +384,7 @@ sudo sshoosh daemon install --binary /usr/local/bin/sshoosh
 sudo sshoosh daemon uninstall
 ```
 
-On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd unit runs as the dedicated `sshoosh` user, uses owner-only state permissions, limits memory/tasks/open files, and restricts filesystem and kernel access while keeping `/var/lib/sshoosh` writable. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
+On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd unit runs as the dedicated `sshoosh` user, uses owner-only state permissions, limits memory/tasks/open files, drops capabilities, and restricts writable paths, devices, kernel surfaces, namespaces, and address families while keeping `/var/lib/sshoosh` writable. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
 
 ## Development
 
