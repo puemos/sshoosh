@@ -1,4 +1,4 @@
-use crate::domain::Snapshot;
+use crate::features::messages::model::Snapshot;
 
 #[derive(Clone, Debug, Default)]
 pub struct WorkspaceViewModel {

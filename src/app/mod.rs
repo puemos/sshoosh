@@ -16,10 +16,15 @@ use ratatui::layout::{Position, Rect};
 
 use crate::{
     client::ClientSession,
-    service::{
-        Account, DEFAULT_HISTORY_LIMIT, LabelFeedItem, LabelFeedKind, LiveEvent, MAX_HISTORY_LIMIT,
-        NotificationSummary, SavedMessageItem, SavedMessageKind, SearchResult, ServerState,
-        Snapshot,
+    features::{
+        accounts::model::Account,
+        events::model::LiveEvent,
+        feeds::model::SearchResult,
+        messages::model::{
+            LabelFeedItem, LabelFeedKind, SavedMessageItem, SavedMessageKind, Snapshot,
+        },
+        notifications::model::NotificationSummary,
+        system::{DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT, ServerState},
     },
     terminal::TerminalCapabilities,
     terminal::{self, SharedBuffer, SshooshTerminal},

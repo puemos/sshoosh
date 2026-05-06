@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::{
     app::Action,
-    service::{Role, Snapshot},
+    features::{accounts::model::Role, messages::model::Snapshot},
 };
 
 use super::state::{AutocompleteItem, AutocompleteState, UiMode, fuzzy_score};

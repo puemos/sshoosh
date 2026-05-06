@@ -79,7 +79,7 @@ pub(crate) async fn run_dev_db_bench(
     let db = db::Database::connect_with_config(&cfg).await?;
     db.init().await?;
     seed_bench_database(&db, users, channels, threads, comments, dms).await?;
-    let state = service::ServerState::new(db.clone()).await?;
+    let state = ServerState::new(db.clone()).await?;
 
     let account_id = "bench-user-0001";
     let channel_id = "bench-channel-0000";
@@ -282,7 +282,7 @@ async fn seed_bench_database(
         let thread_id = format!("bench-thread-{thread:06}");
         let channel_id = format!("bench-channel-{channel:04}");
         let title = bench_thread_title(thread, channel);
-        let name_key = service::normalize_name_key(&title);
+        let name_key = normalize_name_key(&title);
         let body = bench_thread_body(thread, channel);
         db::query(
             "INSERT INTO threads
@@ -481,7 +481,7 @@ async fn insert_seed_labels(
     tx: &mut db::DbTransaction,
     source: SeedLabelSource<'_>,
 ) -> anyhow::Result<()> {
-    for tag in service::parse_labels(source.text) {
+    for tag in parse_labels(source.text) {
         db::query(
             "INSERT OR IGNORE INTO message_labels
              (tag, source_kind, source_id, channel_id, thread_id, conversation_id, obj_index, created_at)

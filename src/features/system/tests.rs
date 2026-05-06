@@ -6,7 +6,7 @@ mod cases {
     use uuid::Uuid;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("sshoosh-service-{name}-{}", Uuid::now_v7()))
+        std::env::temp_dir().join(format!("sshoosh-system-{name}-{}", Uuid::now_v7()))
     }
 
     async fn state_with_owner(name: &str) -> anyhow::Result<(ServerState, Account, String)> {

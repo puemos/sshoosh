@@ -15,12 +15,11 @@ The runtime should stay small and operator-friendly: one Rust binary, one SQLite
 - `src/cli/`: clap CLI definitions, command dispatch, local dev helpers, and sensitive file writing.
 - `src/ssh/`: SSH server/session transport, authentication handoff, render loop integration, and SSH-facing action formatting.
 - `src/app/`: TUI application state, input handling, slash commands, navigation, rendering, theme, and terminal interaction behavior.
-- `src/client/`: `ClientSession` facade used by the TUI/SSH layer to call service behavior.
-- `src/service/`: durable product behavior, permissions, loaders, write operations, notifications/reactions, audit/export, runtime, and `ServerState`.
-- `src/domain/`: shared domain models.
+- `src/client/`: `ClientSession` facade used by the TUI/SSH layer to call feature behavior.
+- `src/features/`: vertical product domains. Each domain owns its models, action handling, formatting, and durable `ServerState` behavior where applicable. Shared cross-domain helpers live in `src/features/shared/`; `ServerState` and runtime live in `src/features/system/`.
 - `src/db.rs`: database connection, migrations, query wrapper, encryption, backups, doctor checks, master lease, and local file permissions.
 - `migrations/`: SQL migrations embedded by `src/db.rs`.
-- `tests/integration.rs`: end-to-end service, persistence, SSH, auth, security, and CLI behavior coverage.
+- `tests/integration.rs`: end-to-end feature, persistence, SSH, auth, security, and CLI behavior coverage.
 - `docs/`: Astro docs site. Use `pnpm`; do not edit `docs/node_modules`, `docs/dist`, or `docs/.astro`.
 - `packaging/`, `Dockerfile`, `install.sh`, `.github/workflows/`: release, install, systemd, Docker, Pages, and CI automation.
 
@@ -35,11 +34,11 @@ The runtime should stay small and operator-friendly: one Rust binary, one SQLite
 
 ## Architecture Boundaries
 
-- Durable product behavior belongs in `ServerState` and the service modules. Avoid putting persistence, permissions, audit, notification, or membership rules in render, input, SSH, or CLI code.
+- Durable product behavior belongs in `ServerState` and the owning feature modules. Avoid putting persistence, permissions, audit, notification, or membership rules in render, input, SSH, or CLI code.
 - `src/app` owns TUI state, rendering, input, slash command parsing/autocomplete, navigation, hit maps, and terminal affordances.
 - `src/ssh` should remain transport/session glue: SSH auth, channels, render loop, terminal IO, and mapping TUI actions to client calls.
-- `src/cli` should parse/administer commands and delegate behavior to service/database APIs rather than duplicating business logic.
-- `ClientSession` is the app-facing facade over service behavior. TUI actions should route through it instead of reaching directly into `ServerState`.
+- `src/cli` should parse/administer commands and delegate behavior to feature/database APIs rather than duplicating business logic.
+- `ClientSession` is the app-facing facade over feature behavior. TUI actions should route through it instead of reaching directly into `ServerState`.
 - Database writes should go through the query wrapper in `src/db.rs` so encryption, master/standby fencing, and local file protections remain effective.
 - Schema changes must update SQL migrations, the embedded migration list in `src/db.rs`, and tests that prove upgrades and persistence still work.
 
@@ -70,7 +69,7 @@ The runtime should stay small and operator-friendly: one Rust binary, one SQLite
 
 - New or changed slash commands usually need coordinated updates in command specs, parsing, autocomplete/help, action handling, and tests.
 - Keep command aliases documented in code and docs when they are user-facing.
-- Commands that mutate durable state should surface clear errors and route through service permissions.
+- Commands that mutate durable state should surface clear errors and route through feature permissions.
 - For edit/delete flows, keep ownership and confirmation behavior explicit in both keyboard and mouse paths.
 
 ## Database And Migrations
@@ -100,7 +99,7 @@ Focused checks are useful while iterating:
 - App/TUI behavior: `cargo test app::tests`
 - Render helpers: `cargo test app::render::tests`
 - Terminal escapes/sanitization: `cargo test terminal::tests`
-- Service unit behavior: `cargo test service::tests`
+- Feature/system unit behavior: `cargo test features::system::tests`
 - Integration behavior: `cargo test --test integration`
 - End-to-end SSH behavior: `cargo test --test integration ssh_e2e_authenticates_renders_and_creates_thread`
 

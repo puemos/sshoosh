@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::service::Snapshot;
+use crate::features::messages::model::Snapshot;
 use ratatui::layout::{Position, Rect};
 use tui_scrollview::ScrollViewState;
 

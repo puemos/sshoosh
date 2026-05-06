@@ -1,4 +1,7 @@
-use crate::{domain::*, service::ServerState};
+use crate::features::{
+    accounts::model::*, audit::model::*, channels::model::*, events::model::*, feeds::model::*,
+    messages::model::*, notifications::model::*, system::ServerState,
+};
 
 #[derive(Clone)]
 pub struct ClientSession {

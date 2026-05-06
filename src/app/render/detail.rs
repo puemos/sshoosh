@@ -1,6 +1,8 @@
 use super::*;
 use crate::app::SourceFocus;
-use crate::service::{LabelFeedItem, LabelFeedKind, SavedMessageKind};
+use crate::features::messages::model::{
+    LabelFeedItem, LabelFeedKind, SavedMessageItem, SavedMessageKind,
+};
 use crate::time_format::{
     calendar_day_key, calendar_day_label, format_human_timestamp, seconds_between,
 };
@@ -831,7 +833,7 @@ fn breadcrumb_spans(text: String, marker: BreadcrumbMarker) -> Vec<Span<'static>
     spans
 }
 
-fn saved_breadcrumb_text(snapshot: &Snapshot, item: &crate::service::SavedMessageItem) -> String {
+fn saved_breadcrumb_text(snapshot: &Snapshot, item: &SavedMessageItem) -> String {
     match item.kind {
         SavedMessageKind::Dm => {
             let actor = snapshot

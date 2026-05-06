@@ -1,4 +1,8 @@
 use super::*;
+use crate::features::{
+    accounts::model::PresenceState,
+    messages::model::{DmSidebarItem, ThreadItem},
+};
 pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::panel()), area);
     let area = pane_inner(area);
@@ -131,7 +135,7 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         fallback_dm_sidebar = snapshot
             .conversations
             .iter()
-            .map(crate::service::DmSidebarItem::from)
+            .map(DmSidebarItem::from)
             .collect::<Vec<_>>();
         fallback_dm_sidebar.as_slice()
     } else {
@@ -265,7 +269,7 @@ pub(crate) fn channel_privacy_badge(visibility: &str) -> &'static str {
 
 pub(crate) fn thread_item<'a>(
     snapshot: &Snapshot,
-    thread: &'a crate::service::ThreadItem,
+    thread: &'a ThreadItem,
     row_width: usize,
     connector: &'static str,
 ) -> ListItem<'a> {
@@ -293,7 +297,7 @@ pub(crate) fn thread_item<'a>(
     ]))
 }
 
-pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String {
+pub(crate) fn thread_state_badge(thread: &ThreadItem) -> String {
     let mut out = String::new();
     if thread.archived_at.is_some() {
         out.push_str(" archived");
@@ -304,13 +308,13 @@ pub(crate) fn thread_state_badge(thread: &crate::service::ThreadItem) -> String 
     out
 }
 
-pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &crate::service::DmSidebarItem) -> String {
+pub(crate) fn dm_state_badge(snapshot: &Snapshot, dm: &DmSidebarItem) -> String {
     let mut out = String::new();
     out.push(' ');
     out.push_str(match snapshot.presence_for(&dm.peer_username) {
-        crate::service::PresenceState::Online => "online",
-        crate::service::PresenceState::Away => "away",
-        crate::service::PresenceState::Offline => "offline",
+        PresenceState::Online => "online",
+        PresenceState::Away => "away",
+        PresenceState::Offline => "offline",
     });
     if dm.muted_until.is_some() {
         out.push_str(" muted");

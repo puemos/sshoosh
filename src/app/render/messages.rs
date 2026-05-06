@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::state::MessageSelectionRegion;
-use crate::service::ReactionSummary;
+use crate::features::messages::model::ReactionSummary;
 use crate::time_format::format_human_timestamp;
 use ratatui::style::Color;
 

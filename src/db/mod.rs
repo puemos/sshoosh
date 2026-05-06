@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use url::Url;
 use zeroize::Zeroizing;
 
-use crate::domain::{normalize_name_key, parse_labels};
+use crate::features::shared::{label::parse_labels, name::normalize_name_key};
 
 mod config;
 mod encryption;

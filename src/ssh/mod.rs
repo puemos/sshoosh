@@ -23,17 +23,11 @@ use tokio::{
 };
 
 use crate::{
-    app::{
-        Action, App, InputDecoder, Key, ListModal, ListModalAction, LoadMoreRequest, MouseEvent,
-        MouseEventKind, SourceFocus, SourceTarget,
-    },
-    client::ClientSession,
+    app::{Action, App, InputDecoder, Key, MouseEvent, MouseEventKind},
     config::Config,
-    output::ssh::format_audit,
-    service::{
-        Account, AccountSummary, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
-        MentionSummary, NextUnread, NotificationSummary, PageRequest, ServerRuntime, ServerState,
-        SshKeySummary,
+    features::{
+        accounts::model::Account,
+        system::{ServerRuntime, ServerState},
     },
     terminal,
 };

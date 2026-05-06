@@ -1,4 +1,4 @@
-use crate::service::Role;
+use crate::features::accounts::model::Role;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceTarget {

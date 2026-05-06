@@ -1,9 +1,12 @@
-use crate::service;
-
 pub mod cli {
-    use super::service;
+    use crate::features::{
+        accounts::model::{AccountSummary, InviteSummary, SshKeySummary},
+        audit::model::AuditEntry,
+        channels::model::{ChannelDirectoryItem, ChannelMemberSummary},
+        notifications::model::NotificationSummary,
+    };
 
-    pub fn format_accounts(rows: &[service::AccountSummary]) -> String {
+    pub fn format_accounts(rows: &[AccountSummary]) -> String {
         let mut out = String::from("username\trole\tstate\tlast_seen\n");
         for row in rows {
             let state = if row.disabled {
@@ -24,7 +27,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_keys(rows: &[service::SshKeySummary]) -> String {
+    pub fn format_keys(rows: &[SshKeySummary]) -> String {
         let mut out = String::from("id\tusername\tfingerprint\tstate\n");
         for row in rows {
             out.push_str(&format!(
@@ -38,7 +41,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_invites(rows: &[service::InviteSummary]) -> String {
+    pub fn format_invites(rows: &[InviteSummary]) -> String {
         let mut out = String::from("id\trole\tcreated_by\tstate\texpires\n");
         for row in rows {
             let state = if row.accepted_at.is_some() {
@@ -60,7 +63,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_channel_members(rows: &[service::ChannelMemberSummary]) -> String {
+    pub fn format_channel_members(rows: &[ChannelMemberSummary]) -> String {
         let mut out = String::from("channel\tusername\trole\tjoined\n");
         for row in rows {
             out.push_str(&format!(
@@ -71,7 +74,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_channels(rows: &[service::ChannelDirectoryItem]) -> String {
+    pub fn format_channels(rows: &[ChannelDirectoryItem]) -> String {
         let mut out = String::from("channel\tvisibility\tstate\tjoined\ttopic\n");
         for row in rows {
             out.push_str(&format!(
@@ -86,7 +89,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_notifications(rows: &[service::NotificationSummary]) -> String {
+    pub fn format_notifications(rows: &[NotificationSummary]) -> String {
         let mut out = String::from("id\tkind\tactor\tstate\ttitle\tbody\n");
         for row in rows {
             out.push_str(&format!(
@@ -106,7 +109,7 @@ pub mod cli {
         out
     }
 
-    pub fn format_audit(rows: &[service::AuditEntry]) -> String {
+    pub fn format_audit(rows: &[AuditEntry]) -> String {
         let mut out = String::from("created\tactor\taction\ttarget\tmetadata\n");
         for row in rows {
             out.push_str(&format!(
@@ -124,9 +127,11 @@ pub mod cli {
 
 pub mod ssh {
     use crate::{
-        service::{
-            AccountSummary, AuditEntry, ChannelDirectoryItem, ChannelMemberSummary, InviteSummary,
-            MentionSummary, NotificationSummary, SshKeySummary,
+        features::{
+            accounts::model::{AccountSummary, InviteSummary, SshKeySummary},
+            audit::model::AuditEntry,
+            channels::model::{ChannelDirectoryItem, ChannelMemberSummary},
+            notifications::model::{MentionSummary, NotificationSummary},
         },
         time_format::format_human_timestamp,
     };
@@ -300,7 +305,7 @@ pub mod ssh {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::service::Role;
+        use crate::features::accounts::model::Role;
 
         #[test]
         fn formats_human_timestamps_without_changing_missing_values() {

@@ -10,11 +10,17 @@ mod cases {
     use crate::{
         app::render::author_prefix_width,
         db::Database,
-        service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DEFAULT_HISTORY_LIMIT,
-            DmSidebarItem, HotLabel, LabelFeedItem, LabelFeedKind, NotificationSummary,
-            ReactionSummary, SavedMessageItem, SavedMessageKind, SearchKind, SearchResult,
-            ServerState, Snapshot, ThreadItem, UserPresence,
+        features::{
+            accounts::model::UserPresence,
+            channels::model::Channel,
+            feeds::model::{SearchKind, SearchResult},
+            messages::model::{
+                CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
+                LabelFeedItem, LabelFeedKind, ReactionSummary, SavedMessageItem, SavedMessageKind,
+                Snapshot, ThreadItem,
+            },
+            notifications::model::NotificationSummary,
+            system::{DEFAULT_HISTORY_LIMIT, ServerState},
         },
     };
 
@@ -456,7 +462,7 @@ mod cases {
     #[tokio::test]
     async fn tab_accepts_inline_mention_autocomplete() {
         let mut app = test_app("mention-tab").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,
@@ -528,13 +534,13 @@ mod cases {
     #[tokio::test]
     async fn arrow_keys_navigate_inline_mention_autocomplete() {
         let mut app = test_app("mention-arrows").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,
             connected: true,
         });
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alex".to_string(),
             display_name: "Alex".to_string(),
             last_seen_at: None,
@@ -557,7 +563,7 @@ mod cases {
     #[tokio::test]
     async fn enter_accepts_open_autocomplete_without_submitting() {
         let mut app = test_app("autocomplete-enter-accept").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,
@@ -582,13 +588,13 @@ mod cases {
     #[tokio::test]
     async fn enter_accepts_highlighted_autocomplete_item() {
         let mut app = test_app("autocomplete-enter-highlighted").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,
             connected: true,
         });
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "bob".to_string(),
             display_name: "Bob".to_string(),
             last_seen_at: None,
@@ -2314,7 +2320,7 @@ mod cases {
     #[tokio::test]
     async fn exact_dm_autocomplete_enter_accepts_before_submit() {
         let mut app = test_app("dm-enter-exact-accept").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,
@@ -2347,7 +2353,7 @@ mod cases {
     #[tokio::test]
     async fn exact_mention_autocomplete_enter_accepts_before_submit() {
         let mut app = test_app("mention-enter-exact-accept").await;
-        app.snapshot.users.push(crate::service::UserPresence {
+        app.snapshot.users.push(UserPresence {
             username: "alice".to_string(),
             display_name: "Alice".to_string(),
             last_seen_at: None,

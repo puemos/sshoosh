@@ -93,7 +93,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     match command {
         Command::Serve => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             ssh::run(cfg, state).await
         }
         Command::Dev
@@ -103,7 +103,7 @@ pub async fn run() -> anyhow::Result<()> {
             unreachable!("dev commands return before opening the database")
         }
         Command::Invite { role, ttl_hours } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             let code = state
                 .create_invite_with_options(&actor_id, parse_role(&role)?, ttl_hours)
@@ -112,12 +112,12 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Users { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 UsersCommand::List { limit, cursor } => {
                     let page = state
-                        .list_accounts_page(&actor_id, service::PageRequest { limit, cursor })
+                        .list_accounts_page(&actor_id, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_accounts(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -157,12 +157,12 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Keys { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 KeysCommand::List { limit, cursor } => {
                     let page = state
-                        .list_ssh_keys_page(&actor_id, service::PageRequest { limit, cursor })
+                        .list_ssh_keys_page(&actor_id, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_keys(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -194,7 +194,7 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Invites { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 InvitesCommand::Create { role, ttl_hours } => {
@@ -205,7 +205,7 @@ pub async fn run() -> anyhow::Result<()> {
                 }
                 InvitesCommand::List { limit, cursor } => {
                     let page = state
-                        .list_invites_page(&actor_id, service::PageRequest { limit, cursor })
+                        .list_invites_page(&actor_id, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_invites(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -218,7 +218,7 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Channels { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = user_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 ChannelsCommand::List {
@@ -227,11 +227,7 @@ pub async fn run() -> anyhow::Result<()> {
                     cursor,
                 } => {
                     let page = state
-                        .list_channels_page(
-                            &actor_id,
-                            archived,
-                            service::PageRequest { limit, cursor },
-                        )
+                        .list_channels_page(&actor_id, archived, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_channels(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -272,11 +268,7 @@ pub async fn run() -> anyhow::Result<()> {
                     cursor,
                 } => {
                     let page = state
-                        .list_channel_members_page(
-                            &actor_id,
-                            &slug,
-                            service::PageRequest { limit, cursor },
-                        )
+                        .list_channel_members_page(&actor_id, &slug, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_channel_members(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -297,12 +289,12 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Notifications { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = user_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 NotificationsCommand::List { limit, cursor } => {
                     let page = state
-                        .list_notifications_page(&actor_id, service::PageRequest { limit, cursor })
+                        .list_notifications_page(&actor_id, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_notifications(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -317,12 +309,12 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Audit { command } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             match command {
                 AuditCommand::List { limit, cursor } => {
                     let page = state
-                        .list_audit_page(&actor_id, service::PageRequest { limit, cursor })
+                        .list_audit_page(&actor_id, PageRequest { limit, cursor })
                         .await?;
                     print!("{}", format_audit(&page.items));
                     print_next_cursor(page.next_cursor);
@@ -335,7 +327,7 @@ pub async fn run() -> anyhow::Result<()> {
             out,
             include_audit,
         } => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             let actor_id = admin_actor_id(&state, cli.actor.as_deref()).await?;
             let format = parse_export_format(&format)?;
             let content = state
@@ -372,8 +364,8 @@ pub async fn run() -> anyhow::Result<()> {
         Command::Encrypt {
             command: EncryptCommand::Migrate,
         } => {
-            let state = service::ServerState::new(db.clone()).await?;
-            let _runtime = service::ServerRuntime::start(state).await?;
+            let state = ServerState::new(db.clone()).await?;
+            let _runtime = ServerRuntime::start(state).await?;
             let report = db.encrypt_migrate().await?;
             println!(
                 "encrypted rows: threads={} comments={} conversation_messages={} notifications={}",
@@ -398,7 +390,7 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::BootstrapToken => {
-            let state = service::ServerState::new(db).await?;
+            let state = ServerState::new(db).await?;
             println!("{}", state.create_bootstrap_token().await?);
             Ok(())
         }
@@ -406,7 +398,7 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 pub(crate) async fn admin_actor_id(
-    state: &service::ServerState,
+    state: &ServerState,
     actor: Option<&str>,
 ) -> anyhow::Result<String> {
     if let Some(actor) = actor {
@@ -431,7 +423,7 @@ pub(crate) async fn admin_actor_id(
 }
 
 pub(crate) async fn user_actor_id(
-    state: &service::ServerState,
+    state: &ServerState,
     actor: Option<&str>,
 ) -> anyhow::Result<String> {
     if let Some(actor) = actor {
@@ -454,19 +446,19 @@ pub(crate) async fn user_actor_id(
     anyhow::bail!("protected user commands require --actor")
 }
 
-pub(crate) fn parse_role(role: &str) -> anyhow::Result<service::Role> {
+pub(crate) fn parse_role(role: &str) -> anyhow::Result<Role> {
     match role {
-        "owner" => Ok(service::Role::Owner),
-        "admin" => Ok(service::Role::Admin),
-        "member" => Ok(service::Role::Member),
+        "owner" => Ok(Role::Owner),
+        "admin" => Ok(Role::Admin),
+        "member" => Ok(Role::Member),
         value => anyhow::bail!("role must be owner, admin, or member, got {value}"),
     }
 }
 
-pub(crate) fn parse_export_format(format: &str) -> anyhow::Result<service::ExportFormat> {
+pub(crate) fn parse_export_format(format: &str) -> anyhow::Result<ExportFormat> {
     match format {
-        "json" => Ok(service::ExportFormat::Json),
-        "markdown" | "md" => Ok(service::ExportFormat::Markdown),
+        "json" => Ok(ExportFormat::Json),
+        "markdown" | "md" => Ok(ExportFormat::Markdown),
         value => anyhow::bail!("format must be json or markdown, got {value}"),
     }
 }

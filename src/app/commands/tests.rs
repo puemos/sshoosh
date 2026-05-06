@@ -2,6 +2,8 @@
 use super::*;
 #[cfg(test)]
 mod cases {
+    use crate::features::{accounts::model::UserPresence, messages::model::HotLabel};
+
     use super::*;
 
     #[test]
@@ -292,13 +294,13 @@ mod cases {
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
             users: vec![
-                crate::service::UserPresence {
+                UserPresence {
                     username: "alice".to_string(),
                     display_name: "Alice".to_string(),
                     last_seen_at: None,
                     connected: false,
                 },
-                crate::service::UserPresence {
+                UserPresence {
                     username: "owner".to_string(),
                     display_name: "Owner".to_string(),
                     last_seen_at: None,
@@ -326,12 +328,12 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             hot_labels: vec![
-                crate::service::HotLabel {
+                HotLabel {
                     tag: "incident".to_string(),
                     count: 12,
                     latest_at: "2026-05-03T12:00:00Z".to_string(),
                 },
-                crate::service::HotLabel {
+                HotLabel {
                     tag: "deploy".to_string(),
                     count: 4,
                     latest_at: "2026-05-03T12:00:00Z".to_string(),
@@ -357,7 +359,7 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
-            users: vec![crate::service::UserPresence {
+            users: vec![UserPresence {
                 username: "alice".to_string(),
                 display_name: "Alice".to_string(),
                 last_seen_at: None,
@@ -381,7 +383,7 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
-            users: vec![crate::service::UserPresence {
+            users: vec![UserPresence {
                 username: "alice".to_string(),
                 display_name: "Alice".to_string(),
                 last_seen_at: None,
@@ -403,12 +405,12 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             hot_labels: vec![
-                crate::service::HotLabel {
+                HotLabel {
                     tag: "incident".to_string(),
                     count: 12,
                     latest_at: "2026-05-03T12:00:00Z".to_string(),
                 },
-                crate::service::HotLabel {
+                HotLabel {
                     tag: "deploy".to_string(),
                     count: 4,
                     latest_at: "2026-05-03T12:00:00Z".to_string(),
@@ -431,7 +433,7 @@ mod cases {
     fn bare_label_opens_without_enter_acceptance() {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
-            hot_labels: vec![crate::service::HotLabel {
+            hot_labels: vec![HotLabel {
                 tag: "incident".to_string(),
                 count: 1,
                 latest_at: "2026-05-03T12:00:00Z".to_string(),
@@ -452,7 +454,7 @@ mod cases {
     fn label_autocomplete_requires_label_boundary() {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
-            hot_labels: vec![crate::service::HotLabel {
+            hot_labels: vec![HotLabel {
                 tag: "incident".to_string(),
                 count: 1,
                 latest_at: "2026-05-03T12:00:00Z".to_string(),
@@ -471,7 +473,7 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
-            users: vec![crate::service::UserPresence {
+            users: vec![UserPresence {
                 username: "alice".to_string(),
                 display_name: "Alice".to_string(),
                 last_seen_at: None,
@@ -582,7 +584,7 @@ mod cases {
         let registry = CommandRegistry::default();
         let snapshot = Snapshot {
             current_username: Some("owner".to_string()),
-            users: vec![crate::service::UserPresence {
+            users: vec![UserPresence {
                 username: "alice".to_string(),
                 display_name: "Alice".to_string(),
                 last_seen_at: None,

@@ -10,7 +10,13 @@ use secrecy::SecretString;
 use sshoosh::{
     config::Config,
     db::{Database, DatabaseConfig, now, query, query_scalar},
-    service::{Account, ServerRuntime, ServerState},
+    features::{
+        accounts::model::{Account, PresenceState, Role},
+        audit::model::ExportFormat,
+        feeds::model::PageRequest,
+        messages::model::LabelFeedKind,
+        system::{ServerRuntime, ServerState},
+    },
     ssh::run_with_listener,
 };
 use tokio::{net::TcpListener, time::timeout};
@@ -284,10 +290,7 @@ async fn sqlite_services_track_session_presence_counts() {
         .snapshot(&alice.id, None, None, None)
         .await
         .expect("snapshot");
-    assert_eq!(
-        snapshot.presence_for("owner"),
-        sshoosh::service::PresenceState::Online
-    );
+    assert_eq!(snapshot.presence_for("owner"), PresenceState::Online);
     assert_eq!(snapshot.online_user_count(), 1);
 
     state
@@ -302,10 +305,7 @@ async fn sqlite_services_track_session_presence_counts() {
         .snapshot(&alice.id, None, None, None)
         .await
         .expect("snapshot with one session");
-    assert_eq!(
-        snapshot.presence_for("owner"),
-        sshoosh::service::PresenceState::Online
-    );
+    assert_eq!(snapshot.presence_for("owner"), PresenceState::Online);
 
     state
         .end_account_session(&owner.id)
@@ -315,10 +315,7 @@ async fn sqlite_services_track_session_presence_counts() {
         .snapshot(&alice.id, None, None, None)
         .await
         .expect("snapshot after disconnect");
-    assert_ne!(
-        snapshot.presence_for("owner"),
-        sshoosh::service::PresenceState::Online
-    );
+    assert_ne!(snapshot.presence_for("owner"), PresenceState::Online);
     assert_eq!(snapshot.online_user_count(), 0);
 }
 
@@ -345,10 +342,7 @@ async fn sqlite_services_share_presence_sessions_across_state_handles() {
         .snapshot(&alice.id, None, None, None)
         .await
         .expect("snapshot from another handle");
-    assert_eq!(
-        snapshot.presence_for("owner"),
-        sshoosh::service::PresenceState::Online
-    );
+    assert_eq!(snapshot.presence_for("owner"), PresenceState::Online);
 
     state
         .end_presence_session(&owner.id, &owner_session)
@@ -358,10 +352,7 @@ async fn sqlite_services_share_presence_sessions_across_state_handles() {
         .snapshot(&alice.id, None, None, None)
         .await
         .expect("snapshot after disconnect");
-    assert_ne!(
-        snapshot.presence_for("owner"),
-        sshoosh::service::PresenceState::Online
-    );
+    assert_ne!(snapshot.presence_for("owner"), PresenceState::Online);
 }
 
 #[tokio::test]
@@ -421,7 +412,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     let (_config, state) = test_state("admin-lifecycle").await;
     let owner = bootstrap_owner(&state, "SHA256:admin-owner", "ssh-ed25519 owner").await;
     let invite = state
-        .create_invite_with_options(&owner.id, sshoosh::service::Role::Member, Some(1))
+        .create_invite_with_options(&owner.id, Role::Member, Some(1))
         .await
         .expect("invite");
     let alice = accept_invite_key(
@@ -434,11 +425,11 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     .await;
 
     state
-        .set_user_role(&owner.id, "alice", sshoosh::service::Role::Admin)
+        .set_user_role(&owner.id, "alice", Role::Admin)
         .await
         .expect("promote alice");
     let bob_invite = state
-        .create_invite_with_options(&owner.id, sshoosh::service::Role::Member, Some(1))
+        .create_invite_with_options(&owner.id, Role::Member, Some(1))
         .await
         .expect("bob invite");
     let _bob = accept_invite_key(
@@ -450,7 +441,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     )
     .await;
     let admin_promote_admin = state
-        .set_user_role(&alice.id, "bob", sshoosh::service::Role::Admin)
+        .set_user_role(&alice.id, "bob", Role::Admin)
         .await
         .expect_err("admins cannot mint admins");
     assert!(
@@ -460,14 +451,14 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         "{admin_promote_admin:?}"
     );
     let demote_owner = state
-        .set_user_role(&owner.id, "owner", sshoosh::service::Role::Member)
+        .set_user_role(&owner.id, "owner", Role::Member)
         .await
         .expect_err("cannot demote last owner");
     assert!(demote_owner.to_string().contains("last active owner"));
 
     let keys = state.list_ssh_keys(&owner.id).await.expect("keys");
     let key_page = state
-        .list_ssh_keys_page(&owner.id, sshoosh::service::PageRequest::first(1))
+        .list_ssh_keys_page(&owner.id, PageRequest::first(1))
         .await
         .expect("first key page");
     assert_eq!(key_page.items.len(), 1);
@@ -475,7 +466,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     let second_key_page = state
         .list_ssh_keys_page(
             &owner.id,
-            sshoosh::service::PageRequest {
+            PageRequest {
                 limit: 1,
                 cursor: Some(key_next),
             },
@@ -494,7 +485,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .expect("revoke alice key");
 
     let spare_invite = state
-        .create_invite_with_options(&owner.id, sshoosh::service::Role::Member, None)
+        .create_invite_with_options(&owner.id, Role::Member, None)
         .await
         .expect("spare invite");
     let open_invite = state
@@ -505,7 +496,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .find(|invite| invite.accepted_at.is_none() && invite.revoked_at.is_none())
         .expect("open invite");
     let invite_page = state
-        .list_invites_page(&owner.id, sshoosh::service::PageRequest::first(1))
+        .list_invites_page(&owner.id, PageRequest::first(1))
         .await
         .expect("first invite page");
     assert_eq!(invite_page.items.len(), 1);
@@ -530,11 +521,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .expect("members");
     assert!(members.iter().any(|member| member.username == "alice"));
     let member_page = state
-        .list_channel_members_page(
-            &owner.id,
-            "ops-secret",
-            sshoosh::service::PageRequest::first(1),
-        )
+        .list_channel_members_page(&owner.id, "ops-secret", PageRequest::first(1))
         .await
         .expect("first member page");
     assert_eq!(member_page.items.len(), 1);
@@ -629,11 +616,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
             .any(|result| result.conversation_id.as_deref() == Some(&dm_id))
     );
     let searchable_page = state
-        .search_page_after(
-            &owner.id,
-            "searchable",
-            sshoosh::service::PageRequest::first(1),
-        )
+        .search_page_after(&owner.id, "searchable", PageRequest::first(1))
         .await
         .expect("first search page");
     assert_eq!(searchable_page.results.len(), 1);
@@ -645,7 +628,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
         .0;
     assert_eq!(saved_messages.len(), 2);
     let saved_page = state
-        .saved_messages_page_after(&owner.id, sshoosh::service::PageRequest::first(1))
+        .saved_messages_page_after(&owner.id, PageRequest::first(1))
         .await
         .expect("first saved page");
     assert_eq!(saved_page.items.len(), 1);
@@ -653,7 +636,7 @@ async fn sqlite_services_cover_admin_lifecycle_membership_and_search() {
     let second_saved_page = state
         .saved_messages_page_after(
             &owner.id,
-            sshoosh::service::PageRequest {
+            PageRequest {
                 limit: 1,
                 cursor: Some(saved_next),
             },
@@ -776,21 +759,15 @@ async fn sqlite_label_feeds_track_visible_message_sources() {
     assert!(!hot.iter().any(|tag| tag.tag == "1"));
 
     let owner_feed = state
-        .label_feed_page_after(
-            &owner.id,
-            "$deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&owner.id, "$deploy-2026", PageRequest::first(10))
         .await
         .expect("owner feed");
     assert_eq!(owner_feed.items.len(), 3);
     assert!(owner_feed.items.iter().any(|item| {
-        matches!(item.kind, sshoosh::service::LabelFeedKind::Thread)
-            && item.thread_id.as_deref() == Some(&thread_id)
+        matches!(item.kind, LabelFeedKind::Thread) && item.thread_id.as_deref() == Some(&thread_id)
     }));
     assert!(owner_feed.items.iter().any(|item| {
-        matches!(item.kind, sshoosh::service::LabelFeedKind::Dm)
-            && item.conversation_id.as_deref() == Some(&dm_id)
+        matches!(item.kind, LabelFeedKind::Dm) && item.conversation_id.as_deref() == Some(&dm_id)
     }));
 
     query("DELETE FROM message_labels")
@@ -806,21 +783,13 @@ async fn sqlite_label_feeds_track_visible_message_sources() {
     .expect("clear label backfill marker");
     state.db.init().await.expect("rerun migrations");
     let rebuilt_feed = state
-        .label_feed_page_after(
-            &owner.id,
-            "$deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&owner.id, "$deploy-2026", PageRequest::first(10))
         .await
         .expect("rebuilt owner feed");
     assert_eq!(rebuilt_feed.items.len(), 3);
 
     let bob_feed = state
-        .label_feed_page_after(
-            &bob.id,
-            "deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&bob.id, "deploy-2026", PageRequest::first(10))
         .await
         .expect("bob feed");
     assert!(bob_feed.items.is_empty());
@@ -832,16 +801,12 @@ async fn sqlite_label_feeds_track_visible_message_sources() {
         .await
         .expect("edit comment");
     let deploy_after_edit = state
-        .label_feed_page_after(
-            &owner.id,
-            "deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&owner.id, "deploy-2026", PageRequest::first(10))
         .await
         .expect("feed after edit");
     assert_eq!(deploy_after_edit.items.len(), 2);
     let fixed = state
-        .label_feed_page_after(&owner.id, "fixed", sshoosh::service::PageRequest::first(10))
+        .label_feed_page_after(&owner.id, "fixed", PageRequest::first(10))
         .await
         .expect("fixed feed");
     assert_eq!(fixed.items.len(), 1);
@@ -851,11 +816,7 @@ async fn sqlite_label_feeds_track_visible_message_sources() {
         .await
         .expect("delete dm");
     let deploy_after_dm_delete = state
-        .label_feed_page_after(
-            &owner.id,
-            "deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&owner.id, "deploy-2026", PageRequest::first(10))
         .await
         .expect("feed after dm delete");
     assert_eq!(deploy_after_dm_delete.items.len(), 1);
@@ -865,11 +826,7 @@ async fn sqlite_label_feeds_track_visible_message_sources() {
         .await
         .expect("delete thread");
     let deploy_after_thread_delete = state
-        .label_feed_page_after(
-            &owner.id,
-            "deploy-2026",
-            sshoosh::service::PageRequest::first(10),
-        )
+        .label_feed_page_after(&owner.id, "deploy-2026", PageRequest::first(10))
         .await
         .expect("feed after thread delete");
     assert!(deploy_after_thread_delete.items.is_empty());
@@ -1331,7 +1288,7 @@ async fn sqlite_services_cover_v1_notifications_reactions_export_and_events() {
     );
 
     let export = state
-        .export_workspace(&owner.id, sshoosh::service::ExportFormat::Json, true)
+        .export_workspace(&owner.id, ExportFormat::Json, true)
         .await
         .expect("export json");
     assert!(export.contains("\"notifications\""));
@@ -1648,7 +1605,7 @@ async fn redeem_token_for_key_creates_owner_and_consumes_bootstrap_token() {
         .await
         .expect("complete owner");
     assert!(owner.activated);
-    assert_eq!(owner.role, sshoosh::service::Role::Owner);
+    assert_eq!(owner.role, Role::Owner);
     let reused = state
         .redeem_token_for_key(
             "second",
@@ -1810,7 +1767,7 @@ async fn bootstrap_token_creates_one_owner_and_cannot_be_reused() {
         .complete_onboarding(&pending_owner.id, "owner")
         .await
         .expect("complete owner");
-    assert_eq!(owner.role, sshoosh::service::Role::Owner);
+    assert_eq!(owner.role, Role::Owner);
     let reused = state
         .redeem_token_for_key(
             "second",
@@ -1841,7 +1798,7 @@ async fn invite_token_creates_one_account_key_and_cannot_be_reused() {
     )
     .await;
     assert!(alice.activated);
-    assert_eq!(alice.role, sshoosh::service::Role::Member);
+    assert_eq!(alice.role, Role::Member);
     let reused = state
         .redeem_token_for_key("bob", &invite, "SHA256:invite-bob", "ssh-ed25519 bob")
         .await;
@@ -2532,7 +2489,7 @@ fn tui_actions_route_through_client_session() {
             .expect("read actions");
     assert!(
         !actions.contains("ServerState"),
-        "TUI action processing should not depend on service state directly"
+        "TUI action processing should not depend on ServerState directly"
     );
     assert!(
         !actions.contains("state."),

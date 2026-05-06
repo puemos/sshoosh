@@ -12,10 +12,15 @@ mod cases {
 
     use crate::{
         app::state,
-        service::{
-            Channel, CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
-            NotificationSummary, ReactionSummary, Role, SavedMessageItem, SavedMessageKind,
-            SearchKind, SearchResult, ThreadItem, UserPresence,
+        features::{
+            accounts::model::{Role, UserPresence},
+            channels::model::Channel,
+            feeds::model::{SearchKind, SearchResult},
+            messages::model::{
+                CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
+                ReactionSummary, SavedMessageItem, SavedMessageKind, ThreadItem,
+            },
+            notifications::model::NotificationSummary,
         },
     };
 

@@ -11,7 +11,10 @@ use ratatui::{
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
-use crate::service::{Account, NotificationSummary, SearchKind, Snapshot};
+use crate::features::{
+    accounts::model::Account, feeds::model::SearchKind, messages::model::Snapshot,
+    notifications::model::NotificationSummary,
+};
 
 use super::{
     commands::{CommandSpec, SubcommandSpec, subcommands_for},

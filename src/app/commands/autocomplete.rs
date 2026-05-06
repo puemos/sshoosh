@@ -290,7 +290,7 @@ fn active_label_token(buffer: &str, cursor: usize) -> Option<(Range<usize>, &str
         .char_indices()
         .rev()
         .find(|(_, ch)| *ch == '$')?;
-    if !crate::service::is_label_boundary(buffer, start) {
+    if !crate::features::shared::label::is_label_boundary(buffer, start) {
         return None;
     }
 

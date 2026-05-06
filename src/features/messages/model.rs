@@ -1,4 +1,9 @@
-use super::{Channel, NotificationSummary, PresenceState, SearchResult, UserPresence};
+use crate::features::{
+    accounts::model::{PresenceState, UserPresence},
+    channels::model::Channel,
+    feeds::model::SearchResult,
+    notifications::model::NotificationSummary,
+};
 
 #[derive(Clone, Debug)]
 pub struct ReactionSummary {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::service::normalize_label;
+use crate::features::shared::label::normalize_label;
 
 pub(crate) const LABEL_LINK_PREFIX: &str = "label:";
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,7 +240,7 @@ fn find_valid_mention_with_username(text: &str, valid_mentions: &[String]) -> Op
 
 pub(crate) fn find_valid_label(text: &str) -> Option<(usize, usize, String)> {
     for (idx, ch) in text.char_indices() {
-        if ch != '$' || !crate::service::is_label_boundary(text, idx) {
+        if ch != '$' || !crate::features::shared::label::is_label_boundary(text, idx) {
             continue;
         }
         let mut end = idx + ch.len_utf8();
