@@ -555,7 +555,8 @@ mod cases {
         assert!(!top_row.contains("sshoosh"));
         assert!(!top_row.contains("workspace main"));
         let bottom_status = row_text(buffer, 120, 23);
-        assert!(bottom_status.contains("NORMAL"));
+        assert!(!bottom_status.contains("NORMAL"));
+        assert!(!bottom_status.contains("COMPOSE"));
         assert!(bottom_status.contains("#general"));
         let rendered = format!("{buffer:?}");
         assert!(!rendered.contains("2 notifications"));
@@ -3275,7 +3276,7 @@ mod cases {
             pending_username: None,
         };
         let mut ui = UiState {
-            mode: UiMode::Compose,
+            mode: UiMode::Workspace,
             ..UiState::default()
         };
         ui.composer.buffer = "hello\nworld\n1\n2\n3".to_string();
@@ -3294,7 +3295,7 @@ mod cases {
         assert!(row_text(buffer, 100, hello_pos.1 + 3).contains("2"));
         assert!(row_text(buffer, 100, hello_pos.1 + 4).contains("3▌"));
         assert!(rendered.contains("shift-enter"));
-        assert!(rendered.contains("newline"));
+        assert!(rendered.contains("nl"));
     }
 
     #[test]
@@ -3303,7 +3304,7 @@ mod cases {
         let mut terminal = Terminal::new(backend).unwrap();
         let account = activated_test_account();
         let mut ui = UiState {
-            mode: UiMode::Compose,
+            mode: UiMode::Workspace,
             ..UiState::default()
         };
         ui.composer.start_prompt("/thread new ", "title");

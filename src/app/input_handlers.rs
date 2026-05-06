@@ -66,8 +66,7 @@ impl App {
         }
 
         match self.ui.mode {
-            UiMode::Normal => self.handle_normal_key(key),
-            UiMode::Compose => self.handle_compose_key(key),
+            UiMode::Workspace => self.handle_workspace_key(key),
             UiMode::Palette => self.handle_palette_key(key),
             UiMode::Help => self.handle_help_key(key),
             UiMode::ConfirmQuit => self.handle_confirm_quit_key(key),
@@ -367,9 +366,6 @@ impl App {
                 self.actions.push(Action::OpenLabel { tag });
             }
             HitTarget::ComposerInput { scroll_y } => {
-                if self.account.activated && self.ui.mode != UiMode::Compose {
-                    self.ui.mode = UiMode::Compose;
-                }
                 self.place_composer_cursor(region.rect, scroll_y, mouse);
             }
             HitTarget::AutocompleteRow(idx) => {
@@ -386,7 +382,9 @@ impl App {
                 }
             }
             HitTarget::PaletteInput | HitTarget::PaletteResults => {}
-            HitTarget::PaletteBackdrop | HitTarget::HelpBackdrop => self.ui.mode = UiMode::Normal,
+            HitTarget::PaletteBackdrop | HitTarget::HelpBackdrop => {
+                self.ui.mode = UiMode::Workspace
+            }
             HitTarget::BannerModal => {}
             HitTarget::ListModalRow(row) => {
                 let action = self
@@ -404,7 +402,7 @@ impl App {
             }
             HitTarget::ConfirmQuitYes => self.running = false,
             HitTarget::ConfirmQuitNo | HitTarget::ConfirmQuitBackdrop => {
-                self.ui.mode = UiMode::Normal;
+                self.ui.mode = UiMode::Workspace;
             }
             HitTarget::BottomBar(action) => self.run_bottom_bar_action(action),
             HitTarget::CommentMenuBackdrop => self.close_comment_overlays(),
@@ -501,23 +499,19 @@ impl App {
 
     pub(crate) fn run_bottom_bar_action(&mut self, action: BottomBarAction) {
         match action {
-            BottomBarAction::ToggleDetail => self.toggle_workspace_detail(),
-            BottomBarAction::OpenCommand => self.enter_compose("/"),
             BottomBarAction::OpenHelp => self.open_help(),
-            BottomBarAction::OpenQuit => self.ui.mode = UiMode::ConfirmQuit,
             BottomBarAction::SubmitComposer => self.submit_composer(),
             BottomBarAction::AcceptAutocomplete => {
-                let _ = self.accept_autocomplete_tab();
+                if !self.accept_autocomplete_tab() {
+                    self.toggle_workspace_detail();
+                }
             }
             BottomBarAction::CloseMode => {
-                if self.ui.mode == UiMode::Compose {
-                    self.ui.composer.reset_input();
-                }
-                self.ui.mode = UiMode::Normal;
+                self.ui.mode = UiMode::Workspace;
             }
             BottomBarAction::RunPalette => self.run_palette_selection(),
             BottomBarAction::ConfirmQuit => self.running = false,
-            BottomBarAction::CancelQuit => self.ui.mode = UiMode::Normal,
+            BottomBarAction::CancelQuit => self.ui.mode = UiMode::Workspace,
         }
     }
 
@@ -538,57 +532,45 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_normal_key(&mut self, key: Key) {
-        match key {
-            Key::Char('q') => self.ui.mode = UiMode::ConfirmQuit,
-            Key::Char('?') | Key::CtrlSeq('x', 'h') => self.open_help(),
-            Key::Ctrl('p') | Key::CtrlSeq('x', 'p') => self.open_palette(),
-            Key::Tab | Key::BackTab => self.toggle_workspace_detail(),
-            Key::Left | Key::Char('h') => self.navigate_left(),
-            Key::Right | Key::Char('l') => self.navigate_right(),
-            Key::Down | Key::Char('j') => self.move_selection(1),
-            Key::Up | Key::Char('k') => self.move_selection(-1),
-            Key::PageDown if self.ui.active_pane == ActivePane::Detail => {
-                self.page_detail(true);
-            }
-            Key::PageUp if self.ui.active_pane == ActivePane::Detail => {
-                self.page_detail(false);
-            }
-            Key::PageDown => self.move_selection(8),
-            Key::PageUp => self.move_selection(-8),
-            Key::Home | Key::Char('g') => self.move_to_edge(false),
-            Key::End | Key::Char('G') => self.move_to_edge(true),
-            Key::Enter | Key::ShiftEnter => self.activate_selection(),
-            Key::Char('f') if self.ui.route == Route::Notifications => {
-                self.cycle_notification_filter();
-            }
-            Key::Char('i') | Key::Char('r') => self.enter_compose(""),
-            Key::Char('/') => self.enter_compose("/"),
-            Key::Char(' ') => self.toggle_threads(),
-            Key::Char('t') => self.enter_compose("/thread new "),
-            Key::Char('d') => self.enter_compose("/dm open "),
-            Key::Char('c') => self.enter_compose("/channel new "),
-            Key::Char('n') => self.actions.push(Action::NextUnread),
-            Key::Char('N') => self.actions.push(Action::NextUnread),
-            Key::Char('m') => self.actions.push(Action::MarkThreadRead),
-            Key::Char('u') => self.actions.push(Action::MarkThreadUnread),
-            Key::Char(ch) if !ch.is_control() => {
-                self.enter_compose("");
-                self.handle_compose_key(Key::Char(ch));
-            }
-            _ => {}
-        }
-    }
-
-    pub(crate) fn handle_compose_key(&mut self, key: Key) {
+    pub(crate) fn handle_workspace_key(&mut self, key: Key) {
         match key {
             Key::Esc => {
                 if self.ui.composer.autocomplete.open {
                     self.ui.composer.autocomplete.open = false;
                 } else {
-                    self.ui.mode = UiMode::Normal;
                     self.ui.composer.reset_input();
                 }
+                return;
+            }
+            Key::Ctrl('p') | Key::CtrlSeq('x', 'p') => self.open_palette(),
+            Key::CtrlSeq('x', '?') => self.open_help(),
+            Key::CtrlSeq('x', 'q') | Key::CtrlSeq('x', 'Q') => {
+                self.ui.mode = UiMode::ConfirmQuit;
+            }
+            Key::CtrlSeq('x', 'h') => self.navigate_left(),
+            Key::CtrlSeq('x', 'j') => self.move_selection(1),
+            Key::CtrlSeq('x', 'k') => self.move_selection(-1),
+            Key::CtrlSeq('x', 'l') => self.navigate_right(),
+            Key::CtrlSeq('x', 'g') => self.move_to_edge(false),
+            Key::CtrlSeq('x', 'G') => self.move_to_edge(true),
+            Key::CtrlSeq('x', 'o') | Key::CtrlSeq('x', 'O') => self.activate_selection(),
+            Key::CtrlSeq('x', ' ') => self.toggle_threads(),
+            Key::CtrlSeq('x', 't') | Key::CtrlSeq('x', 'T') => self.enter_compose("/thread new "),
+            Key::CtrlSeq('x', 'd') | Key::CtrlSeq('x', 'D') => self.enter_compose("/dm open "),
+            Key::CtrlSeq('x', 'c') | Key::CtrlSeq('x', 'C') => self.enter_compose("/channel new "),
+            Key::CtrlSeq('x', 'n') | Key::CtrlSeq('x', 'N') => {
+                self.actions.push(Action::NextUnread);
+            }
+            Key::CtrlSeq('x', 'm') | Key::CtrlSeq('x', 'M') => {
+                self.actions.push(Action::MarkThreadRead);
+            }
+            Key::CtrlSeq('x', 'u') | Key::CtrlSeq('x', 'U') => {
+                self.actions.push(Action::MarkThreadUnread);
+            }
+            Key::CtrlSeq('x', 'f') | Key::CtrlSeq('x', 'F') => self.cycle_notification_filter(),
+            Key::CtrlSeq('x', 'e') | Key::CtrlSeq('x', 'E') => {
+                self.prefill_last_own_comment_edit();
+                return;
             }
             Key::Enter => {
                 if self.accept_autocomplete_enter() {
@@ -598,21 +580,19 @@ impl App {
             }
             Key::ShiftEnter => self.ui.composer.insert('\n'),
             Key::Tab => {
-                if !self.accept_autocomplete_tab() {
-                    self.ui.composer.autocomplete.next();
+                if self.ui.composer.autocomplete.open {
+                    let _ = self.accept_autocomplete_tab();
+                } else {
+                    self.toggle_workspace_detail();
                 }
                 return;
             }
             Key::BackTab => {
-                self.ui.composer.autocomplete.previous();
-                return;
-            }
-            Key::Up if self.ui.composer.previous_history() => {
-                self.update_completions();
-                return;
-            }
-            Key::Down if self.ui.composer.next_history() => {
-                self.update_completions();
+                if self.ui.composer.autocomplete.open {
+                    self.ui.composer.autocomplete.previous();
+                } else {
+                    self.toggle_workspace_detail();
+                }
                 return;
             }
             Key::Down if self.ui.composer.autocomplete.open => {
@@ -623,6 +603,20 @@ impl App {
                 self.ui.composer.autocomplete.previous();
                 return;
             }
+            Key::Up if self.ui.composer.previous_history() => {
+                return;
+            }
+            Key::Down if self.ui.composer.next_history() => {
+                return;
+            }
+            Key::PageDown if self.ui.active_pane == ActivePane::Detail => {
+                self.page_detail(true);
+            }
+            Key::PageUp if self.ui.active_pane == ActivePane::Detail => {
+                self.page_detail(false);
+            }
+            Key::PageDown => self.move_selection(8),
+            Key::PageUp => self.move_selection(-8),
             Key::Backspace => self.ui.composer.backspace(),
             Key::Delete => self.ui.composer.delete(),
             Key::Left | Key::Ctrl('b') => self.ui.composer.move_left(),
@@ -634,10 +628,6 @@ impl App {
             Key::Ctrl('u') => self.ui.composer.clear_before_cursor(),
             Key::Ctrl('k') => self.ui.composer.clear_after_cursor(),
             Key::Ctrl('w') => self.ui.composer.delete_word_before_cursor(),
-            Key::CtrlSeq('x', 'e') | Key::CtrlSeq('x', 'E') => {
-                self.prefill_last_own_comment_edit();
-                return;
-            }
             Key::Paste(text) => self.ui.composer.insert_str(&sanitize_composer_paste(&text)),
             Key::Char(ch) if !ch.is_control() => self.ui.composer.insert(ch),
             _ => {}
@@ -647,7 +637,7 @@ impl App {
 
     pub(crate) fn handle_palette_key(&mut self, key: Key) {
         match key {
-            Key::Esc => self.ui.mode = UiMode::Normal,
+            Key::Esc => self.ui.mode = UiMode::Workspace,
             Key::Enter | Key::ShiftEnter => self.run_palette_selection(),
             Key::Down | Key::Ctrl('n') => self.ui.palette.next(),
             Key::Up | Key::Ctrl('p') => self.ui.palette.previous(),
@@ -670,7 +660,7 @@ impl App {
     pub(crate) fn handle_help_key(&mut self, key: Key) {
         match key {
             Key::Esc | Key::Enter | Key::ShiftEnter | Key::Char('?') | Key::Char('q') => {
-                self.ui.mode = UiMode::Normal;
+                self.ui.mode = UiMode::Workspace;
             }
             Key::Down | Key::Char('j') => self.ui.help_scroll.scroll_down(),
             Key::Up | Key::Char('k') => self.ui.help_scroll.scroll_up(),
@@ -686,7 +676,7 @@ impl App {
         match key {
             Key::Char('y') | Key::Char('Y') | Key::Enter | Key::ShiftEnter => self.running = false,
             Key::Esc | Key::Char('n') | Key::Char('N') | Key::Char('q') => {
-                self.ui.mode = UiMode::Normal
+                self.ui.mode = UiMode::Workspace
             }
             _ => {}
         }
@@ -799,14 +789,14 @@ impl App {
             return;
         };
         self.close_comment_overlays();
-        self.ui.mode = UiMode::Compose;
+        self.ui.mode = UiMode::Workspace;
         self.ui.composer = ComposerState::from(command.as_str());
         self.update_completions();
     }
 
     pub(crate) fn prefill_reaction_add(&mut self, target: ReactionTarget) {
         self.close_comment_overlays();
-        self.ui.mode = UiMode::Compose;
+        self.ui.mode = UiMode::Workspace;
         let prefix = "/reaction add :";
         let suffix = match target {
             ReactionTarget::ThreadRoot => "",

@@ -17,12 +17,6 @@ pub(crate) fn draw_bottombar(
         return;
     }
 
-    let mode_color = if ui.mode == UiMode::Normal {
-        theme::ACCENT
-    } else {
-        theme::WARN
-    };
-
     let top_padding: u16 = if card.height >= 3 { 1 } else { 0 };
     let status_reserved: u16 = if card.height >= 3 { 2 } else { 1 };
     let input_height = card
@@ -35,12 +29,8 @@ pub(crate) fn draw_bottombar(
         card.width.saturating_sub(4),
         input_height,
     );
-    let cursor = if ui.mode == UiMode::Compose || ui.composer.buffer.is_empty() {
-        "▌"
-    } else {
-        ""
-    };
-    let show_placeholder = ui.mode == UiMode::Normal && ui.composer.buffer.is_empty();
+    let cursor = "▌";
+    let show_placeholder = ui.composer.buffer.is_empty();
     let mut prompt = ui.composer.buffer.clone();
     if !cursor.is_empty() {
         let cursor_index = ui.composer.cursor.min(prompt.len());
@@ -55,8 +45,7 @@ pub(crate) fn draw_bottombar(
         prompt.push_str(cursor);
     }
     let inline_prompt = ui.composer.inline_prompt.as_ref().filter(|hint| {
-        ui.mode == UiMode::Compose
-            && ui.composer.buffer.len() == hint.prefix_len
+        ui.composer.buffer.len() == hint.prefix_len
             && ui.composer.cursor == hint.prefix_len
             && !hint.placeholder.is_empty()
     });
@@ -69,7 +58,7 @@ pub(crate) fn draw_bottombar(
         vec![Line::from(vec![
             Span::styled(sanitize_terminal_visible_text(&prompt), theme::composer()),
             Span::styled(
-                "  Press / for a command, Enter to write…",
+                "  Type a message or /command",
                 theme::composer().fg(theme::MUTED),
             ),
         ])]
@@ -122,34 +111,19 @@ pub(crate) fn draw_bottombar(
         .min(96);
     if status_left_width > 0 {
         let status_left = Rect::new(status.x, status.y, status_left_width, 1);
-        draw_status_cluster(frame, status_left, account, snapshot, ui, mode_color);
+        draw_status_cluster(frame, status_left, account, snapshot, ui);
     }
     register_keybar_actions(ui, status, keybar_start);
 }
 
-pub(crate) fn mode_label(ui: &UiState) -> &'static str {
-    match ui.mode {
-        UiMode::Compose => "compose",
-        UiMode::Normal => "normal",
-        UiMode::Palette => "palette",
-        UiMode::Help => "help",
-        UiMode::ConfirmQuit => "quit?",
-    }
-}
-
 fn keybar_items(ui: &UiState) -> &'static [(&'static str, &'static str, Option<BottomBarAction>)] {
     match ui.mode {
-        UiMode::Normal => &[
-            ("tab", "detail", Some(BottomBarAction::ToggleDetail)),
-            ("/", "command", Some(BottomBarAction::OpenCommand)),
-            ("?", "help", Some(BottomBarAction::OpenHelp)),
-            ("q", "quit", Some(BottomBarAction::OpenQuit)),
-        ],
-        UiMode::Compose => &[
+        UiMode::Workspace => &[
             ("enter", "send", Some(BottomBarAction::SubmitComposer)),
-            ("shift-enter", "newline", None),
+            ("shift-enter", "nl", None),
             ("tab", "accept", Some(BottomBarAction::AcceptAutocomplete)),
-            ("esc", "normal", Some(BottomBarAction::CloseMode)),
+            ("esc", "clear", Some(BottomBarAction::CloseMode)),
+            ("c-x ?", "help", Some(BottomBarAction::OpenHelp)),
         ],
         UiMode::Palette => &[
             ("enter", "run", Some(BottomBarAction::RunPalette)),
@@ -219,7 +193,6 @@ fn draw_status_cluster(
     account: &Account,
     snapshot: &Snapshot,
     ui: &mut UiState,
-    mode_color: ratatui::style::Color,
 ) {
     if area.is_empty() {
         return;
@@ -227,20 +200,11 @@ fn draw_status_cluster(
     let active = active_label(snapshot, ui);
     let unread = snapshot.total_unread();
     let mentions = snapshot.mention_unread_count;
-    let compact_width = char_width(mode_label(ui)).saturating_add(char_width(&active)) + 5;
+    let compact_width = char_width(&active);
     let show_badges = area.width as usize >= compact_width.saturating_add(22);
     let show_account = area.width as usize >= compact_width.saturating_add(62);
 
     let mut spans = Vec::new();
-    let mode_pill_text = mode_label(ui).to_uppercase();
-    spans.push(Span::styled(
-        format!(" {mode_pill_text} "),
-        Style::default()
-            .fg(theme::BG)
-            .bg(mode_color)
-            .add_modifier(Modifier::BOLD),
-    ));
-    spans.push(Span::styled(" · ", theme::composer().fg(theme::MUTED)));
     spans.push(Span::styled(active, theme::composer().fg(theme::SUBTLE)));
     if show_badges {
         spans.push(Span::styled(" ", theme::composer()));

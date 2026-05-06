@@ -114,19 +114,19 @@ fn render_help_scroll(
 fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
     let layout = HelpLayout::new(width);
     let rows = [
-        ("Navigation", "j/k", "move through workspace rows"),
-        ("", "h / l", "collapse/back / open/expand"),
+        ("Navigation", "Ctrl-X H/J/K/L", "navigate panes and rows"),
+        ("", "Ctrl-X O", "open selected item"),
+        ("", "Ctrl-X g/G", "jump to top/bottom"),
         ("", "Tab", "toggle workspace/detail"),
-        ("", "Space", "toggle threads"),
-        ("Compose", "Enter", "open selected item or send"),
+        ("", "Ctrl-X Space", "toggle threads"),
+        ("Compose", "Printable", "type into the composer"),
+        ("", "Enter", "send message or run slash command"),
         ("", "Shift-Enter", "insert newline"),
-        ("", "/", "compose command"),
-        ("", "Up/Down", "choose suggestion"),
-        ("", "Tab", "accept suggestion"),
+        ("", "Up/Down, Tab", "history and autocomplete"),
         ("", "Ctrl-X E", "edit latest message/comment here"),
-        ("System", "Ctrl-P", "command palette"),
-        ("", "Esc", "close overlay or mode"),
-        ("", "q / Ctrl-C", "quit / disconnect"),
+        ("System", "Ctrl-P, Ctrl-X ?", "palette and keyboard help"),
+        ("", "Esc", "close overlay or clear draft"),
+        ("", "Ctrl-X Q/Ctrl-C", "quit / disconnect"),
     ];
     let mut lines = vec![Line::from(Span::styled(
         "Keyboard",
@@ -279,7 +279,15 @@ impl HelpLayout {
     }
 
     fn with_group_width(width: usize, group_width: usize) -> Self {
-        let shortcut_width = if width >= 56 { 3 } else { 0 };
+        let shortcut_width = if group_width == 0 && width >= 56 {
+            8
+        } else if width >= 72 {
+            14
+        } else if width >= 56 {
+            3
+        } else {
+            0
+        };
         let desired_item_width = if width >= 88 {
             if group_width == 0 { 44 } else { 38 }
         } else if width >= 72 {

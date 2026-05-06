@@ -15,8 +15,7 @@ use super::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
-    Normal,
-    Compose,
+    Workspace,
     Palette,
     Help,
     ConfirmQuit,
@@ -113,7 +112,7 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            mode: UiMode::Normal,
+            mode: UiMode::Workspace,
             active_pane: ActivePane::List,
             route: Route::Dms,
             threads_collapsed: false,
@@ -388,10 +387,7 @@ pub enum HitTarget {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BottomBarAction {
-    ToggleDetail,
-    OpenCommand,
     OpenHelp,
-    OpenQuit,
     SubmitComposer,
     AcceptAutocomplete,
     CloseMode,

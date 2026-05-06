@@ -98,7 +98,8 @@ impl InputDecoder {
 
 pub(crate) fn decode_one(bytes: &[u8]) -> Option<(usize, Key)> {
     match bytes[0] {
-        b'\r' | b'\n' => Some((1, Key::Enter)),
+        b'\r' => Some((1, Key::Enter)),
+        b'\n' => Some((1, Key::ShiftEnter)),
         b'\t' => Some((1, Key::Tab)),
         0x7f | 0x08 => Some((1, Key::Backspace)),
         0x01..=0x1a => Some((1, Key::Ctrl((bytes[0] - 0x01 + b'a') as char))),
@@ -115,6 +116,9 @@ pub(crate) fn decode_one(bytes: &[u8]) -> Option<(usize, Key)> {
 pub(crate) fn decode_escape(bytes: &[u8]) -> Option<(usize, Key)> {
     if bytes.len() == 1 {
         return Some((1, Key::Esc));
+    }
+    if matches!(bytes[1], b'\r' | b'\n') {
+        return Some((2, Key::ShiftEnter));
     }
     if bytes[1].is_ascii_alphabetic() {
         return Some((2, Key::Alt(bytes[1] as char)));
@@ -153,7 +157,8 @@ pub(crate) fn decode_csi(bytes: &[u8]) -> Option<(usize, Key)> {
     }
     let seq = &bytes[..=end];
     match seq {
-        b"\x1b[13;2u" | b"\x1b[13;2~" | b"\x1b[27;2;13~" => Some((seq.len(), Key::ShiftEnter)),
+        b"\x1b[13;2u" | b"\x1b[13;2~" | b"\x1b[27;2;13~" | b"\x1b[13;3u" | b"\x1b[13;3~"
+        | b"\x1b[27;3;13~" => Some((seq.len(), Key::ShiftEnter)),
         b"\x1b[1~" | b"\x1b[7~" => Some((seq.len(), Key::Home)),
         b"\x1b[4~" | b"\x1b[8~" => Some((seq.len(), Key::End)),
         b"\x1b[3~" => Some((seq.len(), Key::Delete)),
@@ -270,9 +275,15 @@ mod tests {
     #[test]
     fn decodes_shift_enter_variants() {
         for seq in [
+            b"\n".as_slice(),
+            b"\x1b\r".as_slice(),
+            b"\x1b\n".as_slice(),
             b"\x1b[13;2u".as_slice(),
             b"\x1b[13;2~".as_slice(),
             b"\x1b[27;2;13~".as_slice(),
+            b"\x1b[13;3u".as_slice(),
+            b"\x1b[13;3~".as_slice(),
+            b"\x1b[27;3;13~".as_slice(),
         ] {
             let mut decoder = InputDecoder::default();
             assert_eq!(decoder.push(seq), vec![Key::ShiftEnter]);

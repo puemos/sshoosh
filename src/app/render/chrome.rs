@@ -1,15 +1,12 @@
 use super::*;
 pub(crate) fn bottombar_height(ui: &UiState) -> u16 {
-    let input_lines = if ui.mode == UiMode::Compose {
-        ui.composer
-            .buffer
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count() as u16
-            + 1
-    } else {
-        1
-    };
+    let input_lines = ui
+        .composer
+        .buffer
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count() as u16
+        + 1;
     input_lines.min(5) + 3
 }
 

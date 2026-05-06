@@ -58,19 +58,20 @@ Core keyboard controls:
 
 | Key | Action |
 | --- | --- |
-| `j` / `k` | Move through workspace rows |
-| `h` / `l` | Collapse/back or open/expand |
-| `Tab` | Toggle focus between workspace and detail panes |
-| `Space` | Toggle a channel's thread list |
-| `Enter` | Open the selected item or send the composed message |
-| `Shift-Enter` | Insert a newline in compose |
+| `Ctrl-X J` / `Ctrl-X K` | Move through workspace rows |
+| `Ctrl-X H` / `Ctrl-X L` | Collapse/back or open/expand |
+| `Ctrl-X O` | Open the selected item |
+| `Tab` | Toggle focus between workspace and detail panes, or accept autocomplete |
+| `Ctrl-X Space` | Toggle a channel's thread list |
+| `Enter` | Send the composed message or run a slash command |
+| `Shift-Enter` / `Ctrl-J` / `Option-Enter` | Insert a newline in compose |
 | `/` | Start a slash command |
 | `Ctrl-P` | Open the command palette |
-| `?` or `/help` | Open the in-app keyboard and command help |
-| `Esc` | Close the current overlay or mode |
-| `q` or `Ctrl-C` | Disconnect |
+| `Ctrl-X ?` or `/help` | Open the in-app keyboard and command help |
+| `Esc` | Close the current overlay or clear the composer |
+| `Ctrl-X Q` or `Ctrl-C` | Disconnect |
 
-When autocomplete is open, use `Up`/`Down` to move through suggestions and `Tab` to accept one. With mouse support enabled, you can click workspace rows, notification sources, saved-message sources, reaction chips, and topbar notification/mention counters. Right-click one of your messages or comments to open the edit/delete/save menu.
+Every printable key types into the composer. When autocomplete is open, use `Up`/`Down` to move through suggestions and `Tab` to accept one. With mouse support enabled, you can click workspace rows, notification sources, saved-message sources, reaction chips, and topbar notification/mention counters. Right-click one of your messages or comments to open the edit/delete/save menu.
 
 ## Daily Use
 
@@ -142,7 +143,7 @@ Notification and mention rows include their source. Click a source row with the 
 
 ## Messages And Actions
 
-Select a thread or DM, type in the composer, and press `Enter` to send. Use `Shift-Enter` for a multi-line message. Mention teammates with `@username`; mention autocomplete appears while composing.
+Select a thread or DM, type in the composer, and press `Enter` to send. Use `Shift-Enter`, `Ctrl-J`, or `Option-Enter` for a multi-line message. Mention teammates with `@username`; mention autocomplete appears while composing.
 
 Messages support lightweight inline Markdown:
 

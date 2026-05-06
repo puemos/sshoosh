@@ -2653,9 +2653,9 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(copied.contains("\x1b]52;c;Q2hhbm5lbHM="), "{copied:?}");
 
     session
-        .data(channel.id(), sgr_click(82, 32))
+        .data(channel.id(), b"\x18?".to_vec())
         .await
-        .expect("click help keybar");
+        .expect("open help");
     let help_output = read_until(&mut channel, "Keyboard").await;
     assert!(help_output.contains("Keyboard"), "{help_output:?}");
     session
@@ -2675,13 +2675,9 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .expect("dismiss invite modal");
 
     session
-        .data(channel.id(), sgr_click(69, 32))
+        .data(channel.id(), b"/thread new mouse\r".to_vec())
         .await
-        .expect("click command keybar");
-    session
-        .data(channel.id(), b"thread new mouse\r".to_vec())
-        .await
-        .expect("send mouse-driven input");
+        .expect("send command input");
     let output = read_until(&mut channel, "mouse").await;
     assert!(output.contains("mouse"), "{output:?}");
 
@@ -2700,10 +2696,6 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
         .disconnect(Disconnect::ByApplication, "", "en")
         .await;
     server.abort();
-}
-
-fn sgr_click(column: u16, row: u16) -> Vec<u8> {
-    format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").into_bytes()
 }
 
 fn sgr_drag(start: (u16, u16), end: (u16, u16)) -> Vec<u8> {

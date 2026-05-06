@@ -1,13 +1,13 @@
 use super::*;
 impl App {
     pub(crate) fn enter_compose(&mut self, initial: &str) {
-        self.ui.mode = UiMode::Compose;
+        self.ui.mode = UiMode::Workspace;
         self.ui.composer.start(initial);
         self.update_completions();
     }
 
     pub(crate) fn open_compose_prompt(&mut self, _title: &str, prefix: &str, placeholder: &str) {
-        self.ui.mode = UiMode::Compose;
+        self.ui.mode = UiMode::Workspace;
         self.ui.composer.start_prompt(prefix, placeholder);
         self.update_completions();
     }
@@ -37,7 +37,7 @@ impl App {
     }
 
     pub(crate) fn run_command_executor(&mut self, executor: CommandExecutor) {
-        self.ui.mode = UiMode::Normal;
+        self.ui.mode = UiMode::Workspace;
         match executor {
             CommandExecutor::Action(action) => self.actions.push(action),
             CommandExecutor::Prompt {
@@ -154,13 +154,11 @@ impl App {
     pub(crate) fn submit_composer(&mut self) {
         let body = self.ui.composer.buffer.trim().to_string();
         if body.is_empty() {
-            self.ui.mode = UiMode::Normal;
-            self.ui.composer.reset_input();
             return;
         }
         self.ui.composer.push_history(body.clone());
         self.ui.composer.reset_input();
-        self.ui.mode = UiMode::Normal;
+        self.ui.mode = UiMode::Workspace;
 
         if body.starts_with('/') {
             self.dispatch_command_line(body);

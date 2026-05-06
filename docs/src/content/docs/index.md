@@ -339,7 +339,7 @@ Use `/older` to load older thread or DM message history. Use `/more` to load add
 
 `/audit` is shorthand for `/audit list`.
 
-In compose mode, `Ctrl-X E` prefills an edit command for your latest comment in the current thread or your latest message in the current DM. With mouse support enabled, right-click one of your comments or DM messages to open the message menu, then choose edit or delete; deletes require confirmation.
+`Ctrl-X E` prefills an edit command for your latest comment in the current thread or your latest message in the current DM. With mouse support enabled, right-click one of your comments or DM messages to open the message menu, then choose edit or delete; deletes require confirmation.
 
 ## Membership And Channels
 

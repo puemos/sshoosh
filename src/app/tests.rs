@@ -341,7 +341,7 @@ mod cases {
     #[tokio::test]
     async fn arrow_keys_navigate_open_autocomplete() {
         let mut app = test_app("autocomplete-arrows").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/");
         app.update_completions();
 
@@ -358,7 +358,7 @@ mod cases {
     #[tokio::test]
     async fn compose_search_runs_channel_result() {
         let mut app = test_app("compose-search-channel").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/general");
         app.update_completions();
 
@@ -367,7 +367,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.snapshot.selected_channel_id.as_deref(), Some("general"));
         assert!(app.snapshot.selected_conversation_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
@@ -380,7 +380,7 @@ mod cases {
     #[tokio::test]
     async fn compose_search_runs_dm_result() {
         let mut app = test_app("compose-search-dm").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/alice");
         app.update_completions();
 
@@ -389,7 +389,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert!(app.snapshot.selected_channel_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
@@ -403,7 +403,7 @@ mod cases {
     async fn compose_search_runs_thread_result() {
         let mut app = test_app("compose-search-thread").await;
         app.snapshot.selected_thread_id = None;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/deploy");
         app.update_completions();
 
@@ -412,7 +412,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
         assert!(app.refresh_requested);
@@ -422,7 +422,7 @@ mod cases {
     #[tokio::test]
     async fn command_argument_completion_still_inserts_text() {
         let mut app = test_app("command-argument-completion").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/channel ");
         app.update_completions();
 
@@ -431,7 +431,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/channel new ");
         assert!(app.actions.is_empty());
     }
@@ -439,13 +439,13 @@ mod cases {
     #[tokio::test]
     async fn bottom_bar_accept_runs_compose_search_result() {
         let mut app = test_app("bottom-bar-compose-search").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/alice");
         app.update_completions();
 
         app.run_bottom_bar_action(BottomBarAction::AcceptAutocomplete);
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.snapshot.selected_conversation_id.as_deref(), Some("dm"));
         assert!(app.snapshot.selected_channel_id.is_none());
         assert!(app.snapshot.selected_thread_id.is_none());
@@ -462,7 +462,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("@al");
         app.update_completions();
 
@@ -477,7 +477,7 @@ mod cases {
     #[tokio::test]
     async fn tab_accepts_inline_emoji_autocomplete() {
         let mut app = test_app("emoji-tab").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from(":roc");
         app.update_completions();
 
@@ -492,7 +492,7 @@ mod cases {
     #[tokio::test]
     async fn enter_accepts_inline_emoji_autocomplete_without_submitting() {
         let mut app = test_app("emoji-enter").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from(":roc");
         app.update_completions();
 
@@ -500,7 +500,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "🚀");
         assert!(app.actions.is_empty());
     }
@@ -508,7 +508,7 @@ mod cases {
     #[tokio::test]
     async fn bare_emoji_autocomplete_enter_submits() {
         let mut app = test_app("emoji-bare-enter").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from(":");
         app.update_completions();
 
@@ -516,7 +516,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.actions,
             vec![Action::AddComment {
@@ -540,7 +540,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("@a");
         app.update_completions();
 
@@ -563,7 +563,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/dm open ");
         app.update_completions();
 
@@ -572,7 +572,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, format!("/dm open {replacement}"));
         assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
         assert!(!app.ui.composer.autocomplete.open);
@@ -594,7 +594,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/dm open ");
         app.update_completions();
 
@@ -622,6 +622,7 @@ mod cases {
         app.ui.composer.push_history("hello".to_string());
         app.handle_input(b"/");
         assert_eq!(app.ui.composer.buffer, "/");
+        app.handle_input(b"\x1b");
 
         app.handle_input(b"\x1b[A");
         assert_eq!(app.ui.composer.buffer, "/more");
@@ -798,7 +799,7 @@ mod cases {
         app.ui.active_pane = ActivePane::List;
 
         app.render().expect("render");
-        app.handle_input(b"\r");
+        app.handle_input(b"\x18o");
         app.render().expect("render opened thread");
 
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
@@ -841,7 +842,7 @@ mod cases {
         app.ui.active_pane = ActivePane::List;
         app.render().expect("render list");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         app.snapshot.comments = (1..=80)
             .map(|index| comment(index, "alice", &format!("comment {index}")))
             .collect();
@@ -1234,7 +1235,7 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
 
         for _ in 0..7 {
-            app.handle_input(b"\x1b[B");
+            app.handle_input(b"\x18j");
         }
         app.render().expect("render saved screen");
 
@@ -1335,7 +1336,7 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
 
         for _ in 0..7 {
-            app.handle_input(b"\x1b[B");
+            app.handle_input(b"\x18j");
         }
         app.render().expect("render notifications screen");
 
@@ -1811,7 +1812,7 @@ mod cases {
             )
         });
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/reaction add : #2");
         assert_eq!(app.ui.composer.cursor, "/reaction add :".len());
         assert!(app.ui.composer.autocomplete.open);
@@ -1839,7 +1840,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.ui.composer.buffer,
             format!("/reaction add {selected} #2")
@@ -1869,7 +1870,7 @@ mod cases {
         app.handle_input(b"\r");
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.actions,
             vec![Action::React {
@@ -1978,10 +1979,10 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::ThreadRoot));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(1)));
         app.render().expect("render highlighted message");
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
@@ -1990,7 +1991,7 @@ mod cases {
 
         app.ui.detail_scroll.scroll_to_top();
         app.ui.active_pane = ActivePane::List;
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         app.render().expect("render selected thread");
 
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
@@ -2011,10 +2012,10 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render dm detail");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(1)));
         for _ in 0..7 {
-            app.handle_input(b"\x1b[B");
+            app.handle_input(b"\x18j");
         }
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::Dm(8)));
         app.render().expect("render moved dm focus");
@@ -2061,8 +2062,8 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render");
 
-        app.handle_input(b"\x1b[A");
-        app.handle_input(b"\x1b[A");
+        app.handle_input(b"\x18k");
+        app.handle_input(b"\x18k");
 
         assert_eq!(app.actions, vec![Action::LoadOlder]);
     }
@@ -2077,7 +2078,7 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render saved");
 
-        app.handle_input(b"\x1b[A");
+        app.handle_input(b"\x18k");
         assert!(app.actions.is_empty());
 
         app.snapshot.notifications = vec![notification(1, "reply")];
@@ -2086,7 +2087,7 @@ mod cases {
         app.ui.notifications_selected = 0;
         app.render().expect("render notifications");
 
-        app.handle_input(b"\x1b[A");
+        app.handle_input(b"\x18k");
         assert!(app.actions.is_empty());
     }
 
@@ -2125,7 +2126,7 @@ mod cases {
         app.ui.notifications_selected = 0;
         app.render().expect("render notifications");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         assert_eq!(
             app.actions,
             vec![Action::LoadMore {
@@ -2135,7 +2136,7 @@ mod cases {
             }]
         );
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x18j");
         assert_eq!(app.actions.len(), 1);
     }
 
@@ -2267,7 +2268,7 @@ mod cases {
     #[tokio::test]
     async fn mouse_places_composer_cursor_and_accepts_autocomplete() {
         let mut app = test_app("composer-clicks").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("hello\nworld");
         app.render().expect("render");
         let input = app
@@ -2294,7 +2295,7 @@ mod cases {
     #[tokio::test]
     async fn mouse_runs_compose_search_result() {
         let mut app = test_app("mouse-compose-search").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/general");
         app.update_completions();
         app.render().expect("render");
@@ -2303,7 +2304,7 @@ mod cases {
             matches!(target, HitTarget::AutocompleteRow(0))
         });
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.snapshot.selected_channel_id.as_deref(), Some("general"));
         assert!(app.snapshot.selected_thread_id.is_none());
         assert_eq!(app.ui.route, Route::Channel("general".to_string()));
@@ -2319,7 +2320,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("/dm @alice");
         app.update_completions();
 
@@ -2327,14 +2328,14 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/dm @alice");
         assert!(!app.ui.composer.autocomplete.open);
         assert!(app.actions.is_empty());
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.actions,
             vec![Action::OpenDm {
@@ -2352,7 +2353,7 @@ mod cases {
             last_seen_at: None,
             connected: true,
         });
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("@alice");
         app.update_completions();
 
@@ -2360,14 +2361,14 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "@alice");
         assert!(!app.ui.composer.autocomplete.open);
         assert!(app.actions.is_empty());
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.actions,
             vec![Action::AddComment {
@@ -2379,7 +2380,7 @@ mod cases {
     #[tokio::test]
     async fn enter_submits_when_autocomplete_is_closed() {
         let mut app = test_app("enter-submit-no-autocomplete").await;
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("hello");
         app.update_completions();
 
@@ -2387,7 +2388,7 @@ mod cases {
 
         app.handle_input(b"\r");
 
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.actions,
             vec![Action::AddComment {
@@ -2404,12 +2405,12 @@ mod cases {
             comment(2, "owner", "first mine"),
             comment(3, "owner", "latest mine"),
         ];
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("draft");
 
         app.handle_input(b"\x18e");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(
             app.ui.composer.buffer,
             "/comment edit #3 latest mine".to_string()
@@ -2421,7 +2422,7 @@ mod cases {
     async fn compose_ctrl_x_e_ignores_threads_without_own_comment() {
         let mut app = test_app("quick-edit-no-own").await;
         app.snapshot.comments = vec![comment(1, "alice", "not mine")];
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("draft");
 
         app.handle_input(b"\x18e");
@@ -2443,12 +2444,12 @@ mod cases {
             dm_message(2, "owner", "first mine"),
             dm_message(3, "owner", "latest mine"),
         ];
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("draft");
 
         app.handle_input(b"\x18e");
 
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/dm edit #3 latest mine");
         assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
     }
@@ -2460,7 +2461,7 @@ mod cases {
         app.snapshot.selected_conversation_id = Some("dm".to_string());
         app.ui.route = Route::Dms;
         app.snapshot.conversation_messages = vec![dm_message(1, "alice", "not mine")];
-        app.ui.mode = UiMode::Compose;
+        app.ui.mode = UiMode::Workspace;
         app.ui.composer = ComposerState::from("draft");
 
         app.handle_input(b"\x18e");
@@ -2498,7 +2499,7 @@ mod cases {
         });
 
         assert!(app.ui.comment_menu.is_none());
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/comment edit #2 mine");
     }
 
@@ -2614,7 +2615,7 @@ mod cases {
         });
 
         assert!(app.ui.comment_menu.is_none());
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/dm edit #2 mine");
     }
 
@@ -2716,7 +2717,7 @@ mod cases {
         click_region(&mut app, |target| {
             matches!(target, HitTarget::PaletteRow(0))
         });
-        assert_eq!(app.ui.mode, UiMode::Compose);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
         assert_eq!(app.ui.composer.buffer, "/thread new ");
         assert_eq!(
             app.ui
@@ -2728,16 +2729,16 @@ mod cases {
         );
 
         app.handle_input(b"\x1b");
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
 
         app.render().expect("render");
         click_at(&mut app, 0, 0);
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
 
         app.ui.mode = UiMode::Help;
         app.render().expect("render");
         click_at(&mut app, 0, 0);
-        assert_eq!(app.ui.mode, UiMode::Normal);
+        assert_eq!(app.ui.mode, UiMode::Workspace);
 
         app.ui.mode = UiMode::ConfirmQuit;
         app.running = true;

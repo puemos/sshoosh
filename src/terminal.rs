@@ -17,6 +17,8 @@ use ratatui::{
 
 const MOUSE_ENABLE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 const MOUSE_DISABLE: &[u8] = b"\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
+const KEYBOARD_ENHANCEMENTS_ENABLE: &[u8] = b"\x1b[>1u";
+const KEYBOARD_ENHANCEMENTS_DISABLE: &[u8] = b"\x1b[<u";
 const NOTIFICATION_TITLE_LIMIT: usize = 80;
 const NOTIFICATION_BODY_LIMIT: usize = 240;
 
@@ -76,13 +78,16 @@ pub fn enter_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_ENABLE);
     }
+    buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_ENABLE);
     buf.extend_from_slice(b"\x1b[?2004h");
     Ok(buf)
 }
 
 pub fn leave_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
-    buf.extend_from_slice(b"\x1b[?2004l\x1b]111\x1b\\");
+    buf.extend_from_slice(b"\x1b[?2004l");
+    buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_DISABLE);
+    buf.extend_from_slice(b"\x1b]111\x1b\\");
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_DISABLE);
     }
@@ -271,12 +276,14 @@ mod tests {
         assert!(enter.contains("\x1b[?1006h"));
         assert!(!enter.contains("\x1b[?1003h"));
         assert!(!enter.contains("\x1b[?1015h"));
+        assert!(enter.contains("\x1b[>1u"));
         assert!(enter.contains("\x1b[?2004h"));
         assert!(leave.contains("\x1b[?1006l"));
         assert!(leave.contains("\x1b[?1003l"));
         assert!(leave.contains("\x1b[?1002l"));
         assert!(leave.contains("\x1b[?1000l"));
         assert!(leave.contains("\x1b[?2004l"));
+        assert!(leave.contains("\x1b[<u"));
         assert!(leave.contains("\x1b]22;default\x1b\\"));
     }
 
@@ -289,12 +296,14 @@ mod tests {
         assert!(!enter.contains("\x1b[?1002h"));
         assert!(!enter.contains("\x1b[?1003h"));
         assert!(!enter.contains("\x1b[?1006h"));
+        assert!(enter.contains("\x1b[>1u"));
         assert!(enter.contains("\x1b[?2004h"));
         assert!(!leave.contains("\x1b[?1000l"));
         assert!(!leave.contains("\x1b[?1002l"));
         assert!(!leave.contains("\x1b[?1003l"));
         assert!(!leave.contains("\x1b[?1006l"));
         assert!(leave.contains("\x1b[?2004l"));
+        assert!(leave.contains("\x1b[<u"));
         assert!(leave.contains("\x1b]22;default\x1b\\"));
     }
 
