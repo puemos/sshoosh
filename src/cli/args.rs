@@ -285,6 +285,21 @@ pub(crate) enum DaemonCommand {
         #[arg(long)]
         remove_user: bool,
     },
+    #[command(about = "Restart a managed daemon and optionally copy a stopped SQLite backup")]
+    Restart {
+        #[arg(long, value_enum, default_value_t = DaemonBackend::Auto)]
+        backend: DaemonBackend,
+        #[arg(long, default_value = "sshoosh")]
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, conflicts_with = "ask_backup")]
+        backup: bool,
+        #[arg(long, value_name = "DIR", conflicts_with = "ask_backup")]
+        backup_dir: Option<PathBuf>,
+        #[arg(long, conflicts_with_all = ["backup", "backup_dir"])]
+        ask_backup: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

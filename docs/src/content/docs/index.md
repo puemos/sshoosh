@@ -228,6 +228,7 @@ sshoosh backup /path/to/backup.sqlite
 sshoosh master status
 sshoosh encrypt migrate
 sshoosh daemon install
+sshoosh daemon restart --backup
 sshoosh daemon uninstall
 sshoosh audit list --limit 100
 sshoosh notifications list --actor alice
@@ -245,7 +246,7 @@ Protected CLI commands require `--actor <owner-or-admin>` to attribute the actio
 | Notifications | `sshoosh notifications list --actor alice`, `sshoosh notifications mark-read --actor alice` |
 | Encryption | `sshoosh encrypt migrate` |
 | Master | `sshoosh master status` |
-| Daemon | `sshoosh daemon install`, `sshoosh daemon uninstall --purge-data`, `sshoosh daemon install --backend systemd --dry-run` |
+| Daemon | `sshoosh daemon install`, `sshoosh daemon restart --backup`, `sshoosh daemon uninstall --purge-data`, `sshoosh daemon install --backend systemd --dry-run` |
 | Audit | `sshoosh audit list --limit 100` |
 | Export | `sshoosh export --format json --out export.json --include-audit`, `sshoosh export --format markdown --out export.md` |
 | Backup | `sshoosh backup /path/to/backup.sqlite` |
@@ -381,10 +382,19 @@ For production daemon deployments, prefer the built-in service manager installer
 
 ```sh
 sudo sshoosh daemon install --binary /usr/local/bin/sshoosh
+sudo sshoosh daemon restart --backup
 sudo sshoosh daemon uninstall
 ```
 
 On Linux, `daemon install` writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd unit runs as the dedicated `sshoosh` user, uses owner-only state permissions, limits memory/tasks/open files, drops capabilities, and restricts writable paths, devices, kernel surfaces, namespaces, and address families while keeping `/var/lib/sshoosh` writable. On macOS, it writes a root LaunchDaemon under `/Library/LaunchDaemons` and keeps runtime state under `/var/lib/sshoosh`. Generated env files are not embedded into systemd units or launchd plists. Uninstall preserves the database and SSH host key unless `--purge-data` is provided.
+
+To apply a new release on a managed daemon, replace the binary at the same path and restart the service. The restart command does not download binaries or change the service binary path; `--backup` stops the daemon, copies the local SQLite database plus existing WAL/SHM sidecars, then starts and verifies the service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh \
+  | sudo sh -s -- --dir /usr/local/bin --version vX.Y.Z
+sudo /usr/local/bin/sshoosh daemon restart --backup
+```
 
 ## Development
 

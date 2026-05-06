@@ -308,6 +308,14 @@ sudo systemctl status sshoosh
 
 On Linux, daemon install writes `/etc/systemd/system/sshoosh.service`, `/etc/sshoosh/sshoosh.env`, and `/var/lib/sshoosh`. The systemd service runs as the dedicated `sshoosh` user, keeps state owner-only, and restricts capabilities, devices, writable paths, kernel surfaces, namespaces, and address families. On macOS, it writes a root LaunchDaemon and keeps runtime state under `/var/lib/sshoosh`. Uninstall preserves data unless `--purge-data` is passed.
 
+To apply a new release on a daemon install, replace the binary in place and restart the managed service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh \
+  | sudo sh -s -- --dir /usr/local/bin --version vX.Y.Z
+sudo /usr/local/bin/sshoosh daemon restart --backup
+```
+
 Run with Docker:
 
 ```sh

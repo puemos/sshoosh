@@ -215,6 +215,40 @@ mod cases {
                 }
             }) if name == "sshoosh"
         ));
+
+        let cli = Cli::try_parse_from([
+            "sshoosh",
+            "daemon",
+            "restart",
+            "--backend",
+            "systemd",
+            "--name",
+            "sshoosh-prod",
+            "--backup-dir",
+            "/var/backups/sshoosh-before-upgrade",
+            "--dry-run",
+        ])
+        .expect("parse daemon restart");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Daemon {
+                command: DaemonCommand::Restart {
+                    backend: DaemonBackend::Systemd,
+                    name,
+                    dry_run: true,
+                    backup: false,
+                    backup_dir: Some(backup_dir),
+                    ask_backup: false,
+                }
+            }) if name == "sshoosh-prod"
+                && backup_dir == Path::new("/var/backups/sshoosh-before-upgrade")
+        ));
+
+        assert!(
+            Cli::try_parse_from(["sshoosh", "daemon", "restart", "--backup", "--ask-backup"])
+                .is_err()
+        );
     }
 
     #[test]

@@ -94,6 +94,14 @@ ssh -p 2222 sshoosh.example.com
 # Paste the bootstrap token at the masked "Token:" prompt.
 ```
 
+To apply a new release on a daemon install, replace the binary in place and restart the managed service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/puemos/sshoosh/main/install.sh \
+  | sudo sh -s -- --dir /usr/local/bin --version vX.Y.Z
+sudo /usr/local/bin/sshoosh daemon restart --backup
+```
+
 Docker quick start:
 
 ```sh
