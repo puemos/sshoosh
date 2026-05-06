@@ -1,0 +1,11 @@
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unused-ignored-advisory = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.x is pulled by libsql 0.9.30's remote TLS stack. Remote libSQL support is in scope, and there is no lockfile-only upgrade path to rustls-webpki >=0.103.10 through current libsql. Remove when libsql updates its TLS dependency chain." },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.x is pulled by libsql 0.9.30's remote TLS stack. Remote libSQL support is in scope, and there is no lockfile-only upgrade path to rustls-webpki >=0.103.12 through current libsql. Remove when libsql updates its TLS dependency chain." },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.x is pulled by libsql 0.9.30's remote TLS stack. Remote libSQL support is in scope, and there is no lockfile-only upgrade path to rustls-webpki >=0.103.12 through current libsql. Remove when libsql updates its TLS dependency chain." },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.x is pulled by libsql 0.9.30's remote TLS stack. Remote libSQL support is in scope, and there is no lockfile-only upgrade path to rustls-webpki >=0.103.13 through current libsql. Remove when libsql updates its TLS dependency chain." },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is pulled transitively by libsql 0.9.30's remote TLS stack via rustls-native-certs. The app does not depend on rustls-pemfile directly, and remote libSQL TLS support is still required. Remove when libsql updates away from this transitive dependency." },
+]

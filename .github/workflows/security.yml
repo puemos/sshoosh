@@ -17,15 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.4 --locked
       - name: Check RustSec advisories
-        run: cargo audit --deny warnings
+        run: cargo deny check advisories
 
   scorecard:
     name: OpenSSF Scorecard
     runs-on: ubuntu-24.04
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
     permissions:
       contents: read
       security-events: write
