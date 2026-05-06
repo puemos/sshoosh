@@ -2398,6 +2398,29 @@ mod cases {
     }
 
     #[tokio::test]
+    async fn newline_fallbacks_insert_without_submitting() {
+        let mut app = test_app("newline-fallbacks").await;
+        app.ui.mode = UiMode::Workspace;
+        app.ui.composer = ComposerState::from("hello");
+        app.ui.composer.cursor = app.ui.composer.buffer.len();
+
+        app.handle_input(b"\n");
+        app.handle_input(b"\x1b\r");
+
+        assert_eq!(app.ui.composer.buffer, "hello\n\n");
+        assert!(app.actions.is_empty());
+
+        app.handle_input(b"\r");
+
+        assert_eq!(
+            app.actions,
+            vec![Action::AddComment {
+                body: "hello".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn compose_ctrl_x_e_prefills_last_own_comment_edit() {
         let mut app = test_app("quick-edit-shortcut").await;
         app.snapshot.comments = vec![

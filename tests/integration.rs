@@ -2628,6 +2628,9 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(onboarding.contains("\x1b[?1002h"), "{onboarding:?}");
     assert!(onboarding.contains("\x1b[?1006h"), "{onboarding:?}");
     assert!(!onboarding.contains("\x1b[?1003h"), "{onboarding:?}");
+    assert!(!onboarding.contains("\x1b[>1u"), "{onboarding:?}");
+    assert!(!onboarding.contains("38;2;"), "{onboarding:?}");
+    assert!(!onboarding.contains("48;2;"), "{onboarding:?}");
     session
         .data(channel.id(), b"\r".to_vec())
         .await
@@ -2796,6 +2799,71 @@ async fn expect_channel_failure(channel: &mut russh::Channel<russh::client::Msg>
         matches!(msg, ChannelMsg::Failure),
         "{label} expected CHANNEL_FAILURE, got {msg:?}"
     );
+}
+
+async fn expect_channel_success(channel: &mut russh::Channel<russh::client::Msg>, label: &str) {
+    let msg = timeout(Duration::from_secs(5), channel.wait())
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {label} success"))
+        .unwrap_or_else(|| panic!("{label} channel closed before success"));
+    assert!(
+        matches!(msg, ChannelMsg::Success),
+        "{label} expected CHANNEL_SUCCESS, got {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn ssh_accepts_terminal_capability_env_and_enables_enhanced_keyboard() {
+    let (config, state) = test_state("ssh-terminal-capabilities").await;
+    let key = Arc::new(
+        PrivateKey::random(
+            &mut UnwrapErr(SysRng),
+            russh::keys::ssh_key::Algorithm::Ed25519,
+        )
+        .expect("client key"),
+    );
+    let public = key.public_key();
+    let fingerprint = public.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+    let public_key = public.to_openssh().expect("public key");
+    bootstrap_owner(&state, &fingerprint, &public_key).await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = run_with_listener(listener, config, state).await;
+    });
+
+    let (mut session, priv_key) = connect_with_key(addr, key).await;
+    let auth = session
+        .authenticate_publickey("owner", priv_key)
+        .await
+        .expect("publickey auth");
+    assert!(auth.success(), "registered key should authenticate");
+
+    let mut channel = session.channel_open_session().await.expect("channel");
+    channel
+        .set_env(true, "COLORTERM", "truecolor")
+        .await
+        .expect("send COLORTERM");
+    expect_channel_success(&mut channel, "COLORTERM").await;
+    channel
+        .set_env(true, "WEZTERM_EXECUTABLE", "/Applications/WezTerm.app")
+        .await
+        .expect("send WEZTERM_EXECUTABLE");
+    expect_channel_success(&mut channel, "WEZTERM_EXECUTABLE").await;
+    channel
+        .request_pty(true, "xterm-256color", 100, 32, 0, 0, &[])
+        .await
+        .expect("pty");
+    channel.request_shell(true).await.expect("shell");
+
+    let output = read_until(&mut channel, "Notifications").await;
+    assert!(output.contains("\x1b[>1u"), "{output:?}");
+
+    let _ = session
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    server.abort();
 }
 
 #[tokio::test]

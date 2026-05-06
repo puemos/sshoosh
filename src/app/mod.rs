@@ -21,6 +21,7 @@ use crate::{
         NotificationSummary, SavedMessageItem, SavedMessageKind, SearchResult, ServerState,
         Snapshot,
     },
+    terminal::TerminalCapabilities,
     terminal::{self, SharedBuffer, SshooshTerminal},
 };
 
@@ -45,6 +46,7 @@ pub struct App {
     pub running: bool,
     terminal: SshooshTerminal,
     shared: SharedBuffer,
+    terminal_capabilities: TerminalCapabilities,
     pub account: Account,
     client: ClientSession,
     live_rx: tokio::sync::broadcast::Receiver<LiveEvent>,

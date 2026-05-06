@@ -21,13 +21,116 @@ const KEYBOARD_ENHANCEMENTS_ENABLE: &[u8] = b"\x1b[>1u";
 const KEYBOARD_ENHANCEMENTS_DISABLE: &[u8] = b"\x1b[<u";
 const NOTIFICATION_TITLE_LIMIT: usize = 80;
 const NOTIFICATION_BODY_LIMIT: usize = 240;
+const CAPABILITY_ENV_VALUE_LIMIT: usize = 128;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColorMode {
+    #[default]
+    Ansi256,
+    Truecolor,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalCapabilities {
+    pub color_mode: ColorMode,
+    pub enhanced_keyboard: bool,
+}
+
+impl TerminalCapabilities {
+    pub fn detect(term: &str, env: &TerminalCapabilityEnv) -> Self {
+        let term = term.to_ascii_lowercase();
+        let term_program = env.term_program.as_deref().map(str::to_ascii_lowercase);
+        let apple_terminal = term_program.as_deref() == Some("apple_terminal");
+        let has_truecolor = !apple_terminal
+            && (env.colorterm.as_deref().is_some_and(|value| {
+                matches!(value.to_ascii_lowercase().as_str(), "truecolor" | "24bit")
+            }) || term.ends_with("-direct")
+                || term == "xterm-kitty"
+                || env.wezterm_executable.is_some()
+                || env.kitty_window_id.is_some()
+                || env.ghostty_resources_dir.is_some());
+        let enhanced_keyboard = !apple_terminal
+            && (term == "xterm-kitty"
+                || env.wezterm_executable.is_some()
+                || env.kitty_window_id.is_some()
+                || env.ghostty_resources_dir.is_some());
+        Self {
+            color_mode: if has_truecolor {
+                ColorMode::Truecolor
+            } else {
+                ColorMode::Ansi256
+            },
+            enhanced_keyboard,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TerminalCapabilityEnv {
+    pub colorterm: Option<String>,
+    pub term_program: Option<String>,
+    pub wezterm_executable: Option<String>,
+    pub kitty_window_id: Option<String>,
+    pub ghostty_resources_dir: Option<String>,
+}
+
+impl TerminalCapabilityEnv {
+    pub fn set(&mut self, name: &str, value: &str) -> bool {
+        let value = sanitize_capability_env_value(value);
+        match name {
+            name if name.eq_ignore_ascii_case("COLORTERM") => {
+                self.colorterm = Some(value);
+                true
+            }
+            name if name.eq_ignore_ascii_case("TERM_PROGRAM") => {
+                self.term_program = Some(value);
+                true
+            }
+            name if name.eq_ignore_ascii_case("WEZTERM_EXECUTABLE") => {
+                self.wezterm_executable = Some(value);
+                true
+            }
+            name if name.eq_ignore_ascii_case("KITTY_WINDOW_ID") => {
+                self.kitty_window_id = Some(value);
+                true
+            }
+            name if name.eq_ignore_ascii_case("GHOSTTY_RESOURCES_DIR") => {
+                self.ghostty_resources_dir = Some(value);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SharedBuffer {
     inner: Arc<Mutex<Vec<u8>>>,
+    color_mode: Arc<Mutex<ColorMode>>,
+}
+
+impl Default for SharedBuffer {
+    fn default() -> Self {
+        Self::new(ColorMode::default())
+    }
 }
 
 impl SharedBuffer {
+    pub fn new(color_mode: ColorMode) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Vec::new())),
+            color_mode: Arc::new(Mutex::new(color_mode)),
+        }
+    }
+
+    pub fn set_color_mode(&self, color_mode: ColorMode) -> io::Result<()> {
+        *self
+            .color_mode
+            .lock()
+            .map_err(|_| io::Error::other("terminal color mode lock poisoned"))? = color_mode;
+        Ok(())
+    }
+
     pub fn take(&self) -> io::Result<Vec<u8>> {
         let mut guard = self
             .inner
@@ -40,11 +143,18 @@ impl SharedBuffer {
 
 impl Write for SharedBuffer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let color_mode = *self
+            .color_mode
+            .lock()
+            .map_err(|_| io::Error::other("terminal color mode lock poisoned"))?;
         let mut guard = self
             .inner
             .lock()
             .map_err(|_| io::Error::other("shared terminal buffer poisoned"))?;
-        guard.extend_from_slice(buf);
+        match color_mode {
+            ColorMode::Truecolor => guard.extend_from_slice(buf),
+            ColorMode::Ansi256 => guard.extend(downgrade_truecolor_sgr(buf)),
+        }
         Ok(buf.len())
     }
 
@@ -55,8 +165,12 @@ impl Write for SharedBuffer {
 
 pub type SshooshTerminal = Terminal<CrosstermBackend<SharedBuffer>>;
 
-pub fn terminal(cols: u16, rows: u16) -> anyhow::Result<(SshooshTerminal, SharedBuffer)> {
-    let shared = SharedBuffer::default();
+pub fn terminal(
+    cols: u16,
+    rows: u16,
+    color_mode: ColorMode,
+) -> anyhow::Result<(SshooshTerminal, SharedBuffer)> {
+    let shared = SharedBuffer::new(color_mode);
     let backend = CrosstermBackend::new(shared.clone());
     let terminal = Terminal::with_options(
         backend,
@@ -67,7 +181,7 @@ pub fn terminal(cols: u16, rows: u16) -> anyhow::Result<(SshooshTerminal, Shared
     Ok((terminal, shared))
 }
 
-pub fn enter_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
+pub fn enter_alt_screen(mouse_enabled: bool, enhanced_keyboard: bool) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     crossterm::execute!(
         buf,
@@ -75,18 +189,23 @@ pub fn enter_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
         cursor::Hide,
         terminal::Clear(ClearType::All)
     )?;
+    buf.extend_from_slice(b"\x1b[0m");
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_ENABLE);
     }
-    buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_ENABLE);
+    if enhanced_keyboard {
+        buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_ENABLE);
+    }
     buf.extend_from_slice(b"\x1b[?2004h");
     Ok(buf)
 }
 
-pub fn leave_alt_screen(mouse_enabled: bool) -> io::Result<Vec<u8>> {
+pub fn leave_alt_screen(mouse_enabled: bool, enhanced_keyboard: bool) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
-    buf.extend_from_slice(b"\x1b[?2004l");
-    buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_DISABLE);
+    buf.extend_from_slice(b"\x1b[0m\x1b[?2004l");
+    if enhanced_keyboard {
+        buf.extend_from_slice(KEYBOARD_ENHANCEMENTS_DISABLE);
+    }
     buf.extend_from_slice(b"\x1b]111\x1b\\");
     if mouse_enabled {
         buf.extend_from_slice(MOUSE_DISABLE);
@@ -121,7 +240,13 @@ pub fn pointer_shape(shape: &str) -> Vec<u8> {
     }
 }
 
-pub fn osc8_hyperlink_at(rect: Rect, url: &str, text: &str, style: Style) -> Vec<u8> {
+pub fn osc8_hyperlink_at(
+    rect: Rect,
+    url: &str,
+    text: &str,
+    style: Style,
+    color_mode: ColorMode,
+) -> Vec<u8> {
     let url = sanitize_osc8(url);
     let text = sanitize_visible_text(text);
     if url.is_empty() || text.is_empty() || rect.is_empty() {
@@ -132,7 +257,7 @@ pub fn osc8_hyperlink_at(rect: Rect, url: &str, text: &str, style: Style) -> Vec
         "\x1b[{};{}H{}\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\\x1b[0m",
         rect.y.saturating_add(1),
         rect.x.saturating_add(1),
-        style_sgr(style),
+        style_sgr(style, color_mode),
         url,
         text
     )
@@ -231,13 +356,21 @@ fn sanitize_notification_id(id: &str) -> String {
     if id.is_empty() { "sshoosh" } else { &id }.to_string()
 }
 
-fn style_sgr(style: Style) -> String {
+fn sanitize_capability_env_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(CAPABILITY_ENV_VALUE_LIMIT)
+        .collect()
+}
+
+fn style_sgr(style: Style, color_mode: ColorMode) -> String {
     let mut parts = vec!["0".to_string()];
     if let Some(fg) = style.fg.and_then(rgb_color) {
-        parts.push(format!("38;2;{};{};{}", fg.0, fg.1, fg.2));
+        push_sgr_color(&mut parts, "38", fg, color_mode);
     }
     if let Some(bg) = style.bg.and_then(rgb_color) {
-        parts.push(format!("48;2;{};{};{}", bg.0, bg.1, bg.2));
+        push_sgr_color(&mut parts, "48", bg, color_mode);
     }
     if style.add_modifier.contains(Modifier::BOLD) {
         parts.push("1".to_string());
@@ -254,11 +387,147 @@ fn style_sgr(style: Style) -> String {
     format!("\x1b[{}m", parts.join(";"))
 }
 
+fn push_sgr_color(
+    parts: &mut Vec<String>,
+    prefix: &'static str,
+    rgb: (u8, u8, u8),
+    color_mode: ColorMode,
+) {
+    match color_mode {
+        ColorMode::Truecolor => parts.push(format!("{};2;{};{};{}", prefix, rgb.0, rgb.1, rgb.2)),
+        ColorMode::Ansi256 => parts.push(format!("{};5;{}", prefix, rgb_to_xterm256(rgb))),
+    }
+}
+
 fn rgb_color(color: Color) -> Option<(u8, u8, u8)> {
     match color {
         Color::Rgb(r, g, b) => Some((r, g, b)),
+        Color::Indexed(index) => Some(xterm256_to_rgb(index)),
         _ => None,
     }
+}
+
+fn downgrade_truecolor_sgr(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == 0x1b
+            && bytes.get(idx + 1) == Some(&b'[')
+            && let Some(end_offset) = bytes[idx + 2..]
+                .iter()
+                .position(|byte| matches!(*byte, 0x40..=0x7e))
+        {
+            let end = idx + 2 + end_offset;
+            if bytes[end] == b'm'
+                && let Ok(params) = std::str::from_utf8(&bytes[idx + 2..end])
+            {
+                out.extend_from_slice(b"\x1b[");
+                out.extend_from_slice(downgrade_sgr_params(params).as_bytes());
+                out.push(b'm');
+                idx = end + 1;
+                continue;
+            }
+            out.extend_from_slice(&bytes[idx..=end]);
+            idx = end + 1;
+            continue;
+        }
+        out.push(bytes[idx]);
+        idx += 1;
+    }
+    out
+}
+
+fn downgrade_sgr_params(params: &str) -> String {
+    let parts = params.split(';').collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(parts.len());
+    let mut idx = 0;
+    while idx < parts.len() {
+        if matches!(parts[idx], "38" | "48")
+            && parts.get(idx + 1) == Some(&"2")
+            && let (Some(r), Some(g), Some(b)) = (
+                parts.get(idx + 2).and_then(|part| part.parse::<u8>().ok()),
+                parts.get(idx + 3).and_then(|part| part.parse::<u8>().ok()),
+                parts.get(idx + 4).and_then(|part| part.parse::<u8>().ok()),
+            )
+        {
+            out.push(parts[idx].to_string());
+            out.push("5".to_string());
+            out.push(rgb_to_xterm256((r, g, b)).to_string());
+            idx += 5;
+        } else {
+            out.push(parts[idx].to_string());
+            idx += 1;
+        }
+    }
+    out.join(";")
+}
+
+fn rgb_to_xterm256(rgb: (u8, u8, u8)) -> u8 {
+    let mut best = 0;
+    let mut best_distance = u32::MAX;
+    for index in 0..=255 {
+        let candidate = xterm256_to_rgb(index);
+        let distance = color_distance(rgb, candidate);
+        if distance < best_distance {
+            best = index;
+            best_distance = distance;
+        }
+    }
+    best
+}
+
+fn xterm256_to_rgb(index: u8) -> (u8, u8, u8) {
+    const ANSI_16: [(u8, u8, u8); 16] = [
+        (0, 0, 0),
+        (128, 0, 0),
+        (0, 128, 0),
+        (128, 128, 0),
+        (0, 0, 128),
+        (128, 0, 128),
+        (0, 128, 128),
+        (192, 192, 192),
+        (128, 128, 128),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (0, 0, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    ];
+    match index {
+        0..=15 => ANSI_16[index as usize],
+        16..=231 => {
+            let value = index - 16;
+            let r = value / 36;
+            let g = (value % 36) / 6;
+            let b = value % 6;
+            (
+                xterm_color_cube(r),
+                xterm_color_cube(g),
+                xterm_color_cube(b),
+            )
+        }
+        232..=255 => {
+            let level = 8 + (index - 232) * 10;
+            (level, level, level)
+        }
+    }
+}
+
+fn xterm_color_cube(component: u8) -> u8 {
+    if component == 0 {
+        0
+    } else {
+        55 + component * 40
+    }
+}
+
+fn color_distance(left: (u8, u8, u8), right: (u8, u8, u8)) -> u32 {
+    let dr = left.0 as i32 - right.0 as i32;
+    let dg = left.1 as i32 - right.1 as i32;
+    let db = left.2 as i32 - right.2 as i32;
+    (dr * dr + dg * dg + db * db) as u32
 }
 
 #[cfg(test)]
@@ -268,9 +537,12 @@ mod tests {
 
     #[test]
     fn alt_screen_sequences_toggle_minimal_mouse_reporting() {
-        let enter = String::from_utf8_lossy(&enter_alt_screen(true).expect("enter")).into_owned();
-        let leave = String::from_utf8_lossy(&leave_alt_screen(true).expect("leave")).into_owned();
+        let enter =
+            String::from_utf8_lossy(&enter_alt_screen(true, true).expect("enter")).into_owned();
+        let leave =
+            String::from_utf8_lossy(&leave_alt_screen(true, true).expect("leave")).into_owned();
 
+        assert!(enter.contains("\x1b[0m"));
         assert!(enter.contains("\x1b[?1000h"));
         assert!(enter.contains("\x1b[?1002h"));
         assert!(enter.contains("\x1b[?1006h"));
@@ -284,27 +556,76 @@ mod tests {
         assert!(leave.contains("\x1b[?1000l"));
         assert!(leave.contains("\x1b[?2004l"));
         assert!(leave.contains("\x1b[<u"));
+        assert!(leave.starts_with("\x1b[0m"));
         assert!(leave.contains("\x1b]22;default\x1b\\"));
     }
 
     #[test]
     fn alt_screen_can_skip_mouse_reporting() {
-        let enter = String::from_utf8_lossy(&enter_alt_screen(false).expect("enter")).into_owned();
-        let leave = String::from_utf8_lossy(&leave_alt_screen(false).expect("leave")).into_owned();
+        let enter =
+            String::from_utf8_lossy(&enter_alt_screen(false, false).expect("enter")).into_owned();
+        let leave =
+            String::from_utf8_lossy(&leave_alt_screen(false, false).expect("leave")).into_owned();
 
         assert!(!enter.contains("\x1b[?1000h"));
         assert!(!enter.contains("\x1b[?1002h"));
         assert!(!enter.contains("\x1b[?1003h"));
         assert!(!enter.contains("\x1b[?1006h"));
-        assert!(enter.contains("\x1b[>1u"));
+        assert!(!enter.contains("\x1b[>1u"));
         assert!(enter.contains("\x1b[?2004h"));
         assert!(!leave.contains("\x1b[?1000l"));
         assert!(!leave.contains("\x1b[?1002l"));
         assert!(!leave.contains("\x1b[?1003l"));
         assert!(!leave.contains("\x1b[?1006l"));
         assert!(leave.contains("\x1b[?2004l"));
-        assert!(leave.contains("\x1b[<u"));
+        assert!(!leave.contains("\x1b[<u"));
         assert!(leave.contains("\x1b]22;default\x1b\\"));
+    }
+
+    #[test]
+    fn detects_terminal_capabilities_from_safe_hints() {
+        assert_eq!(
+            TerminalCapabilities::detect("xterm-256color", &TerminalCapabilityEnv::default()),
+            TerminalCapabilities {
+                color_mode: ColorMode::Ansi256,
+                enhanced_keyboard: false
+            }
+        );
+        assert_eq!(
+            TerminalCapabilities::detect("xterm-direct", &TerminalCapabilityEnv::default()),
+            TerminalCapabilities {
+                color_mode: ColorMode::Truecolor,
+                enhanced_keyboard: false
+            }
+        );
+
+        let mut env = TerminalCapabilityEnv::default();
+        assert!(env.set("COLORTERM", "truecolor"));
+        assert_eq!(
+            TerminalCapabilities::detect("xterm-256color", &env).color_mode,
+            ColorMode::Truecolor
+        );
+
+        let mut env = TerminalCapabilityEnv::default();
+        assert!(env.set("WEZTERM_EXECUTABLE", "/Applications/WezTerm.app"));
+        assert_eq!(
+            TerminalCapabilities::detect("xterm-256color", &env),
+            TerminalCapabilities {
+                color_mode: ColorMode::Truecolor,
+                enhanced_keyboard: true
+            }
+        );
+
+        let mut env = TerminalCapabilityEnv::default();
+        assert!(env.set("TERM_PROGRAM", "Apple_Terminal"));
+        assert!(env.set("COLORTERM", "truecolor"));
+        assert_eq!(
+            TerminalCapabilities::detect("xterm-direct", &env),
+            TerminalCapabilities {
+                color_mode: ColorMode::Ansi256,
+                enhanced_keyboard: false
+            }
+        );
     }
 
     #[test]
@@ -360,6 +681,7 @@ mod tests {
             Style::default()
                 .fg(Color::Rgb(1, 2, 3))
                 .add_modifier(Modifier::UNDERLINED),
+            ColorMode::Truecolor,
         ))
         .into_owned();
 
@@ -367,6 +689,78 @@ mod tests {
         assert!(output.contains("38;2;1;2;3"));
         assert!(output.contains(";4m"));
         assert!(output.contains("\x1b]8;;https://example.com/\x1b\\exam\x1b]8;;\x1b\\"));
+    }
+
+    #[test]
+    fn osc8_hyperlink_downgrades_rgb_for_ansi256_mode() {
+        let output = String::from_utf8_lossy(&osc8_hyperlink_at(
+            Rect::new(0, 0, 4, 1),
+            "https://example.com/",
+            "example",
+            Style::default().fg(Color::Rgb(1, 2, 3)),
+            ColorMode::Ansi256,
+        ))
+        .into_owned();
+
+        assert!(!output.contains("38;2"));
+        assert!(output.contains("38;5;"));
+    }
+
+    #[test]
+    fn terminal_output_respects_color_mode() {
+        use ratatui::widgets::Paragraph;
+
+        let (mut ansi_terminal, shared) = terminal(4, 2, ColorMode::Ansi256).expect("terminal");
+        ansi_terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Paragraph::new("x").style(
+                        Style::default()
+                            .fg(Color::Rgb(214, 214, 214))
+                            .bg(Color::Rgb(34, 37, 41)),
+                    ),
+                    frame.area(),
+                );
+            })
+            .expect("draw ansi256");
+        let ansi = String::from_utf8_lossy(&shared.take().expect("ansi output")).into_owned();
+        assert!(!ansi.contains("38;2"));
+        assert!(!ansi.contains("48;2"));
+    }
+
+    #[test]
+    fn shared_buffer_downgrades_truecolor_sgr() {
+        let mut shared = SharedBuffer::new(ColorMode::Ansi256);
+        shared
+            .write_all(b"\x1b[38;2;1;2;3;48;2;34;37;41mtext")
+            .expect("write ansi256");
+        let output = String::from_utf8_lossy(&shared.take().expect("take output")).into_owned();
+
+        assert!(!output.contains("38;2"));
+        assert!(!output.contains("48;2"));
+        assert!(output.contains("38;5;"));
+        assert!(output.contains("48;5;"));
+
+        let mut shared = SharedBuffer::new(ColorMode::Truecolor);
+        shared
+            .write_all(b"\x1b[38;2;1;2;3;48;2;34;37;41mtext")
+            .expect("write truecolor");
+        let output = String::from_utf8_lossy(&shared.take().expect("take output")).into_owned();
+        assert!(output.contains("38;2"));
+        assert!(output.contains("48;2"));
+    }
+
+    #[test]
+    fn shared_buffer_preserves_non_sgr_csi_sequences() {
+        let mut shared = SharedBuffer::new(ColorMode::Ansi256);
+        shared
+            .write_all(b"\x1b[?25l\x1b[38;2;1;2;3mtext")
+            .expect("write csi");
+        let output = String::from_utf8_lossy(&shared.take().expect("take output")).into_owned();
+
+        assert!(output.contains("\x1b[?25l"));
+        assert!(output.contains("38;5;"));
+        assert!(!output.contains("38;2"));
     }
 
     #[test]

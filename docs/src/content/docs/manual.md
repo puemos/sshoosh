@@ -145,6 +145,8 @@ Notification and mention rows include their source. Click a source row with the 
 
 Select a thread or DM, type in the composer, and press `Enter` to send. Use `Shift-Enter`, `Ctrl-J`, or `Option-Enter` for a multi-line message. Mention teammates with `@username`; mention autocomplete appears while composing.
 
+Apple Terminal may not distinguish `Shift-Enter` from plain `Enter`. Use `Ctrl-J`, enable "Use Option as Meta Key" and press `Option-Enter`, or map Shift-Return to send `ESC[13;2u`.
+
 Messages support lightweight inline Markdown:
 
 ```text

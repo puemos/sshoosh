@@ -28,7 +28,11 @@ impl App {
         };
         for link in &self.ui.link_overlays {
             output.extend(terminal::osc8_hyperlink_at(
-                link.rect, &link.url, &link.text, link.style,
+                link.rect,
+                &link.url,
+                &link.text,
+                link.style,
+                self.terminal_capabilities.color_mode,
             ));
         }
         if self.pending_link_open.take().is_some() {

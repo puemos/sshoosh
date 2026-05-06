@@ -231,7 +231,7 @@ impl russh::server::Handler for ClientHandler {
     async fn pty_request(
         &mut self,
         channel: ChannelId,
-        _term: &str,
+        term: &str,
         col_width: u32,
         row_height: u32,
         _pix_width: u32,
@@ -243,11 +243,15 @@ impl russh::server::Handler for ClientHandler {
             .account
             .clone()
             .ok_or_else(|| anyhow::anyhow!("pty requested before auth"))?;
-        let app = App::new(
+        self.terminal_term = term.chars().take(128).collect();
+        self.terminal_capabilities =
+            terminal::TerminalCapabilities::detect(&self.terminal_term, &self.terminal_env);
+        let app = App::new_with_terminal_capabilities(
             account,
             self.state.clone(),
             col_width as u16,
             row_height as u16,
+            self.terminal_capabilities,
         )
         .await?;
         let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE_CAP);
@@ -301,7 +305,11 @@ impl russh::server::Handler for ClientHandler {
         let channel_id = chan.id();
         let handle = session.handle();
         let mouse_enabled = self.mouse_enabled;
-        let mut init = match terminal::enter_alt_screen(mouse_enabled) {
+        let terminal_capabilities = self.terminal_capabilities;
+        let keyboard_enhancements_active = terminal_capabilities.enhanced_keyboard;
+        self.keyboard_enhancements_active = keyboard_enhancements_active;
+        let mut init = match terminal::enter_alt_screen(mouse_enabled, keyboard_enhancements_active)
+        {
             Ok(sequence) => sequence,
             Err(err) => {
                 tracing::warn!(error = ?err, "initialize terminal sequences failed");
@@ -381,13 +389,21 @@ impl russh::server::Handler for ClientHandler {
                     Ok(should_quit) => {
                         last_render = Instant::now();
                         if should_quit {
-                            clean_disconnect(&handle, channel_id, mouse_enabled).await;
+                            clean_disconnect(
+                                &handle,
+                                channel_id,
+                                mouse_enabled,
+                                keyboard_enhancements_active,
+                            )
+                            .await;
                             break;
                         }
                     }
                     Err(err) => {
                         tracing::debug!(error = ?err, "render loop failed");
-                        if let Ok(sequence) = terminal::leave_alt_screen(mouse_enabled) {
+                        if let Ok(sequence) =
+                            terminal::leave_alt_screen(mouse_enabled, keyboard_enhancements_active)
+                        {
                             let _ = handle.data(channel_id, sequence).await;
                         }
                         let _ = handle.eof(channel_id).await;
@@ -422,12 +438,26 @@ impl russh::server::Handler for ClientHandler {
     async fn env_request(
         &mut self,
         channel: ChannelId,
-        _variable_name: &str,
-        _variable_value: &str,
+        variable_name: &str,
+        variable_value: &str,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        tracing::debug!("ssh env request rejected");
-        session.channel_failure(channel)?;
+        if self.terminal_env.set(variable_name, variable_value) {
+            self.terminal_capabilities =
+                terminal::TerminalCapabilities::detect(&self.terminal_term, &self.terminal_env);
+            if let Some(app) = self.app.as_ref()
+                && let Err(err) = app
+                    .lock()
+                    .await
+                    .set_terminal_capabilities(self.terminal_capabilities)
+            {
+                tracing::debug!(error = ?err, "update terminal capabilities failed");
+            }
+            session.channel_success(channel)?;
+        } else {
+            tracing::debug!("ssh env request rejected");
+            session.channel_failure(channel)?;
+        }
         Ok(())
     }
 
@@ -709,9 +739,12 @@ impl ClientHandler {
             return;
         }
         self.terminal_active = false;
-        if let Ok(sequence) = terminal::leave_alt_screen(self.mouse_enabled) {
+        if let Ok(sequence) =
+            terminal::leave_alt_screen(self.mouse_enabled, self.keyboard_enhancements_active)
+        {
             let _ = session.data(channel, sequence);
         }
+        self.keyboard_enhancements_active = false;
     }
 }
 

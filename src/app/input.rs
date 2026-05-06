@@ -273,6 +273,12 @@ mod tests {
     }
 
     #[test]
+    fn decodes_carriage_return_as_enter() {
+        let mut decoder = InputDecoder::default();
+        assert_eq!(decoder.push(b"\r"), vec![Key::Enter]);
+    }
+
+    #[test]
     fn decodes_shift_enter_variants() {
         for seq in [
             b"\n".as_slice(),

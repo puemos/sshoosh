@@ -51,13 +51,32 @@ pub(crate) async fn fetch_refresh(
 }
 
 impl App {
+    #[cfg(test)]
     pub async fn new(
         account: Account,
         state: ServerState,
         cols: u16,
         rows: u16,
     ) -> anyhow::Result<Self> {
-        let (terminal, shared) = terminal::terminal(cols.max(80), rows.max(24))?;
+        Self::new_with_terminal_capabilities(
+            account,
+            state,
+            cols,
+            rows,
+            TerminalCapabilities::default(),
+        )
+        .await
+    }
+
+    pub async fn new_with_terminal_capabilities(
+        account: Account,
+        state: ServerState,
+        cols: u16,
+        rows: u16,
+        terminal_capabilities: TerminalCapabilities,
+    ) -> anyhow::Result<Self> {
+        let (terminal, shared) =
+            terminal::terminal(cols.max(80), rows.max(24), terminal_capabilities.color_mode)?;
         let client = ClientSession::new(account, state);
         let live_rx = client.subscribe();
         let snapshot = client
@@ -80,6 +99,7 @@ impl App {
             running: true,
             terminal,
             shared,
+            terminal_capabilities,
             account,
             client,
             live_rx,
@@ -102,6 +122,17 @@ impl App {
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             pending_load_more: HashSet::new(),
         })
+    }
+
+    pub fn set_terminal_capabilities(
+        &mut self,
+        terminal_capabilities: TerminalCapabilities,
+    ) -> anyhow::Result<()> {
+        self.shared
+            .set_color_mode(terminal_capabilities.color_mode)?;
+        self.terminal_capabilities = terminal_capabilities;
+        self.force_full_repaint();
+        Ok(())
     }
 
     pub(crate) fn refresh_inputs(&self) -> RefreshInputs {

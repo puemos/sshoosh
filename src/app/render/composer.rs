@@ -32,18 +32,13 @@ pub(crate) fn draw_bottombar(
     let cursor = "▌";
     let show_placeholder = ui.composer.buffer.is_empty();
     let mut prompt = ui.composer.buffer.clone();
-    if !cursor.is_empty() {
-        let cursor_index = ui.composer.cursor.min(prompt.len());
-        let cursor_index = if prompt.is_char_boundary(cursor_index) {
-            cursor_index
-        } else {
-            prompt.len()
-        };
-        prompt.insert_str(cursor_index, cursor);
-    }
-    if prompt.is_empty() {
-        prompt.push_str(cursor);
-    }
+    let cursor_index = ui.composer.cursor.min(prompt.len());
+    let cursor_index = if prompt.is_char_boundary(cursor_index) {
+        cursor_index
+    } else {
+        prompt.len()
+    };
+    prompt.insert_str(cursor_index, cursor);
     let inline_prompt = ui.composer.inline_prompt.as_ref().filter(|hint| {
         ui.composer.buffer.len() == hint.prefix_len
             && ui.composer.cursor == hint.prefix_len
@@ -120,7 +115,7 @@ fn keybar_items(ui: &UiState) -> &'static [(&'static str, &'static str, Option<B
     match ui.mode {
         UiMode::Workspace => &[
             ("enter", "send", Some(BottomBarAction::SubmitComposer)),
-            ("shift-enter", "nl", None),
+            ("shift-enter/ctrl-j", "nl", None),
             ("tab", "accept", Some(BottomBarAction::AcceptAutocomplete)),
             ("esc", "clear", Some(BottomBarAction::CloseMode)),
             ("c-x ?", "help", Some(BottomBarAction::OpenHelp)),

@@ -3,8 +3,9 @@ pub(crate) async fn clean_disconnect(
     handle: &russh::server::Handle,
     channel_id: ChannelId,
     mouse_enabled: bool,
+    enhanced_keyboard: bool,
 ) {
-    if let Ok(sequence) = terminal::leave_alt_screen(mouse_enabled) {
+    if let Ok(sequence) = terminal::leave_alt_screen(mouse_enabled, enhanced_keyboard) {
         let _ = handle.data(channel_id, sequence).await;
     }
     let _ = handle
