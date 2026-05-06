@@ -391,8 +391,8 @@ pub(crate) fn draw_confirm_quit(frame: &mut Frame, full_area: Rect, area: Rect, 
         + 3
         + no_label.chars().count();
     let keycap = Style::default()
-        .fg(theme::TEXT)
-        .bg(theme::KEYCAP)
+        .fg(theme::text_color())
+        .bg(theme::keycap())
         .add_modifier(Modifier::BOLD);
     let line = Line::from(vec![
         Span::styled(prompt.to_string(), theme::elevated_panel()),
@@ -591,9 +591,9 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
     let y = bottom_bar_top.saturating_sub(height.saturating_add(1));
     let rect = Rect::new(x, y, width, height);
     let color = if banner.error {
-        theme::ERROR
+        theme::error_color()
     } else {
-        theme::OK
+        theme::ok_color()
     };
 
     let inner = elevated_panel(frame, rect, "");
@@ -604,7 +604,7 @@ pub(crate) fn draw_toast(frame: &mut Frame, area: Rect, banner: &Banner, ui: &Ui
             .style(
                 Style::default()
                     .fg(color)
-                    .bg(theme::ELEVATED_PANEL)
+                    .bg(theme::elevated_panel_bg())
                     .add_modifier(Modifier::BOLD),
             )
             .wrap(Wrap { trim: true }),
@@ -635,8 +635,8 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
                 Line::from(Span::styled(
                     code.trim().to_string(),
                     Style::default()
-                        .fg(theme::OK)
-                        .bg(theme::ELEVATED_PANEL)
+                        .fg(theme::ok_color())
+                        .bg(theme::elevated_panel_bg())
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
@@ -657,8 +657,8 @@ pub(crate) fn draw_banner_modal(frame: &mut Frame, area: Rect, banner: &Banner, 
                 Line::from(Span::styled(
                     code.trim().to_string(),
                     Style::default()
-                        .fg(theme::OK)
-                        .bg(theme::ELEVATED_PANEL)
+                        .fg(theme::ok_color())
+                        .bg(theme::elevated_panel_bg())
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
@@ -812,9 +812,9 @@ fn list_cell_style(value: &str) -> Style {
     match value {
         "open" | "active" | "enabled" | "joined" | "read" | "accepted" => theme::elevated_accent(),
         "pending" | "joinable" | "unread" => theme::elevated_unread(),
-        "revoked" | "disabled" | "archived" => {
-            Style::default().fg(theme::ERROR).bg(theme::ELEVATED_PANEL)
-        }
+        "revoked" | "disabled" | "archived" => Style::default()
+            .fg(theme::error_color())
+            .bg(theme::elevated_panel_bg()),
         _ => theme::elevated_panel(),
     }
 }
@@ -853,8 +853,8 @@ pub(crate) fn elevated_panel(frame: &mut Frame, area: Rect, title: &str) -> Rect
                 1,
             );
             let divider_style = Style::default()
-                .fg(theme::MESSAGE_SEPARATOR)
-                .bg(theme::ELEVATED_PANEL);
+                .fg(theme::message_separator_color())
+                .bg(theme::elevated_panel_bg());
             frame.render_widget(
                 Paragraph::new("─".repeat(divider_area.width as usize)).style(divider_style),
                 divider_area,

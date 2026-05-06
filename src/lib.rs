@@ -1,5 +1,6 @@
 mod app;
 pub mod client;
+mod color;
 pub mod config;
 pub mod db;
 pub mod features;

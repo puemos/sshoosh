@@ -15,9 +15,12 @@ impl App {
         let snapshot = &self.snapshot;
         let ui = &mut self.ui;
         let commands = self.commands.specs();
+        let color_mode = self.terminal_capabilities.color_mode;
         self.terminal.draw(|frame| {
-            render::draw(frame, account, snapshot, ui, commands);
-            render::apply_selection(frame, ui);
+            theme::with_color_mode(color_mode, || {
+                render::draw(frame, account, snapshot, ui, commands);
+                render::apply_selection(frame, ui);
+            });
         })?;
         let mut output = match self.shared.take() {
             Ok(output) => output,

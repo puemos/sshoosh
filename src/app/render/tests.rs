@@ -7,6 +7,7 @@ mod cases {
         Terminal,
         backend::TestBackend,
         buffer::{Buffer, Cell},
+        style::Color,
     };
     use std::time::{Duration, Instant};
 
@@ -22,6 +23,7 @@ mod cases {
             },
             notifications::model::NotificationSummary,
         },
+        terminal::{self as terminal_output, ColorMode},
     };
 
     use super::*;
@@ -458,6 +460,45 @@ mod cases {
             let buffer = terminal.backend().buffer();
             assert!(format!("{buffer:?}").contains("Channels"));
         }
+    }
+
+    #[test]
+    fn render_ansi256_theme_does_not_emit_truecolor_sgr() {
+        let backend = TestBackend::new(80, 24);
+        let mut test_terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+
+        test_terminal
+            .draw(|frame| {
+                theme::with_color_mode(ColorMode::Ansi256, || {
+                    draw(frame, &account, &Snapshot::default(), &mut ui, &[]);
+                });
+            })
+            .unwrap();
+
+        let buffer = test_terminal.backend().buffer();
+        assert!(matches!(
+            buffer.cell((0, 0)).expect("root bg").bg,
+            Color::Indexed(_)
+        ));
+
+        let (mut terminal, shared) =
+            terminal_output::terminal(80, 24, ColorMode::Truecolor).unwrap();
+        let account = activated_test_account();
+        let mut ui = UiState::default();
+
+        terminal
+            .draw(|frame| {
+                theme::with_color_mode(ColorMode::Ansi256, || {
+                    draw(frame, &account, &Snapshot::default(), &mut ui, &[]);
+                });
+            })
+            .unwrap();
+
+        let output = String::from_utf8_lossy(&shared.take().unwrap()).into_owned();
+        assert!(!output.contains("38;2"));
+        assert!(!output.contains("48;2"));
     }
 
     #[test]

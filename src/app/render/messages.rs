@@ -516,9 +516,9 @@ fn reaction_chips(reactions: &[ReactionSummary], target: ReactionTarget) -> Vec<
 
 fn message_surface(_body: &str, selected: bool) -> Color {
     if selected {
-        theme::ELEVATED_PANEL
+        theme::elevated_panel_bg()
     } else {
-        theme::PANEL
+        theme::panel_bg()
     }
 }
 

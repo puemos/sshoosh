@@ -54,7 +54,7 @@ pub(crate) fn draw_bottombar(
             Span::styled(sanitize_terminal_visible_text(&prompt), theme::composer()),
             Span::styled(
                 "  Type a message or /command",
-                theme::composer().fg(theme::MUTED),
+                theme::composer().fg(theme::muted_color()),
             ),
         ])]
     } else if let Some(hint) = inline_prompt {
@@ -63,7 +63,7 @@ pub(crate) fn draw_bottombar(
             Span::styled(
                 hint.placeholder.clone(),
                 theme::composer()
-                    .fg(theme::ACCENT)
+                    .fg(theme::accent_color())
                     .add_modifier(Modifier::BOLD),
             ),
         ])]
@@ -152,12 +152,15 @@ fn keybar_line(ui: &UiState) -> Line<'static> {
         spans.push(Span::styled(
             format!(" {key} "),
             Style::default()
-                .fg(theme::TEXT)
-                .bg(theme::KEYCAP)
+                .fg(theme::text_color())
+                .bg(theme::keycap())
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(" ", theme::composer()));
-        spans.push(Span::styled(*label, theme::composer().fg(theme::MUTED)));
+        spans.push(Span::styled(
+            *label,
+            theme::composer().fg(theme::muted_color()),
+        ));
     }
     Line::from(spans)
 }
@@ -200,21 +203,24 @@ fn draw_status_cluster(
     let show_account = area.width as usize >= compact_width.saturating_add(62);
 
     let mut spans = Vec::new();
-    spans.push(Span::styled(active, theme::composer().fg(theme::SUBTLE)));
+    spans.push(Span::styled(
+        active,
+        theme::composer().fg(theme::subtle_color()),
+    ));
     if show_badges {
         spans.push(Span::styled(" ", theme::composer()));
         push_badge(
             &mut spans,
             format!("{unread} unread"),
             unread > 0,
-            theme::WARN,
+            theme::warn_color(),
         );
         let mention_start = spans_width(&spans) as u16;
         push_badge(
             &mut spans,
             format!("{mentions} mentions"),
             mentions > 0,
-            theme::MENTION,
+            theme::mention_color(),
         );
         ui.hit_map.push(
             Rect::new(
@@ -229,15 +235,15 @@ fn draw_status_cluster(
     if show_account {
         spans.push(Span::styled(
             format!("  {} online", snapshot.online_user_count()),
-            theme::composer().fg(theme::MUTED),
+            theme::composer().fg(theme::muted_color()),
         ));
         spans.push(Span::styled(
             format!("  {}", account.username),
-            theme::composer().fg(theme::MUTED),
+            theme::composer().fg(theme::muted_color()),
         ));
         spans.push(Span::styled(
             format!(" ({})", account.role.as_str()),
-            theme::composer().fg(theme::MUTED),
+            theme::composer().fg(theme::muted_color()),
         ));
     }
 
@@ -256,8 +262,12 @@ fn push_badge(
     spans.push(Span::styled(
         format!(" {label} "),
         Style::default()
-            .fg(if active { active_color } else { theme::MUTED })
-            .bg(theme::BADGE),
+            .fg(if active {
+                active_color
+            } else {
+                theme::muted_color()
+            })
+            .bg(theme::badge()),
     ));
 }
 

@@ -116,7 +116,7 @@ fn logo_lines(lines: &'static [&'static str]) -> Vec<Line<'static>> {
 
 fn logo_line(pattern: &'static str, width: usize) -> Line<'static> {
     let fill = Style::default()
-        .fg(theme::SUBTLE)
+        .fg(theme::subtle_color())
         .add_modifier(Modifier::BOLD);
     let mut spans = pattern
         .chars()
@@ -192,7 +192,7 @@ pub(crate) fn draw_vertical_divider(frame: &mut Frame, area: Rect) {
     }
     let divider = (0..area.height).map(|_| "│").collect::<Vec<_>>().join("\n");
     frame.render_widget(
-        Paragraph::new(divider).style(Style::default().fg(theme::BORDER).bg(theme::BG)),
+        Paragraph::new(divider).style(Style::default().fg(theme::border()).bg(theme::bg())),
         area,
     );
 }
