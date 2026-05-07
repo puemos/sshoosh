@@ -620,8 +620,8 @@ mod cases {
     }
 
     #[tokio::test]
-    async fn arrow_keys_walk_command_history_in_compose() {
-        let mut app = test_app("command-history-arrows").await;
+    async fn alt_arrow_keys_walk_command_history_in_compose() {
+        let mut app = test_app("command-history-alt-arrows").await;
 
         app.ui.composer.push_history("/older".to_string());
         app.ui.composer.push_history("/more".to_string());
@@ -631,16 +631,22 @@ mod cases {
         app.handle_input(b"\x1b");
 
         app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.composer.buffer, "/");
+
+        app.handle_input(b"\x1b[B");
+        assert_eq!(app.ui.composer.buffer, "/");
+
+        app.handle_input(b"\x1b[1;3A");
         assert_eq!(app.ui.composer.buffer, "/more");
         assert_eq!(app.ui.composer.cursor, app.ui.composer.buffer.len());
 
-        app.handle_input(b"\x1b[A");
+        app.handle_input(b"\x1b[1;3A");
         assert_eq!(app.ui.composer.buffer, "/older");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x1b[1;3B");
         assert_eq!(app.ui.composer.buffer, "/more");
 
-        app.handle_input(b"\x1b[B");
+        app.handle_input(b"\x1b[1;3B");
         assert_eq!(app.ui.composer.buffer, "/");
     }
 
@@ -1985,11 +1991,14 @@ mod cases {
         app.ui.active_pane = ActivePane::Detail;
         app.render().expect("render");
 
-        app.handle_input(b"\x18j");
+        app.handle_input(b"\x1b[B");
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::ThreadRoot));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
-        app.handle_input(b"\x18j");
+        app.handle_input(b"\x1b[B");
         assert_eq!(app.ui.source_highlight, Some(SourceFocus::Comment(1)));
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.ui.source_highlight, Some(SourceFocus::ThreadRoot));
+        app.handle_input(b"\x1b[B");
         app.render().expect("render highlighted message");
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
         app.handle_input(b"\x1b[6~");
@@ -1997,11 +2006,13 @@ mod cases {
 
         app.ui.detail_scroll.scroll_to_top();
         app.ui.active_pane = ActivePane::List;
-        app.handle_input(b"\x18j");
+        app.handle_input(b"\x1b[B");
         app.render().expect("render selected thread");
 
         assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread-2"));
         assert_eq!(app.ui.detail_scroll.offset().y, 0);
+        app.handle_input(b"\x1b[A");
+        assert_eq!(app.snapshot.selected_thread_id.as_deref(), Some("thread"));
     }
 
     #[tokio::test]

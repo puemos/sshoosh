@@ -603,10 +603,20 @@ impl App {
                 self.ui.composer.autocomplete.previous();
                 return;
             }
-            Key::Up if self.ui.composer.previous_history() => {
+            Key::AltUp => {
+                let _ = self.ui.composer.previous_history();
                 return;
             }
-            Key::Down if self.ui.composer.next_history() => {
+            Key::AltDown => {
+                let _ = self.ui.composer.next_history();
+                return;
+            }
+            Key::Down => {
+                self.move_selection(1);
+                return;
+            }
+            Key::Up => {
+                self.move_selection(-1);
                 return;
             }
             Key::PageDown if self.ui.active_pane == ActivePane::Detail => {

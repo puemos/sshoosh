@@ -114,7 +114,7 @@ fn render_help_scroll(
 fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
     let layout = HelpLayout::new(width);
     let rows = [
-        ("Navigation", "Ctrl-X H/J/K/L", "navigate panes and rows"),
+        ("Navigation", "Up/Down, Ctrl-X H/J/K/L", "feed/list + panes"),
         ("", "Ctrl-X O", "open selected item"),
         ("", "Ctrl-X g/G", "jump to top/bottom"),
         ("", "Tab", "toggle workspace/detail"),
@@ -123,7 +123,7 @@ fn help_keyboard_lines(width: usize) -> Vec<Line<'static>> {
         ("", "Enter", "send message or run slash command"),
         ("", "Shift-Enter/Ctrl-J", "insert newline"),
         ("", "Option-Enter", "insert newline with Option-as-Meta"),
-        ("", "Up/Down, Tab", "history and autocomplete"),
+        ("", "Alt-Up/Down, Tab", "history/autocomplete"),
         ("", "Ctrl-X E", "edit latest message/comment here"),
         ("System", "Ctrl-P, Ctrl-X ?", "palette and keyboard help"),
         ("", "Esc", "close overlay or clear draft"),

@@ -59,6 +59,7 @@ Core keyboard controls:
 | Key | Action |
 | --- | --- |
 | `Ctrl-X J` / `Ctrl-X K` | Move through workspace rows |
+| `Up` / `Down` | Move or scroll the active feed/list |
 | `Ctrl-X H` / `Ctrl-X L` | Collapse/back or open/expand |
 | `Ctrl-X O` | Open the selected item |
 | `Tab` | Toggle focus between workspace and detail panes, or accept autocomplete |
@@ -66,6 +67,7 @@ Core keyboard controls:
 | `Enter` | Send the composed message or run a slash command |
 | `Shift-Enter` / `Ctrl-J` / `Option-Enter` | Insert a newline in compose |
 | `/` | Start a slash command |
+| `Alt-Up` / `Alt-Down` | Walk slash command history |
 | `Ctrl-P` | Open the command palette |
 | `Ctrl-X ?` or `/help` | Open the in-app keyboard and command help |
 | `Esc` | Close the current overlay or clear the composer |

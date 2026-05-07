@@ -10,6 +10,8 @@ pub enum Key {
     BackTab,
     Up,
     Down,
+    AltUp,
+    AltDown,
     Left,
     Right,
     Home,
@@ -120,6 +122,13 @@ pub(crate) fn decode_escape(bytes: &[u8]) -> Option<(usize, Key)> {
     if matches!(bytes[1], b'\r' | b'\n') {
         return Some((2, Key::ShiftEnter));
     }
+    if bytes.len() >= 4 {
+        match &bytes[..4] {
+            b"\x1b\x1b[A" | b"\x1b\x1bOA" => return Some((4, Key::AltUp)),
+            b"\x1b\x1b[B" | b"\x1b\x1bOB" => return Some((4, Key::AltDown)),
+            _ => {}
+        }
+    }
     if bytes[1].is_ascii_alphabetic() {
         return Some((2, Key::Alt(bytes[1] as char)));
     }
@@ -159,6 +168,8 @@ pub(crate) fn decode_csi(bytes: &[u8]) -> Option<(usize, Key)> {
     match seq {
         b"\x1b[13;2u" | b"\x1b[13;2~" | b"\x1b[27;2;13~" | b"\x1b[13;3u" | b"\x1b[13;3~"
         | b"\x1b[27;3;13~" => Some((seq.len(), Key::ShiftEnter)),
+        b"\x1b[1;3A" => Some((seq.len(), Key::AltUp)),
+        b"\x1b[1;3B" => Some((seq.len(), Key::AltDown)),
         b"\x1b[1~" | b"\x1b[7~" => Some((seq.len(), Key::Home)),
         b"\x1b[4~" | b"\x1b[8~" => Some((seq.len(), Key::End)),
         b"\x1b[3~" => Some((seq.len(), Key::Delete)),
@@ -260,6 +271,21 @@ mod tests {
                 Key::Ctrl('p'),
                 Key::CtrlSeq('x', 'p')
             ]
+        );
+    }
+
+    #[test]
+    fn decodes_alt_up_down() {
+        let mut decoder = InputDecoder::default();
+        assert_eq!(
+            decoder.push(b"\x1b[1;3A\x1b[1;3B"),
+            vec![Key::AltUp, Key::AltDown]
+        );
+
+        let mut decoder = InputDecoder::default();
+        assert_eq!(
+            decoder.push(b"\x1b\x1b[A\x1b\x1b[B"),
+            vec![Key::AltUp, Key::AltDown]
         );
     }
 
