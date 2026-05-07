@@ -14,12 +14,13 @@ mod cases {
     use crate::{
         app::state,
         features::{
-            accounts::model::{Role, UserPresence},
+            accounts::model::{Role, SshKeySummary, UserPresence},
             channels::model::Channel,
             feeds::model::{SearchKind, SearchResult},
             messages::model::{
                 CommentItem, Conversation, ConversationMessage, DmSidebarItem, HotLabel,
                 ReactionSummary, SavedMessageItem, SavedMessageKind, ThreadItem,
+                UsernameReservation,
             },
             notifications::model::NotificationSummary,
         },
@@ -637,7 +638,32 @@ mod cases {
                 .symbol(),
             "N"
         );
-        assert_eq!(buffer.cell((1, 4)).expect("workspace header").symbol(), "C");
+        assert_eq!(
+            buffer
+                .cell((0, 4))
+                .expect("workspace divider edge")
+                .symbol(),
+            "─"
+        );
+        assert_eq!(
+            buffer
+                .cell((37, 4))
+                .expect("workspace divider end")
+                .symbol(),
+            "─"
+        );
+        assert_eq!(
+            buffer
+                .cell((38, 4))
+                .expect("workspace vertical divider")
+                .symbol(),
+            "│"
+        );
+        assert_eq!(
+            buffer.cell((38, 4)).expect("workspace vertical divider").fg,
+            theme::BORDER
+        );
+        assert_eq!(buffer.cell((1, 5)).expect("workspace header").symbol(), "C");
         assert_eq!(buffer.cell((40, 1)).expect("detail header").symbol(), "#");
     }
 
@@ -1151,10 +1177,12 @@ mod cases {
         let (_, notifications_y) =
             position_for_text(buffer, width, height, "Notifications 3").unwrap();
         let (_, saved_y) = position_for_text(buffer, width, height, "Saved 0").unwrap();
+        let (_, account_y) = position_for_text(buffer, width, height, "Account").unwrap();
         let (_, channels_y) = position_for_text(buffer, width, height, "Channels").unwrap();
 
         assert!(notifications_y < saved_y);
-        assert!(saved_y < channels_y);
+        assert!(saved_y < account_y);
+        assert!(account_y < channels_y);
         assert!(
             ui.hit_map
                 .entries()
@@ -1166,6 +1194,72 @@ mod cases {
                 .entries()
                 .iter()
                 .any(|region| matches!(region.target, HitTarget::WorkspaceSaved))
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::WorkspaceAccount))
+        );
+    }
+
+    #[test]
+    fn account_page_renders_form_and_single_row_key_table_without_raw_keys() {
+        let width = 120;
+        let height = 28;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = activated_test_account();
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            current_display_name: Some("Owner".to_string()),
+            current_role: Some(Role::Owner),
+            my_ssh_keys: vec![SshKeySummary {
+                id: "019abcdef1234567".to_string(),
+                username: "owner".to_string(),
+                fingerprint: "SHA256:abcdefghijklmnopqrstuvwxyz0123456789".to_string(),
+                label: Some("laptop".to_string()),
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                last_used_at: None,
+                revoked_at: None,
+            }],
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Account;
+        ui.active_pane = ActivePane::Detail;
+        ui.account.username.start("owner");
+        ui.account.display_name.start("Owner");
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..height)
+            .map(|y| row_text(buffer, width, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Account Settings"));
+        assert!(rendered.contains("Username"));
+        assert!(rendered.contains("Display name"));
+        assert!(rendered.contains("Link new device"));
+        assert!(rendered.contains("019abcde"));
+        assert!(rendered.contains("laptop"));
+        assert!(rendered.contains("Rename"));
+        assert!(rendered.contains("Deactivate"));
+        assert!(!rendered.contains("ssh-ed25519"));
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::AccountSave))
+        );
+        assert!(
+            ui.hit_map
+                .entries()
+                .iter()
+                .any(|region| matches!(region.target, HitTarget::AccountKeyDeactivate(0)))
         );
     }
 
@@ -2111,6 +2205,76 @@ mod cases {
     }
 
     #[test]
+    fn render_thread_detail_resolves_historical_username_mentions_to_current_user() {
+        let width = 120;
+        let height = 30;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let account = Account {
+            id: "owner".to_string(),
+            username: "owner".to_string(),
+            display_name: "Owner".to_string(),
+            role: Role::Owner,
+            activated: true,
+            pending_username: None,
+        };
+        let snapshot = Snapshot {
+            current_username: Some("owner".to_string()),
+            users: vec![user_presence("alice-prod")],
+            username_reservations: vec![UsernameReservation {
+                username: "alice".to_string(),
+                account_id: "alice-id".to_string(),
+                current_username: "alice-prod".to_string(),
+            }],
+            threads: vec![ThreadItem {
+                id: "thread".to_string(),
+                channel_id: "general".to_string(),
+                title: "Incident".to_string(),
+                body: String::new(),
+                author: "owner".to_string(),
+                comment_count: 1,
+                last_comment_index: 1,
+                unread_count: 0,
+                last_activity_at: None,
+                created_at: "2020-01-02T03:04:00Z".to_string(),
+                edited_at: None,
+                archived_at: None,
+                pinned_at: None,
+                muted_until: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            comments: vec![CommentItem {
+                id: "comment-1".to_string(),
+                author: "owner".to_string(),
+                obj_index: 1,
+                body: "Ping @alice".to_string(),
+                created_at: "2020-01-02T03:05:00Z".to_string(),
+                edited_at: None,
+                saved_at: None,
+                reactions: Vec::new(),
+            }],
+            selected_channel_id: Some("general".to_string()),
+            selected_thread_id: Some("thread".to_string()),
+            ..Snapshot::default()
+        };
+        let mut ui = UiState::default();
+        ui.route = Route::Channel("general".to_string());
+        ui.active_pane = ActivePane::Detail;
+
+        terminal
+            .draw(|frame| draw(frame, &account, &snapshot, &mut ui, &[]))
+            .unwrap();
+
+        assert!(
+            ui.hit_map.entries().iter().any(|region| {
+                matches!(&region.target, HitTarget::MessageMention(username) if username == "alice-prod")
+            }),
+            "historical @alice should click through to current @alice-prod"
+        );
+    }
+
+    #[test]
     fn render_thread_detail_only_registers_clickable_body_mentions() {
         let width = 120;
         let height = 30;
@@ -2390,11 +2554,11 @@ mod cases {
             .unwrap();
 
         assert!(matches!(
-            ui.hit_map.hit(1, 5).map(|region| region.target),
+            ui.hit_map.hit(1, 6).map(|region| region.target),
             Some(HitTarget::WorkspaceChannel(id)) if id == "general"
         ));
         assert!(matches!(
-            ui.hit_map.hit(1, 6).map(|region| region.target),
+            ui.hit_map.hit(1, 7).map(|region| region.target),
             Some(HitTarget::WorkspaceThread(id)) if id == "thread"
         ));
         assert!(matches!(

@@ -249,12 +249,10 @@ impl ServerState {
         let now = now();
         let pending_username = match normalize_username(desired_username) {
             Ok(username) => {
-                let existing: Option<String> =
-                    query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?)")
-                        .bind(&username)
-                        .fetch_optional(&mut tx)
-                        .await?;
-                if existing.is_none() {
+                if username_reservation_owner_tx(&mut tx, &username)
+                    .await?
+                    .is_none()
+                {
                     Some(username)
                 } else {
                     None
@@ -396,13 +394,7 @@ impl ServerState {
             tx.commit().await?;
             return account_from_row(row);
         }
-        let existing: Option<String> =
-            query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
-                .bind(&username)
-                .bind(account_id)
-                .fetch_optional(&mut tx)
-                .await?;
-        anyhow::ensure!(existing.is_none(), "Username is already taken");
+        ensure_username_reservable_tx(&mut tx, account_id, &username).await?;
         if role == Role::Owner {
             let token_count: i64 = query_scalar(
                 "SELECT COUNT(*)
@@ -455,6 +447,7 @@ impl ServerState {
         .bind(account_id)
         .execute(&mut tx)
         .await?;
+        set_current_username_reservation_tx(&mut tx, account_id, &username, &now).await?;
         query(
             "UPDATE ssh_keys
              SET last_used_at = ?
@@ -601,6 +594,8 @@ impl ServerState {
         let mut active_account_ids = load_active_presence_sessions(&read_session).await?;
         active_account_ids.extend(self.active_account_ids().await);
         let users = load_user_presence(&read_session, &active_account_ids).await?;
+        let username_reservations = load_username_reservations(&read_session).await?;
+        let my_ssh_keys = load_my_ssh_keys(&read_session, account_id).await?;
         let dm_sidebar = load_dm_sidebar(&read_session, account_id).await?;
         let conversations = dm_sidebar
             .iter()
@@ -682,7 +677,11 @@ impl ServerState {
 
         let snapshot = Snapshot {
             current_username: Some(account.username),
+            current_display_name: Some(account.display_name),
+            current_role: Some(account.role),
             users,
+            username_reservations,
+            my_ssh_keys,
             channels,
             threads,
             comments,

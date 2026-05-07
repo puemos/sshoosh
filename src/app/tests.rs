@@ -11,7 +11,7 @@ mod cases {
         app::render::author_prefix_width,
         db::Database,
         features::{
-            accounts::model::UserPresence,
+            accounts::model::{SshKeySummary, UserPresence},
             channels::model::Channel,
             feeds::model::{SearchKind, SearchResult},
             messages::model::{
@@ -882,6 +882,80 @@ mod cases {
         assert_eq!(app.ui.route, Route::Saved);
         assert_eq!(app.ui.active_pane, ActivePane::Detail);
         assert_eq!(app.actions, vec![Action::ListSaved]);
+    }
+
+    #[tokio::test]
+    async fn account_command_and_sidebar_open_account_page() {
+        let mut app = test_app("account-open").await;
+
+        app.dispatch_command_line("/settings".to_string());
+        assert_eq!(app.actions, vec![Action::OpenAccount]);
+        app.actions.clear();
+        app.open_account_page();
+        assert_eq!(app.ui.route, Route::Account);
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+
+        app.ui.route = Route::Channel("general".to_string());
+        app.ui.active_pane = ActivePane::Rail;
+        app.render().expect("render");
+        click_region(&mut app, |target| {
+            matches!(target, HitTarget::WorkspaceAccount)
+        });
+
+        assert_eq!(app.ui.route, Route::Account);
+        assert_eq!(app.ui.active_pane, ActivePane::Detail);
+    }
+
+    #[tokio::test]
+    async fn account_page_edits_fields_and_saves() {
+        let mut app = test_app("account-save").await;
+        app.open_account_page();
+        app.ui.account.username.start("alice");
+        app.ui.account.display_name.start("Alice Lee");
+        app.ui.account.focus = AccountFocus::Save;
+
+        app.activate_account_focus();
+
+        assert_eq!(
+            app.actions,
+            vec![Action::SaveAccountSettings {
+                username: "alice".to_string(),
+                display_name: "Alice Lee".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn account_key_table_actions_link_label_and_deactivate() {
+        let mut app = test_app("account-key-actions").await;
+        app.snapshot.my_ssh_keys = vec![SshKeySummary {
+            id: "019abcdef1234567".to_string(),
+            username: "owner".to_string(),
+            fingerprint: "SHA256:abcdefghijklmnopqrstuvwxyz".to_string(),
+            label: Some("laptop".to_string()),
+            created_at: "2020-01-02T03:04:00Z".to_string(),
+            last_used_at: None,
+            revoked_at: None,
+        }];
+        app.open_account_page();
+
+        app.ui.account.focus = AccountFocus::LinkDevice;
+        app.activate_account_focus();
+        app.ui.account.focus = AccountFocus::KeyLabel(0);
+        app.activate_account_focus();
+        app.ui.account.focus = AccountFocus::KeyDeactivate(0);
+        app.activate_account_focus();
+
+        assert_eq!(
+            app.actions,
+            vec![
+                Action::CreateDeviceLinkToken { label: None },
+                Action::RevokeKey {
+                    key: "019abcde".to_string()
+                }
+            ]
+        );
+        assert_eq!(app.ui.composer.buffer, "/key label 019abcde ");
     }
 
     #[tokio::test]

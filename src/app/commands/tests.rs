@@ -75,6 +75,8 @@ mod cases {
                 },
             ),
             ("/user list", Action::ListUsers),
+            ("/account", Action::OpenAccount),
+            ("/settings", Action::OpenAccount),
             (
                 "/user disable alice",
                 Action::SetUserDisabled {

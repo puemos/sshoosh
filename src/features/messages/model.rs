@@ -1,9 +1,16 @@
 use crate::features::{
-    accounts::model::{PresenceState, UserPresence},
+    accounts::model::{PresenceState, Role, SshKeySummary, UserPresence},
     channels::model::Channel,
     feeds::model::SearchResult,
     notifications::model::NotificationSummary,
 };
+
+#[derive(Clone, Debug)]
+pub struct UsernameReservation {
+    pub username: String,
+    pub account_id: String,
+    pub current_username: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct ReactionSummary {
@@ -153,7 +160,11 @@ pub struct LabelFeedItem {
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub current_username: Option<String>,
+    pub current_display_name: Option<String>,
+    pub current_role: Option<Role>,
     pub users: Vec<UserPresence>,
+    pub username_reservations: Vec<UsernameReservation>,
+    pub my_ssh_keys: Vec<SshKeySummary>,
     pub channels: Vec<Channel>,
     pub threads: Vec<ThreadItem>,
     pub comments: Vec<CommentItem>,

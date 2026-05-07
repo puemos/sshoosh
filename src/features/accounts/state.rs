@@ -191,13 +191,7 @@ impl ServerState {
         if actor.id != target.id {
             ensure_can_manage_account(&actor, &target)?;
         }
-        let existing: Option<String> =
-            query_scalar("SELECT id FROM accounts WHERE lower(username) = lower(?) AND id <> ?")
-                .bind(&next_username)
-                .bind(&target.id)
-                .fetch_optional(&mut tx)
-                .await?;
-        anyhow::ensure!(existing.is_none(), "Username is already taken");
+        ensure_username_reservable_tx(&mut tx, &target.id, &next_username).await?;
         let now = now();
         query("UPDATE accounts SET username = ?, updated_at = ? WHERE id = ?")
             .bind(&next_username)
@@ -205,6 +199,7 @@ impl ServerState {
             .bind(&target.id)
             .execute(&mut tx)
             .await?;
+        set_current_username_reservation_tx(&mut tx, &target.id, &next_username, &now).await?;
         insert_audit(
             &mut tx,
             Some(actor_id),
@@ -277,17 +272,7 @@ impl ServerState {
     }
 
     pub async fn list_my_ssh_keys(&self, account_id: &str) -> anyhow::Result<Vec<SshKeySummary>> {
-        let rows = query(
-            "SELECT k.id, a.username, k.fingerprint, k.label, k.created_at, k.last_used_at, k.revoked_at
-             FROM ssh_keys k
-             JOIN accounts a ON a.id = k.account_id
-             WHERE k.account_id = ?
-             ORDER BY k.created_at",
-        )
-        .bind(account_id)
-        .fetch_all(self.db.read_pool())
-        .await?;
-        rows.into_iter().map(ssh_key_summary_from_row).collect()
+        load_my_ssh_keys(self.db.read_pool(), account_id).await
     }
 
     pub async fn create_device_link_token(

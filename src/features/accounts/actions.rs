@@ -7,7 +7,10 @@ use crate::{
     client::ClientSession,
     features::{
         accounts::format::{accounts_modal, invites_modal, keys_modal},
-        shared::action::ActionResult,
+        shared::{
+            action::ActionResult,
+            utils::{normalize_username, sanitize_single_line_text},
+        },
     },
 };
 
@@ -42,6 +45,31 @@ pub(crate) async fn process(
             .set_display_name(account_id, account_id, &display_name)
             .await
             .map(|_| ActionResult::message("Profile updated")),
+        Action::SaveAccountSettings {
+            username,
+            display_name,
+        } => {
+            let username = normalize_username(&username)?;
+            let display_name = sanitize_single_line_text(&display_name).trim().to_string();
+            anyhow::ensure!(
+                (1..=80).contains(&display_name.chars().count()),
+                "Display name must be 1-80 characters"
+            );
+            let current = session.account();
+            let username_changed = username != current.username;
+            let display_name_changed = display_name != current.display_name;
+            if username_changed {
+                session
+                    .rename_user(account_id, account_id, &username)
+                    .await?;
+            }
+            if display_name_changed {
+                session
+                    .set_display_name(account_id, account_id, &display_name)
+                    .await?;
+            }
+            Ok(ActionResult::message("Account settings saved"))
+        }
         Action::SetUserDisabled { username, disabled } => session
             .set_user_disabled(account_id, &username, disabled)
             .await

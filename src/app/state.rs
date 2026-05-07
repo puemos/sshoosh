@@ -33,6 +33,7 @@ pub enum Route {
     Channel(String),
     #[default]
     Dms,
+    Account,
     Search,
     Label(String),
     Saved,
@@ -99,6 +100,7 @@ pub struct UiState {
     pub labels_expanded: bool,
     pub saved_selected: usize,
     pub notifications_selected: usize,
+    pub account: AccountPageState,
     pub detail_selection_scroll_pending: bool,
     pub notification_filter: NotificationFilter,
     pub pending_source_focus: Option<SourceFocus>,
@@ -131,6 +133,7 @@ impl Default for UiState {
             labels_expanded: false,
             saved_selected: 0,
             notifications_selected: 0,
+            account: AccountPageState::default(),
             detail_selection_scroll_pending: false,
             notification_filter: NotificationFilter::All,
             pending_source_focus: None,
@@ -332,6 +335,13 @@ pub enum HitTarget {
     WorkspaceLabelsMore,
     WorkspaceSaved,
     WorkspaceNotifications,
+    WorkspaceAccount,
+    AccountInput(AccountInputTarget),
+    AccountSave,
+    AccountReset,
+    AccountLinkDevice,
+    AccountKeyLabel(usize),
+    AccountKeyDeactivate(usize),
     WorkspaceDm {
         conversation_id: Option<String>,
         username: String,
@@ -386,6 +396,32 @@ pub enum HitTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountInputTarget {
+    Username,
+    DisplayName,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AccountPageState {
+    pub initialized_account_id: Option<String>,
+    pub username: ComposerState,
+    pub display_name: ComposerState,
+    pub focus: AccountFocus,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccountFocus {
+    #[default]
+    Username,
+    DisplayName,
+    Save,
+    Reset,
+    LinkDevice,
+    KeyLabel(usize),
+    KeyDeactivate(usize),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BottomBarAction {
     OpenHelp,
     SubmitComposer,
@@ -412,6 +448,7 @@ impl UiState {
             }
             let _ = conversation_id;
         } else if self.route != Route::Search
+            && self.route != Route::Account
             && !matches!(self.route, Route::Label(_))
             && self.route != Route::Saved
             && self.route != Route::Notifications

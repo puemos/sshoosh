@@ -149,6 +149,71 @@ pub(crate) async fn ensure_owner_keeps_active_key(
     Ok(())
 }
 
+pub(crate) async fn username_reservation_owner_tx(
+    mut tx: &mut DbTransaction,
+    username: &str,
+) -> anyhow::Result<Option<String>> {
+    query_scalar(
+        "SELECT account_id
+         FROM account_username_reservations
+         WHERE normalized_username = ?",
+    )
+    .bind(username)
+    .fetch_optional(&mut tx)
+    .await
+}
+
+pub(crate) async fn ensure_username_reservable_tx(
+    tx: &mut DbTransaction,
+    account_id: &str,
+    username: &str,
+) -> anyhow::Result<()> {
+    let reserved_by = username_reservation_owner_tx(tx, username).await?;
+    anyhow::ensure!(
+        reserved_by
+            .as_deref()
+            .is_none_or(|owner| owner == account_id),
+        "Username has already been used"
+    );
+    Ok(())
+}
+
+pub(crate) async fn set_current_username_reservation_tx(
+    mut tx: &mut DbTransaction,
+    account_id: &str,
+    username: &str,
+    now: &str,
+) -> anyhow::Result<()> {
+    ensure_username_reservable_tx(tx, account_id, username).await?;
+    query(
+        "UPDATE account_username_reservations
+         SET current = 0, last_used_at = COALESCE(last_used_at, ?)
+         WHERE account_id = ? AND current = 1 AND normalized_username <> ?",
+    )
+    .bind(now)
+    .bind(account_id)
+    .bind(username)
+    .execute(&mut tx)
+    .await?;
+    query(
+        "INSERT INTO account_username_reservations
+           (normalized_username, username, account_id, first_used_at, last_used_at, current)
+         VALUES (?, ?, ?, ?, NULL, 1)
+         ON CONFLICT(normalized_username) DO UPDATE SET
+           username = excluded.username,
+           last_used_at = NULL,
+           current = 1
+         WHERE account_username_reservations.account_id = excluded.account_id",
+    )
+    .bind(username)
+    .bind(username)
+    .bind(account_id)
+    .bind(now)
+    .execute(&mut tx)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn load_account_by_username_tx(
     mut tx: &mut DbTransaction,
     username: &str,

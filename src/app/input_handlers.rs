@@ -137,6 +137,13 @@ impl App {
                     | HitTarget::ListModalRow(_)
                     | HitTarget::WorkspaceLabel(_)
                     | HitTarget::WorkspaceLabelsMore
+                    | HitTarget::WorkspaceAccount
+                    | HitTarget::AccountSave
+                    | HitTarget::AccountReset
+                    | HitTarget::AccountLinkDevice
+                    | HitTarget::AccountKeyLabel(_)
+                    | HitTarget::AccountKeyDeactivate(_)
+                    | HitTarget::AccountInput(_)
                     | HitTarget::MessageMention(_)
                     | HitTarget::MessageLabel(_),
                 ..
@@ -154,8 +161,15 @@ impl App {
             | HitTarget::WorkspaceLabelsMore
             | HitTarget::WorkspaceSaved
             | HitTarget::WorkspaceNotifications
+            | HitTarget::WorkspaceAccount
             | HitTarget::WorkspaceDm { .. } => self.move_workspace(delta),
             HitTarget::DetailScroll
+            | HitTarget::AccountInput(_)
+            | HitTarget::AccountSave
+            | HitTarget::AccountReset
+            | HitTarget::AccountLinkDevice
+            | HitTarget::AccountKeyLabel(_)
+            | HitTarget::AccountKeyDeactivate(_)
             | HitTarget::SearchResult(_)
             | HitTarget::LabelResult(_)
             | HitTarget::SavedResult(_)
@@ -285,6 +299,40 @@ impl App {
             HitTarget::WorkspaceLabel(tag) => self.apply_workspace_row(WorkspaceRow::Label(tag)),
             HitTarget::WorkspaceLabelsMore => self.apply_workspace_row(WorkspaceRow::LabelsMore),
             HitTarget::WorkspaceSaved => self.apply_workspace_row(WorkspaceRow::Saved),
+            HitTarget::WorkspaceAccount => self.apply_workspace_row(WorkspaceRow::Account),
+            HitTarget::AccountInput(target) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = match target {
+                    AccountInputTarget::Username => AccountFocus::Username,
+                    AccountInputTarget::DisplayName => AccountFocus::DisplayName,
+                };
+            }
+            HitTarget::AccountSave => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = AccountFocus::Save;
+                self.save_account_settings();
+            }
+            HitTarget::AccountReset => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = AccountFocus::Reset;
+                self.reset_account_settings();
+            }
+            HitTarget::AccountLinkDevice => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = AccountFocus::LinkDevice;
+                self.actions
+                    .push(Action::CreateDeviceLinkToken { label: None });
+            }
+            HitTarget::AccountKeyLabel(idx) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = AccountFocus::KeyLabel(idx);
+                self.activate_account_focus();
+            }
+            HitTarget::AccountKeyDeactivate(idx) => {
+                self.ui.active_pane = ActivePane::Detail;
+                self.ui.account.focus = AccountFocus::KeyDeactivate(idx);
+                self.activate_account_focus();
+            }
             HitTarget::WorkspaceNotifications => {
                 self.apply_workspace_row(WorkspaceRow::Notifications)
             }
@@ -533,6 +581,12 @@ impl App {
     }
 
     pub(crate) fn handle_workspace_key(&mut self, key: Key) {
+        if self.ui.route == Route::Account
+            && self.ui.active_pane == ActivePane::Detail
+            && self.handle_account_key(key.clone())
+        {
+            return;
+        }
         match key {
             Key::Esc => {
                 if self.ui.composer.autocomplete.open {
@@ -643,6 +697,123 @@ impl App {
             _ => {}
         }
         self.update_completions();
+    }
+
+    pub(crate) fn handle_account_key(&mut self, key: Key) -> bool {
+        match key {
+            Key::Esc => {
+                if self.account_page_dirty() {
+                    self.reset_account_settings();
+                } else {
+                    self.ui.composer.reset_input();
+                }
+                true
+            }
+            Key::Tab => {
+                self.move_account(1);
+                true
+            }
+            Key::BackTab => {
+                self.move_account(-1);
+                true
+            }
+            Key::Enter | Key::ShiftEnter => {
+                self.activate_account_focus();
+                true
+            }
+            Key::Backspace => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.backspace();
+                }
+                true
+            }
+            Key::Delete => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.delete();
+                }
+                true
+            }
+            Key::Left | Key::Ctrl('b') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.move_left();
+                }
+                true
+            }
+            Key::Right | Key::Ctrl('f') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.move_right();
+                }
+                true
+            }
+            Key::Alt('b') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.move_word_left();
+                }
+                true
+            }
+            Key::Alt('f') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.move_word_right();
+                }
+                true
+            }
+            Key::Ctrl('a') | Key::Home => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.cursor = 0;
+                }
+                true
+            }
+            Key::Ctrl('e') | Key::End => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.cursor = input.buffer.len();
+                }
+                true
+            }
+            Key::Ctrl('u') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.clear_before_cursor();
+                }
+                true
+            }
+            Key::Ctrl('k') => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.clear_after_cursor();
+                }
+                true
+            }
+            Key::Paste(text) => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    let text = sanitize_composer_paste(&text).replace('\n', " ");
+                    input.insert_str(&text);
+                }
+                true
+            }
+            Key::Char(ch) if !ch.is_control() => {
+                if let Some(input) = self.focused_account_input_mut() {
+                    input.insert(ch);
+                    true
+                } else {
+                    false
+                }
+            }
+            Key::Down => {
+                self.move_account(1);
+                true
+            }
+            Key::Up => {
+                self.move_account(-1);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn focused_account_input_mut(&mut self) -> Option<&mut ComposerState> {
+        match self.ui.account.focus {
+            AccountFocus::Username => Some(&mut self.ui.account.username),
+            AccountFocus::DisplayName => Some(&mut self.ui.account.display_name),
+            _ => None,
+        }
     }
 
     pub(crate) fn handle_palette_key(&mut self, key: Key) {

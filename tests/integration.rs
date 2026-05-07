@@ -1837,7 +1837,9 @@ async fn complete_onboarding_rejects_duplicate_usernames() {
         .await
         .expect_err("duplicate username should reject");
     assert!(
-        rejected.to_string().contains("Username is already taken"),
+        rejected
+            .to_string()
+            .contains("Username has already been used"),
         "{rejected:?}"
     );
     let pending = state
@@ -1846,6 +1848,62 @@ async fn complete_onboarding_rejects_duplicate_usernames() {
         .expect("reload pending");
     assert!(!pending.activated);
     assert!(pending.username.starts_with("pending-"));
+}
+
+#[tokio::test]
+async fn usernames_are_reserved_forever_but_reusable_by_same_account() {
+    let (_config, state) = test_state("username-reservations").await;
+    let owner = bootstrap_owner(&state, "SHA256:reservations-owner", "ssh-ed25519 owner").await;
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let alice = accept_invite_key(
+        &state,
+        "alice",
+        "SHA256:reservations-alice",
+        "ssh-ed25519 alice",
+        invite,
+    )
+    .await;
+
+    state
+        .rename_user(&alice.id, &alice.id, "alice-prod")
+        .await
+        .expect("rename alice");
+    state
+        .rename_user(&alice.id, &alice.id, "alice")
+        .await
+        .expect("rename alice back to own historical username");
+
+    let invite = state.create_invite(owner.id.clone()).await.expect("invite");
+    let pending_bob = state
+        .redeem_token_for_key(
+            "alice-prod",
+            &invite,
+            "SHA256:reservations-bob",
+            "ssh-ed25519 bob",
+        )
+        .await
+        .expect("pending bob");
+    assert_eq!(pending_bob.pending_username, None);
+    let rejected = state
+        .complete_onboarding(&pending_bob.id, "alice-prod")
+        .await
+        .expect_err("historical username should stay reserved");
+    assert!(
+        rejected
+            .to_string()
+            .contains("Username has already been used"),
+        "{rejected:?}"
+    );
+
+    let reserved_owner: String = query_scalar(
+        "SELECT account_id
+         FROM account_username_reservations
+         WHERE normalized_username = 'alice-prod'",
+    )
+    .fetch_one(state.db.read_pool())
+    .await
+    .expect("reservation owner");
+    assert_eq!(reserved_owner, alice.id);
 }
 
 #[tokio::test]
@@ -2606,7 +2664,7 @@ async fn ssh_e2e_authenticates_renders_and_creates_thread() {
     assert!(first.contains("Channels"), "{first:?}");
 
     session
-        .data(channel.id(), sgr_drag((2, 5), (9, 5)))
+        .data(channel.id(), sgr_drag((2, 6), (9, 6)))
         .await
         .expect("drag selection");
     let copied = read_until(&mut channel, "\x1b]52;c;").await;

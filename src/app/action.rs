@@ -81,6 +81,11 @@ pub enum Action {
     SetProfile {
         display_name: String,
     },
+    OpenAccount,
+    SaveAccountSettings {
+        username: String,
+        display_name: String,
+    },
     SetUserDisabled {
         username: String,
         disabled: bool,

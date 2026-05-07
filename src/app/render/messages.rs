@@ -150,11 +150,25 @@ pub(crate) fn message_card(spec: MessageCardSpec<'_>) -> MessageCard<'static> {
     let surface = message_surface(body, selected);
     let author_color = resolve_author_color(snapshot, author);
     let gutter = theme::message_card_on(surface);
-    let valid_mentions: Vec<String> = snapshot
-        .users
+    let mut valid_mentions: Vec<MentionRenderTarget> = snapshot
+        .username_reservations
         .iter()
-        .map(|user| user.username.clone())
+        .map(|reservation| MentionRenderTarget {
+            label_username: reservation.username.clone(),
+            target_username: reservation.current_username.clone(),
+        })
         .collect();
+    for user in &snapshot.users {
+        if !valid_mentions
+            .iter()
+            .any(|target| target.label_username.eq_ignore_ascii_case(&user.username))
+        {
+            valid_mentions.push(MentionRenderTarget {
+                label_username: user.username.clone(),
+                target_username: user.username.clone(),
+            });
+        }
+    }
     let mut lines = Vec::new();
     let mut links = Vec::new();
     let mut mentions = Vec::new();
@@ -326,7 +340,7 @@ fn render_message_body_rows(
     body: &str,
     first_width: usize,
     rest_width: usize,
-    valid_mentions: &[String],
+    valid_mentions: &[MentionRenderTarget],
 ) -> Vec<Vec<StyledRun>> {
     let mut wrapped = Vec::new();
     let mut first = true;

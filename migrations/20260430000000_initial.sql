@@ -14,6 +14,18 @@ CREATE TABLE accounts (
 CREATE INDEX idx_accounts_username_lower ON accounts(lower(username));
 CREATE INDEX idx_accounts_username_lower_id ON accounts(lower(username), id);
 
+CREATE TABLE account_username_reservations (
+  normalized_username TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  first_used_at TEXT NOT NULL,
+  last_used_at TEXT,
+  current INTEGER NOT NULL DEFAULT 0 CHECK (current IN (0, 1))
+);
+
+CREATE INDEX idx_account_username_reservations_account
+  ON account_username_reservations(account_id, first_used_at);
+
 CREATE TABLE ssh_keys (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

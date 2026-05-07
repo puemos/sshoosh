@@ -11,6 +11,7 @@ impl App {
     }
 
     pub fn render(&mut self) -> anyhow::Result<Vec<u8>> {
+        self.sync_account_page_form();
         let account = &self.account;
         let snapshot = &self.snapshot;
         let ui = &mut self.ui;

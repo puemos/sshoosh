@@ -5,6 +5,7 @@ use crate::features::{
 };
 pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     frame.render_widget(Block::default().style(theme::panel()), area);
+    let outer_area = area;
     let area = pane_inner(area);
     let row_width = area.width as usize;
     let mut items = Vec::new();
@@ -57,7 +58,48 @@ pub(crate) fn draw_workspace(frame: &mut Frame, area: Rect, snapshot: &Snapshot,
         ui.hit_map.push(saved_area, HitTarget::WorkspaceSaved);
     }
 
-    let next_y = area.y.saturating_add(3);
+    let account_selected = matches!(&ui.route, Route::Account);
+    let account_area = Rect::new(
+        area.x,
+        area.y.saturating_add(2),
+        area.width,
+        area.height.saturating_sub(2).min(1),
+    );
+    if !account_area.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                truncate_text("Account", row_width),
+                workspace_label_style(account_selected, 0),
+            )))
+            .style(theme::panel()),
+            account_area,
+        );
+        ui.hit_map.push(account_area, HitTarget::WorkspaceAccount);
+    }
+
+    let divider_y = area.y.saturating_add(3);
+    let divider_area = Rect::new(
+        outer_area.x,
+        divider_y,
+        outer_area.width,
+        outer_area
+            .y
+            .saturating_add(outer_area.height)
+            .saturating_sub(divider_y)
+            .min(1),
+    );
+    if !divider_area.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(outer_area.width as usize),
+                Style::default().fg(theme::border()).bg(theme::panel_bg()),
+            )))
+            .style(theme::panel()),
+            divider_area,
+        );
+    }
+
+    let next_y = area.y.saturating_add(4);
     let channel_header_area = Rect::new(
         area.x,
         next_y,

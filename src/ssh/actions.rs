@@ -34,6 +34,7 @@ fn refresh_after_action(action: &Action) -> bool {
         Action::LoadMore { .. }
             | Action::Search { .. }
             | Action::OpenLabel { .. }
+            | Action::OpenAccount
             | Action::ListSaved
             | Action::ListNotifications
     )
@@ -47,12 +48,17 @@ pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> any
     };
 
     let result = match action {
+        Action::OpenAccount => {
+            app.lock().await.open_account_page();
+            Ok(ActionResult::silent())
+        }
         action @ (Action::CreateInvite
         | Action::CreateInviteWithOptions { .. }
         | Action::CompleteOnboarding { .. }
         | Action::ListUsers
         | Action::SetUsername { .. }
         | Action::SetProfile { .. }
+        | Action::SaveAccountSettings { .. }
         | Action::SetUserDisabled { .. }
         | Action::SetUserRole { .. }
         | Action::ListKeys

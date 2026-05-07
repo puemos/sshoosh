@@ -52,6 +52,12 @@ pub(crate) struct LinkState {
     label: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MentionRenderTarget {
+    pub label_username: String,
+    pub target_username: String,
+}
+
 #[cfg(test)]
 pub(crate) fn render_message_body(body: &str, width: usize) -> Vec<Vec<StyledRun>> {
     render_message_body_with_mentions(body, width, &[])
@@ -62,6 +68,21 @@ pub(crate) fn render_message_body_with_mentions(
     body: &str,
     width: usize,
     valid_mentions: &[String],
+) -> Vec<Vec<StyledRun>> {
+    let targets = valid_mentions
+        .iter()
+        .map(|username| MentionRenderTarget {
+            label_username: username.clone(),
+            target_username: username.clone(),
+        })
+        .collect::<Vec<_>>();
+    render_message_body_with_mention_targets(body, width, &targets)
+}
+
+pub(crate) fn render_message_body_with_mention_targets(
+    body: &str,
+    width: usize,
+    valid_mentions: &[MentionRenderTarget],
 ) -> Vec<Vec<StyledRun>> {
     let width = width.max(1);
     let mut wrapped = Vec::new();
@@ -76,7 +97,10 @@ pub(crate) fn render_message_body_with_mentions(
     wrapped
 }
 
-pub(crate) fn parse_inline_markdown(line: &str, valid_mentions: &[String]) -> Vec<StyledRun> {
+pub(crate) fn parse_inline_markdown(
+    line: &str,
+    valid_mentions: &[MentionRenderTarget],
+) -> Vec<StyledRun> {
     if should_render_literal_line(line) {
         return literal_runs_with_mentions(line, valid_mentions);
     }
@@ -129,7 +153,7 @@ pub(crate) fn append_markdown_text(
     runs: &mut Vec<StyledRun>,
     state: &mut InlineMarkdownState,
     text: &str,
-    valid_mentions: &[String],
+    valid_mentions: &[MentionRenderTarget],
 ) {
     if state.links.is_empty() {
         append_text_with_bare_links(runs, state, text, valid_mentions);
@@ -143,7 +167,7 @@ pub(crate) fn append_text_with_bare_links(
     runs: &mut Vec<StyledRun>,
     state: &InlineMarkdownState,
     mut text: &str,
-    valid_mentions: &[String],
+    valid_mentions: &[MentionRenderTarget],
 ) {
     while let Some((start, end)) = find_bare_link(text) {
         if start > 0 {
@@ -162,7 +186,7 @@ pub(crate) fn push_text_with_mentions(
     runs: &mut Vec<StyledRun>,
     mut text: &str,
     state: &InlineMarkdownState,
-    valid_mentions: &[String],
+    valid_mentions: &[MentionRenderTarget],
 ) {
     loop {
         let mention = find_valid_mention_with_username(text, valid_mentions).map(|found| {
@@ -207,7 +231,10 @@ pub(crate) fn push_text_with_mentions(
     }
 }
 
-fn find_valid_mention_with_username(text: &str, valid_mentions: &[String]) -> Option<MentionMatch> {
+fn find_valid_mention_with_username(
+    text: &str,
+    valid_mentions: &[MentionRenderTarget],
+) -> Option<MentionMatch> {
     for (idx, ch) in text.char_indices() {
         if ch != '@' || !is_mention_boundary(text, idx) {
             continue;
@@ -226,12 +253,12 @@ fn find_valid_mention_with_username(text: &str, valid_mentions: &[String]) -> Op
         let username = &text[idx + ch.len_utf8()..end];
         if let Some(valid) = valid_mentions
             .iter()
-            .find(|valid| valid.eq_ignore_ascii_case(username))
+            .find(|valid| valid.label_username.eq_ignore_ascii_case(username))
         {
             return Some(MentionMatch {
                 start: idx,
                 end,
-                username: valid.clone(),
+                username: valid.target_username.clone(),
             });
         }
     }
@@ -436,7 +463,10 @@ fn push_run_with_metadata(
     }
 }
 
-pub(crate) fn literal_runs_with_mentions(line: &str, valid_mentions: &[String]) -> Vec<StyledRun> {
+pub(crate) fn literal_runs_with_mentions(
+    line: &str,
+    valid_mentions: &[MentionRenderTarget],
+) -> Vec<StyledRun> {
     let mut runs = Vec::new();
     push_text_with_mentions(
         &mut runs,

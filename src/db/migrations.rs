@@ -19,6 +19,8 @@ const MIGRATION_MESSAGE_LABELS: &str =
     include_str!("../../migrations/20260501000005_message_labels.sql");
 const MIGRATION_QUERY_PERFORMANCE: &str =
     include_str!("../../migrations/20260501000006_query_performance.sql");
+const MIGRATION_USERNAME_RESERVATIONS: &str =
+    include_str!("../../migrations/20260501000007_username_reservations.sql");
 
 impl Database {
     pub async fn init(&self) -> anyhow::Result<()> {
@@ -58,6 +60,10 @@ impl Database {
             (
                 "20260501000006_query_performance",
                 MIGRATION_QUERY_PERFORMANCE,
+            ),
+            (
+                "20260501000007_username_reservations",
+                MIGRATION_USERNAME_RESERVATIONS,
             ),
         ] {
             let exists: Option<String> =

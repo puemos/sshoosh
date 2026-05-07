@@ -208,6 +208,13 @@ If you omit the index, sshoosh applies the reaction to the current thread, curre
 
 ## Account And SSH Keys
 
+Open account settings from the workspace sidebar or with:
+
+```text
+/account
+/settings
+```
+
 Users can update their own display name and username:
 
 ```text
@@ -215,16 +222,20 @@ Users can update their own display name and username:
 /user username alice-prod
 ```
 
+Usernames are permanently reserved. If anyone has ever used a username, no other account can claim it later.
+
 List and manage your SSH keys:
 
 ```text
 /key my
-/key add ssh-ed25519 AAAAC3... | laptop
+/key link laptop
 /key label key-id-or-fingerprint work-laptop
 /key revoke key-id-or-fingerprint
 ```
 
-Owners/admins can manage other users and keys through TUI commands or equivalent CLI commands. Do not paste private keys into sshoosh; only public keys should be registered.
+The account settings page uses the device-link flow for new keys. `/key add ssh-ed25519 AAAAC3... | laptop` remains available for operators who already have a public key string. Do not paste private keys into sshoosh; only public keys should be registered.
+
+Owners/admins can manage other users and keys through TUI commands or equivalent CLI commands.
 
 ## Admin Guide
 

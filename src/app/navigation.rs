@@ -17,6 +17,10 @@ impl App {
             self.move_notifications(delta);
             return;
         }
+        if self.ui.route == Route::Account && self.ui.active_pane == ActivePane::Detail {
+            self.move_account(delta);
+            return;
+        }
         if self.ui.active_pane == ActivePane::Detail {
             if self.move_detail_message_focus(delta) {
                 return;
@@ -191,7 +195,11 @@ impl App {
                     self.snapshot.selected_conversation_id.is_some()
                         && self.snapshot.conversation_messages_has_more
                 }
-                Route::Search | Route::Label(_) | Route::Saved | Route::Notifications => false,
+                Route::Search
+                | Route::Label(_)
+                | Route::Saved
+                | Route::Notifications
+                | Route::Account => false,
             }
     }
 
@@ -212,7 +220,11 @@ impl App {
                 .conversation_messages
                 .first()
                 .map(|message| SourceFocus::Dm(message.obj_index)),
-            Route::Search | Route::Label(_) | Route::Saved | Route::Notifications => None,
+            Route::Search
+            | Route::Label(_)
+            | Route::Saved
+            | Route::Notifications
+            | Route::Account => None,
         };
     }
 
@@ -307,7 +319,7 @@ impl App {
             Route::Label(_) => self.snapshot.label_next_cursor.is_some(),
             Route::Saved => self.snapshot.saved_next_cursor.is_some(),
             Route::Notifications => self.snapshot.notifications_next_cursor.is_some(),
-            Route::Channel(_) | Route::Dms | Route::Search => false,
+            Route::Channel(_) | Route::Dms | Route::Search | Route::Account => false,
         }
     }
 
@@ -365,6 +377,7 @@ impl App {
         let mut rows = Vec::new();
         rows.push(WorkspaceRow::Notifications);
         rows.push(WorkspaceRow::Saved);
+        rows.push(WorkspaceRow::Account);
         for channel in &self.snapshot.channels {
             rows.push(WorkspaceRow::Channel(channel.id.clone()));
             let selected_channel = self.snapshot.selected_channel_id.as_deref()
@@ -465,6 +478,7 @@ impl App {
                 }),
             _ if matches!(self.ui.route, Route::Saved) => Some(WorkspaceRow::Saved),
             _ if matches!(self.ui.route, Route::Notifications) => Some(WorkspaceRow::Notifications),
+            _ if matches!(self.ui.route, Route::Account) => Some(WorkspaceRow::Account),
             _ if matches!(self.ui.route, Route::Label(_)) => match &self.ui.route {
                 Route::Label(tag) => Some(WorkspaceRow::Label(tag.clone())),
                 _ => None,
@@ -532,6 +546,9 @@ impl App {
                 self.reset_detail_scroll();
                 self.actions.push(Action::ListSaved);
             }
+            WorkspaceRow::Account => {
+                self.open_account_page();
+            }
             WorkspaceRow::Label(tag) => {
                 self.ui.route = Route::Label(tag.clone());
                 self.ui.active_pane = ActivePane::Detail;
@@ -591,12 +608,20 @@ impl App {
             self.activate_notification_result();
             return;
         }
+        if self.ui.route == Route::Account && self.ui.active_pane == ActivePane::Detail {
+            self.activate_account_focus();
+            return;
+        }
         match self.ui.active_pane {
             ActivePane::Detail => self.enter_compose(""),
             ActivePane::Rail => {
                 if matches!(
                     self.ui.route,
-                    Route::Dms | Route::Label(_) | Route::Saved | Route::Notifications
+                    Route::Dms
+                        | Route::Label(_)
+                        | Route::Saved
+                        | Route::Notifications
+                        | Route::Account
                 ) {
                     self.ui.active_pane = ActivePane::Detail;
                 } else if self.ui.threads_collapsed {
@@ -792,7 +817,7 @@ impl App {
             ActivePane::Rail
                 if matches!(
                     self.ui.route,
-                    Route::Label(_) | Route::Saved | Route::Notifications
+                    Route::Label(_) | Route::Saved | Route::Notifications | Route::Account
                 ) =>
             {
                 self.ui.active_pane = ActivePane::Detail;
@@ -843,7 +868,7 @@ impl App {
 
         if matches!(
             self.ui.route,
-            Route::Label(_) | Route::Saved | Route::Notifications
+            Route::Label(_) | Route::Saved | Route::Notifications | Route::Account
         ) {
             self.ui.active_pane = ActivePane::Detail;
             return;

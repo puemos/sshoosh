@@ -161,6 +161,7 @@ impl App {
     pub(crate) fn apply_refresh(&mut self, inputs: RefreshInputs, fetched: RefreshFetched) {
         self.account = fetched.account;
         self.snapshot = fetched.snapshot;
+        self.sync_account_page_form();
         if !inputs.was_activated && self.account.activated {
             self.ui.route = Route::Notifications;
             self.ui.active_pane = ActivePane::Detail;
@@ -212,6 +213,24 @@ impl App {
         self.ui.sync_route_from_snapshot(&self.snapshot);
         self.update_completions();
         self.refresh_requested = false;
+    }
+
+    pub(crate) fn sync_account_page_form(&mut self) {
+        let needs_init =
+            self.ui.account.initialized_account_id.as_deref() != Some(self.account.id.as_str());
+        if needs_init || !self.account_page_dirty() {
+            self.ui.account.initialized_account_id = Some(self.account.id.clone());
+            self.ui.account.username.start(&self.account.username);
+            self.ui
+                .account
+                .display_name
+                .start(&self.account.display_name);
+        }
+    }
+
+    pub(crate) fn account_page_dirty(&self) -> bool {
+        self.ui.account.username.buffer.trim() != self.account.username
+            || self.ui.account.display_name.buffer.trim() != self.account.display_name
     }
 
     #[cfg(test)]
@@ -523,6 +542,99 @@ impl App {
     pub fn select_conversation_at_bottom(&mut self, conversation_id: String) {
         self.select_conversation(conversation_id);
         self.scroll_detail_to_bottom();
+    }
+
+    pub fn open_account_page(&mut self) {
+        self.clear_active_source_selection();
+        self.reset_detail_scroll();
+        self.sync_account_page_form();
+        self.ui.route = Route::Account;
+        self.ui.active_pane = ActivePane::Detail;
+        self.ui.account.focus = AccountFocus::Username;
+    }
+
+    pub(crate) fn account_focuses(&self) -> Vec<AccountFocus> {
+        let mut focuses = vec![
+            AccountFocus::Username,
+            AccountFocus::DisplayName,
+            AccountFocus::Save,
+            AccountFocus::Reset,
+            AccountFocus::LinkDevice,
+        ];
+        for (idx, key) in self.snapshot.my_ssh_keys.iter().enumerate() {
+            if key.revoked_at.is_none() {
+                focuses.push(AccountFocus::KeyLabel(idx));
+                focuses.push(AccountFocus::KeyDeactivate(idx));
+            }
+        }
+        focuses
+    }
+
+    pub(crate) fn move_account(&mut self, delta: isize) {
+        let focuses = self.account_focuses();
+        if focuses.is_empty() {
+            return;
+        }
+        let current = focuses
+            .iter()
+            .position(|focus| *focus == self.ui.account.focus)
+            .unwrap_or(0);
+        let next = clamp_index(current, delta, focuses.len());
+        self.ui.account.focus = focuses[next];
+        self.ui.detail_selection_scroll_pending = true;
+    }
+
+    pub(crate) fn activate_account_focus(&mut self) {
+        match self.ui.account.focus {
+            AccountFocus::Username | AccountFocus::DisplayName => {}
+            AccountFocus::Save => self.save_account_settings(),
+            AccountFocus::Reset => self.reset_account_settings(),
+            AccountFocus::LinkDevice => self
+                .actions
+                .push(Action::CreateDeviceLinkToken { label: None }),
+            AccountFocus::KeyLabel(idx) => {
+                if let Some(key) = self.snapshot.my_ssh_keys.get(idx) {
+                    let short = key.id.chars().take(8).collect::<String>();
+                    self.enter_compose(&format!("/key label {short} "));
+                }
+            }
+            AccountFocus::KeyDeactivate(idx) => {
+                if let Some(key) = self.snapshot.my_ssh_keys.get(idx) {
+                    let short = key.id.chars().take(8).collect::<String>();
+                    self.actions.push(Action::RevokeKey { key: short });
+                }
+            }
+        }
+    }
+
+    pub(crate) fn save_account_settings(&mut self) {
+        let username = self.ui.account.username.buffer.trim().to_string();
+        let display_name = self.ui.account.display_name.buffer.trim().to_string();
+        if username.is_empty() {
+            self.set_banner_err("Username is required");
+            return;
+        }
+        if display_name.is_empty() {
+            self.set_banner_err("Display name is required");
+            return;
+        }
+        if !self.account_page_dirty() {
+            self.set_banner_ok("Account settings unchanged");
+            return;
+        }
+        self.actions.push(Action::SaveAccountSettings {
+            username,
+            display_name,
+        });
+    }
+
+    pub(crate) fn reset_account_settings(&mut self) {
+        self.ui.account.username.start(&self.account.username);
+        self.ui
+            .account
+            .display_name
+            .start(&self.account.display_name);
+        self.set_banner_ok("Account settings reset");
     }
 
     pub fn set_search_results(

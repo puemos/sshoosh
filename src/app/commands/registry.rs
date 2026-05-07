@@ -99,7 +99,15 @@ impl Default for CommandRegistry {
                     name: "key",
                     aliases: &[],
                     description: "Manage SSH keys",
-                    args: "list|my|add|label|revoke",
+                    args: "list|my|add|link|label|revoke",
+                    shortcut: None,
+                    category: "Account",
+                },
+                CommandSpec {
+                    name: "account",
+                    aliases: &["settings"],
+                    description: "Open account settings",
+                    args: "",
                     shortcut: None,
                     category: "Account",
                 },
@@ -237,6 +245,7 @@ impl CommandRegistry {
             "notification" => parse_notification_command(rest).map(Some),
             "audit" => parse_audit_command(rest).map(Some),
             "reaction" => parse_reaction_command(rest).map(Some),
+            "account" => Ok(Some(Action::OpenAccount)),
             "search" => require(rest, "Search query is required")
                 .map(|query| Some(Action::Search { query })),
             "label" => {
@@ -361,6 +370,13 @@ impl CommandRegistry {
                 category: "Account".to_string(),
                 shortcut: None,
                 executor: CommandExecutor::Action(Action::CreateDeviceLinkToken { label: None }),
+            },
+            PaletteItem {
+                label: "Account settings".to_string(),
+                detail: "profile and SSH keys".to_string(),
+                category: "Account".to_string(),
+                shortcut: None,
+                executor: CommandExecutor::Action(Action::OpenAccount),
             },
             PaletteItem {
                 label: "Mark thread read".to_string(),

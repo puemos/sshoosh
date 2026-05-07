@@ -36,9 +36,10 @@ use self::{
     commands::{CommandExecutor, CommandRegistry},
     input::MouseButton,
     state::{
-        ActivePane, Banner, BottomBarAction, CommentDeleteState, CommentMenuState, ComposerState,
-        EditableMessageTarget, HitRegion, HitTarget, NotificationFilter, PaletteState,
-        ReactionTarget, Route, SelectionAnchor, SelectionRange, UiMode, UiState,
+        AccountFocus, AccountInputTarget, ActivePane, Banner, BottomBarAction, CommentDeleteState,
+        CommentMenuState, ComposerState, EditableMessageTarget, HitRegion, HitTarget,
+        NotificationFilter, PaletteState, ReactionTarget, Route, SelectionAnchor, SelectionRange,
+        UiMode, UiState,
     },
 };
 
@@ -77,6 +78,7 @@ pub struct App {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum WorkspaceRow {
+    Account,
     Channel(String),
     Thread(String),
     Label(String),

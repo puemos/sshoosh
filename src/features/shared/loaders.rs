@@ -56,6 +56,48 @@ pub(crate) async fn load_user_presence(
         .collect::<anyhow::Result<Vec<_>>>()
 }
 
+pub(crate) async fn load_username_reservations(
+    pool: impl DbExecutor + Copy,
+) -> anyhow::Result<Vec<UsernameReservation>> {
+    let rows = query(
+        "SELECT r.username, r.account_id, a.username AS current_username
+         FROM account_username_reservations r
+         JOIN accounts a ON a.id = r.account_id
+         WHERE a.activated_at IS NOT NULL AND a.disabled_at IS NULL
+         ORDER BY lower(r.username)",
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(UsernameReservation {
+                username: sanitize_single_line_text(&row.get::<String>("username")?),
+                account_id: row.get("account_id")?,
+                current_username: sanitize_single_line_text(
+                    &row.get::<String>("current_username")?,
+                ),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()
+}
+
+pub(crate) async fn load_my_ssh_keys(
+    pool: impl DbExecutor + Copy,
+    account_id: &str,
+) -> anyhow::Result<Vec<SshKeySummary>> {
+    let rows = query(
+        "SELECT k.id, a.username, k.fingerprint, k.label, k.created_at, k.last_used_at, k.revoked_at
+         FROM ssh_keys k
+         JOIN accounts a ON a.id = k.account_id
+         WHERE k.account_id = ?
+         ORDER BY k.created_at",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(ssh_key_summary_from_row).collect()
+}
+
 pub(crate) async fn load_notifications_page(
     pool: impl DbExecutor + Copy,
     account_id: &str,

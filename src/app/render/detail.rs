@@ -8,6 +8,48 @@ use crate::time_format::{
 };
 
 const GROUP_GAP_SECONDS: i64 = 5 * 60;
+const ACCOUNT_BUTTON_RENAME_WIDTH: u16 = 8;
+const ACCOUNT_BUTTON_DEACTIVATE_WIDTH: u16 = 12;
+
+#[derive(Clone, Copy, Debug)]
+struct AccountKeyTableLayout {
+    id_width: usize,
+    label_width: usize,
+    fingerprint_width: usize,
+    last_used_width: usize,
+    state_width: usize,
+    gap: usize,
+}
+
+struct AccountInputRender<'a> {
+    label: &'static str,
+    value: &'a str,
+    cursor: usize,
+    target: AccountInputTarget,
+    selected: bool,
+    width: usize,
+}
+
+impl AccountKeyTableLayout {
+    fn actions_col(self) -> u16 {
+        (self.id_width
+            + self.gap
+            + self.label_width
+            + self.gap
+            + self.fingerprint_width
+            + self.gap
+            + self.last_used_width
+            + self.gap
+            + self.state_width
+            + self.gap) as u16
+    }
+
+    fn deactivate_col(self) -> u16 {
+        self.actions_col()
+            .saturating_add(ACCOUNT_BUTTON_RENAME_WIDTH)
+            .saturating_add(self.gap as u16)
+    }
+}
 
 fn should_continue_group(
     prev_author: Option<&str>,
@@ -35,6 +77,10 @@ fn should_continue_group(
 pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui: &mut UiState) {
     if matches!(ui.route, Route::Dms) {
         draw_dm_detail(frame, area, snapshot, ui);
+        return;
+    }
+    if matches!(ui.route, Route::Account) {
+        draw_account_detail(frame, area, snapshot, ui);
         return;
     }
     if matches!(ui.route, Route::Search) {
@@ -241,6 +287,514 @@ pub(crate) fn draw_detail(frame: &mut Frame, area: Rect, snapshot: &Snapshot, ui
     ui.detail_scroll_metrics =
         render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
     register_message_hits(ui, content_area, message_hits, ui.detail_scroll.offset().y);
+}
+
+pub(crate) fn draw_account_detail(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &Snapshot,
+    ui: &mut UiState,
+) {
+    frame.render_widget(Block::default().style(theme::panel()), area);
+    let area = pane_inner(area);
+    let role = snapshot
+        .current_role
+        .map(|role| role.as_str().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    draw_thread_header(frame, area, None, "Account Settings", Some(&role), ui);
+    let messages_area = pane_scroll_area(area);
+    let content_area = scroll_content_area(messages_area);
+    let width = content_area.width as usize;
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut row_hits: Vec<(u16, HitTarget)> = Vec::new();
+    let mut precise_hits: Vec<(u16, u16, u16, HitTarget)> = Vec::new();
+    let mut selected_row = None;
+    let mut row = 0u16;
+
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_account_input(
+        &mut items,
+        &mut row_hits,
+        &mut selected_row,
+        &mut row,
+        AccountInputRender {
+            label: "Username",
+            value: &ui.account.username.buffer,
+            cursor: ui.account.username.cursor,
+            target: AccountInputTarget::Username,
+            selected: ui.account.focus == AccountFocus::Username,
+            width,
+        },
+    );
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_account_input(
+        &mut items,
+        &mut row_hits,
+        &mut selected_row,
+        &mut row,
+        AccountInputRender {
+            label: "Display name",
+            value: &ui.account.display_name.buffer,
+            cursor: ui.account.display_name.cursor,
+            target: AccountInputTarget::DisplayName,
+            selected: ui.account.focus == AccountFocus::DisplayName,
+            width,
+        },
+    );
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_plain_item(
+        &mut items,
+        &mut row,
+        ListItem::new(Line::from(Span::styled("Role", theme::muted()))),
+    );
+    append_plain_item(
+        &mut items,
+        &mut row,
+        ListItem::new(account_value_box(&role, width)),
+    );
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_account_buttons(
+        &mut items,
+        &mut precise_hits,
+        &mut selected_row,
+        &mut row,
+        [
+            ("Save", AccountFocus::Save, HitTarget::AccountSave),
+            ("Reset", AccountFocus::Reset, HitTarget::AccountReset),
+        ],
+        ui.account.focus,
+    );
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_account_buttons(
+        &mut items,
+        &mut precise_hits,
+        &mut selected_row,
+        &mut row,
+        [(
+            "Link new device",
+            AccountFocus::LinkDevice,
+            HitTarget::AccountLinkDevice,
+        )],
+        ui.account.focus,
+    );
+    append_plain_item(&mut items, &mut row, ListItem::new(""));
+    append_plain_item(
+        &mut items,
+        &mut row,
+        ListItem::new(Line::from(Span::styled(
+            "SSH Keys",
+            theme::section_header(false),
+        ))),
+    );
+    let key_layout = account_key_table_layout(width);
+    append_plain_item(
+        &mut items,
+        &mut row,
+        ListItem::new(account_key_header_row(key_layout)),
+    );
+    if snapshot.my_ssh_keys.is_empty() {
+        append_plain_item(
+            &mut items,
+            &mut row,
+            ListItem::new(Line::from(Span::styled(
+                "No SSH keys linked.",
+                theme::muted(),
+            ))),
+        );
+    } else {
+        for (idx, key) in snapshot.my_ssh_keys.iter().enumerate() {
+            let active = key.revoked_at.is_none();
+            let selected_label = ui.account.focus == AccountFocus::KeyLabel(idx);
+            let selected_deactivate = ui.account.focus == AccountFocus::KeyDeactivate(idx);
+            if selected_label || selected_deactivate {
+                selected_row = Some(row);
+            }
+            let line = account_key_row(key, selected_label, selected_deactivate, width, key_layout);
+            let row_start = row;
+            append_plain_item(&mut items, &mut row, ListItem::new(line));
+            if active {
+                precise_hits.push((
+                    row_start,
+                    key_layout.actions_col(),
+                    ACCOUNT_BUTTON_RENAME_WIDTH,
+                    HitTarget::AccountKeyLabel(idx),
+                ));
+                precise_hits.push((
+                    row_start,
+                    key_layout.deactivate_col(),
+                    ACCOUNT_BUTTON_DEACTIVATE_WIDTH,
+                    HitTarget::AccountKeyDeactivate(idx),
+                ));
+            }
+        }
+    }
+
+    if ui.detail_selection_scroll_pending {
+        ensure_scroll_row_visible(&mut ui.detail_scroll, selected_row, messages_area.height);
+        ui.detail_selection_scroll_pending = false;
+    }
+    ui.detail_scroll_metrics =
+        render_scroll_items(frame, messages_area, items, &mut ui.detail_scroll);
+    let offset_y = ui.detail_scroll.offset().y;
+    register_scroll_hits(
+        ui,
+        messages_area,
+        HitTarget::DetailScroll,
+        row_hits,
+        offset_y,
+    );
+    register_precise_account_hits(ui, content_area, precise_hits, offset_y);
+}
+
+fn append_account_input(
+    items: &mut Vec<ListItem<'static>>,
+    row_hits: &mut Vec<(u16, HitTarget)>,
+    selected_row: &mut Option<u16>,
+    row: &mut u16,
+    spec: AccountInputRender<'_>,
+) {
+    if spec.selected {
+        *selected_row = Some(*row);
+    }
+    append_plain_item(
+        items,
+        row,
+        ListItem::new(Line::from(Span::styled(spec.label, theme::muted()))),
+    );
+    let box_row = *row;
+    append_plain_item(
+        items,
+        row,
+        ListItem::new(account_input_box(
+            spec.value,
+            spec.cursor,
+            spec.selected,
+            spec.width,
+        )),
+    );
+    row_hits.push((box_row, HitTarget::AccountInput(spec.target)));
+}
+
+fn account_input_box(value: &str, cursor: usize, selected: bool, width: usize) -> Line<'static> {
+    let input_style = account_input_style(selected);
+    let cursor_style = if selected {
+        theme::strong_selection()
+    } else {
+        input_style
+    };
+    let inner_width = width.saturating_sub(2).max(1);
+    let value = sanitize_terminal_visible_text(value);
+    let cursor = cursor.min(value.len());
+    let cursor = if value.is_char_boundary(cursor) {
+        cursor
+    } else {
+        value.len()
+    };
+    let prefix_width = if selected {
+        inner_width.saturating_sub(1)
+    } else {
+        inner_width
+    };
+    let prefix = truncate_text(&value[..cursor], prefix_width);
+    let remaining_width = inner_width.saturating_sub(prefix.chars().count());
+    let suffix_width = remaining_width.saturating_sub(usize::from(selected));
+    let suffix = truncate_text(&value[cursor..], suffix_width);
+    let used = prefix.chars().count() + suffix.chars().count() + usize::from(selected);
+    let padding = inner_width.saturating_sub(used);
+    let mut spans = vec![
+        Span::styled(" ".to_string(), input_style),
+        Span::styled(prefix, input_style),
+    ];
+    if selected {
+        spans.push(Span::styled(" ".to_string(), cursor_style));
+    }
+    spans.extend([
+        Span::styled(suffix, input_style),
+        Span::styled(" ".repeat(padding + 1), input_style),
+    ]);
+    Line::from(spans)
+}
+
+fn account_value_box(value: &str, width: usize) -> Line<'static> {
+    let style = account_input_style(false);
+    let inner_width = width.saturating_sub(2).max(1);
+    let text = truncate_text(sanitize_terminal_visible_text(value), inner_width);
+    let padding = inner_width.saturating_sub(text.chars().count());
+    Line::from(vec![
+        Span::styled(" ".to_string(), style),
+        Span::styled(text, style),
+        Span::styled(" ".repeat(padding + 1), style),
+    ])
+}
+
+fn account_input_style(selected: bool) -> Style {
+    let mut style = Style::default()
+        .fg(theme::text_color())
+        .bg(theme::composer_bg());
+    if selected {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    style
+}
+
+fn account_button_style(selected: bool) -> Style {
+    if selected {
+        theme::strong_selection()
+    } else {
+        Style::default()
+            .fg(theme::text_color())
+            .bg(theme::keycap())
+            .add_modifier(Modifier::BOLD)
+    }
+}
+
+fn append_account_buttons<const N: usize>(
+    items: &mut Vec<ListItem<'static>>,
+    precise_hits: &mut Vec<(u16, u16, u16, HitTarget)>,
+    selected_row: &mut Option<u16>,
+    row: &mut u16,
+    buttons: [(&'static str, AccountFocus, HitTarget); N],
+    focus: AccountFocus,
+) {
+    let row_start = *row;
+    let mut spans = Vec::new();
+    let mut col = 0u16;
+    for (idx, (label, button_focus, target)) in buttons.into_iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw("  "));
+            col = col.saturating_add(2);
+        }
+        let selected = focus == button_focus;
+        if selected {
+            *selected_row = Some(row_start);
+        }
+        let text = account_button_text(label);
+        let width = text.chars().count() as u16;
+        spans.push(Span::styled(text, account_button_style(selected)));
+        precise_hits.push((row_start, col, width, target));
+        col = col.saturating_add(width);
+    }
+    append_plain_item(items, row, ListItem::new(Line::from(spans)));
+}
+
+fn account_button_text(label: &str) -> String {
+    format!(" {label} ")
+}
+
+fn account_key_row(
+    key: &crate::features::accounts::model::SshKeySummary,
+    selected_label: bool,
+    selected_deactivate: bool,
+    width: usize,
+    layout: AccountKeyTableLayout,
+) -> Line<'static> {
+    let id = key.id.chars().take(8).collect::<String>();
+    let label = key.label.as_deref().unwrap_or("-");
+    let fingerprint = truncate_middle(&key.fingerprint, layout.fingerprint_width.saturating_sub(1));
+    let last_used = key
+        .last_used_at
+        .as_deref()
+        .map(format_human_timestamp)
+        .unwrap_or_else(|| "never".to_string());
+    let state = if key.revoked_at.is_some() {
+        "inactive"
+    } else {
+        "active"
+    };
+    let mut spans = Vec::new();
+    push_account_key_cell(
+        &mut spans,
+        truncate_text(id, 8),
+        layout.id_width,
+        layout.gap,
+        theme::message_body(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        truncate_text(label, layout.label_width.saturating_sub(1)),
+        layout.label_width,
+        layout.gap,
+        theme::message_body(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        fingerprint,
+        layout.fingerprint_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        truncate_text(last_used, layout.last_used_width.saturating_sub(1)),
+        layout.last_used_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        state.to_string(),
+        layout.state_width,
+        layout.gap,
+        if key.revoked_at.is_some() {
+            theme::muted()
+        } else {
+            theme::accent()
+        },
+    );
+    if key.revoked_at.is_none() {
+        spans.push(Span::styled(
+            account_button_text("Rename"),
+            account_button_style(selected_label),
+        ));
+        spans.push(Span::raw(" ".repeat(layout.gap)));
+        spans.push(Span::styled(
+            account_button_text("Deactivate"),
+            account_button_style(selected_deactivate),
+        ));
+    }
+    let text_width = account_spans_width(&spans);
+    if text_width < width {
+        spans.push(Span::raw(" ".repeat(width - text_width)));
+    }
+    Line::from(spans)
+}
+
+fn account_key_table_layout(width: usize) -> AccountKeyTableLayout {
+    if width >= 112 {
+        AccountKeyTableLayout {
+            id_width: 10,
+            label_width: 18,
+            fingerprint_width: 26,
+            last_used_width: 14,
+            state_width: 10,
+            gap: 2,
+        }
+    } else {
+        AccountKeyTableLayout {
+            id_width: 9,
+            label_width: 11,
+            fingerprint_width: 16,
+            last_used_width: 8,
+            state_width: 7,
+            gap: 1,
+        }
+    }
+}
+
+fn account_key_header_row(layout: AccountKeyTableLayout) -> Line<'static> {
+    let mut spans = Vec::new();
+    push_account_key_cell(
+        &mut spans,
+        "id",
+        layout.id_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        "label",
+        layout.label_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        "fingerprint",
+        layout.fingerprint_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        "last used",
+        layout.last_used_width,
+        layout.gap,
+        theme::muted(),
+    );
+    push_account_key_cell(
+        &mut spans,
+        "state",
+        layout.state_width,
+        layout.gap,
+        theme::muted(),
+    );
+    spans.push(Span::styled("actions", theme::muted()));
+    Line::from(spans)
+}
+
+fn push_account_key_cell(
+    spans: &mut Vec<Span<'static>>,
+    value: impl Into<String>,
+    width: usize,
+    gap: usize,
+    style: Style,
+) {
+    let text = truncate_text(value.into(), width);
+    let padding = width.saturating_sub(text.chars().count());
+    spans.push(Span::styled(
+        format!("{text}{}", " ".repeat(padding)),
+        style,
+    ));
+    spans.push(Span::raw(" ".repeat(gap)));
+}
+
+fn account_spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn truncate_middle(value: &str, max_chars: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let left = max_chars / 2;
+    let right = max_chars.saturating_sub(left + 1);
+    let mut out = chars.iter().take(left).collect::<String>();
+    out.push('…');
+    out.extend(
+        chars
+            .iter()
+            .rev()
+            .take(right)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev(),
+    );
+    out
+}
+
+fn register_precise_account_hits(
+    ui: &mut UiState,
+    area: Rect,
+    hits: Vec<(u16, u16, u16, HitTarget)>,
+    offset_y: u16,
+) {
+    let bottom = offset_y.saturating_add(area.height);
+    for (row, col, width, target) in hits {
+        if row < offset_y || row >= bottom {
+            continue;
+        }
+        let Some(x) = area.x.checked_add(col) else {
+            continue;
+        };
+        let right = area.x.saturating_add(area.width);
+        if x >= right {
+            continue;
+        }
+        let width = width.min(right.saturating_sub(x));
+        if width == 0 {
+            continue;
+        }
+        ui.hit_map.push(
+            Rect::new(x, area.y + row.saturating_sub(offset_y), width, 1),
+            target,
+        );
+    }
 }
 
 pub(crate) fn draw_search_detail(
