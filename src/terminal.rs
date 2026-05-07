@@ -109,6 +109,7 @@ impl TerminalCapabilityEnv {
 pub struct SharedBuffer {
     inner: Arc<Mutex<Vec<u8>>>,
     color_mode: Arc<Mutex<ColorMode>>,
+    pending: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Default for SharedBuffer {
@@ -122,6 +123,7 @@ impl SharedBuffer {
         Self {
             inner: Arc::new(Mutex::new(Vec::new())),
             color_mode: Arc::new(Mutex::new(color_mode)),
+            pending: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -155,7 +157,13 @@ impl Write for SharedBuffer {
             .map_err(|_| io::Error::other("shared terminal buffer poisoned"))?;
         match color_mode {
             ColorMode::Truecolor => guard.extend_from_slice(buf),
-            ColorMode::Ansi256 => guard.extend(downgrade_truecolor_sgr(buf)),
+            ColorMode::Ansi256 => {
+                let mut pending = self
+                    .pending
+                    .lock()
+                    .map_err(|_| io::Error::other("terminal sgr buffer poisoned"))?;
+                guard.extend(downgrade_truecolor_sgr_stream(buf, &mut pending));
+            }
         }
         Ok(buf.len())
     }
@@ -409,13 +417,21 @@ fn rgb_color(color: Color) -> Option<(u8, u8, u8)> {
     }
 }
 
-fn downgrade_truecolor_sgr(bytes: &[u8]) -> Vec<u8> {
+fn downgrade_truecolor_sgr_stream(bytes: &[u8], pending: &mut Vec<u8>) -> Vec<u8> {
+    let mut bytes = bytes;
+    let mut joined;
+    if !pending.is_empty() {
+        joined = std::mem::take(pending);
+        joined.extend_from_slice(bytes);
+        bytes = &joined;
+    }
+    let complete_len = complete_csi_len(bytes);
     let mut out = Vec::with_capacity(bytes.len());
     let mut idx = 0;
-    while idx < bytes.len() {
+    while idx < complete_len {
         if bytes[idx] == 0x1b
             && bytes.get(idx + 1) == Some(&b'[')
-            && let Some(end_offset) = bytes[idx + 2..]
+            && let Some(end_offset) = bytes[idx + 2..complete_len]
                 .iter()
                 .position(|byte| matches!(*byte, 0x40..=0x7e))
         {
@@ -436,7 +452,25 @@ fn downgrade_truecolor_sgr(bytes: &[u8]) -> Vec<u8> {
         out.push(bytes[idx]);
         idx += 1;
     }
+    pending.extend_from_slice(&bytes[complete_len..]);
     out
+}
+
+fn complete_csi_len(bytes: &[u8]) -> usize {
+    let Some(esc_idx) = bytes.iter().rposition(|byte| *byte == 0x1b) else {
+        return bytes.len();
+    };
+    match bytes.get(esc_idx + 1) {
+        Some(b'[')
+            if !bytes[esc_idx + 2..]
+                .iter()
+                .any(|byte| matches!(*byte, 0x40..=0x7e)) =>
+        {
+            esc_idx
+        }
+        None => esc_idx,
+        _ => bytes.len(),
+    }
 }
 
 fn downgrade_sgr_params(params: &str) -> String {
@@ -682,6 +716,24 @@ mod tests {
         let output = String::from_utf8_lossy(&shared.take().expect("take output")).into_owned();
         assert!(output.contains("38;2"));
         assert!(output.contains("48;2"));
+    }
+
+    #[test]
+    fn shared_buffer_downgrades_split_truecolor_sgr() {
+        let mut shared = SharedBuffer::new(ColorMode::Ansi256);
+        shared.write_all(b"\x1b[38;").expect("write prefix");
+        assert_eq!(shared.take().expect("pending prefix"), Vec::<u8>::new());
+
+        shared
+            .write_all(b"2;1;2;3;48;2;34;37;41mtext")
+            .expect("write suffix");
+        let output = String::from_utf8_lossy(&shared.take().expect("take output")).into_owned();
+
+        assert!(!output.contains("38;2"));
+        assert!(!output.contains("48;2"));
+        assert!(output.contains("38;5;"));
+        assert!(output.contains("48;5;"));
+        assert!(output.ends_with("text"));
     }
 
     #[test]
