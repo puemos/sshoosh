@@ -54,7 +54,7 @@ impl ActionSelection {
 pub(crate) async fn process_load_more(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
+    _account_id: &str,
     request: Option<LoadMoreRequest>,
 ) -> anyhow::Result<ActionResult> {
     let request = match request {
@@ -71,13 +71,11 @@ pub(crate) async fn process_load_more(
     let result = match &request {
         LoadMoreRequest::Saved { cursor } => {
             let page = session
-                .saved_messages_page_after(
-                    account_id,
-                    PageRequest {
-                        limit: 50,
-                        cursor: Some(cursor.clone()),
-                    },
-                )
+                .feeds()
+                .saved_messages_page_after(PageRequest {
+                    limit: 50,
+                    cursor: Some(cursor.clone()),
+                })
                 .await;
             match page {
                 Ok(page) => {
@@ -92,8 +90,8 @@ pub(crate) async fn process_load_more(
         }
         LoadMoreRequest::Search { query, cursor } => {
             let page = session
+                .feeds()
                 .search_page_after(
-                    account_id,
                     query,
                     PageRequest {
                         limit: 50,
@@ -114,8 +112,8 @@ pub(crate) async fn process_load_more(
         }
         LoadMoreRequest::Label { tag, cursor } => {
             let page = session
+                .feeds()
                 .label_feed_page_after(
-                    account_id,
                     tag,
                     PageRequest {
                         limit: 50,
@@ -136,13 +134,11 @@ pub(crate) async fn process_load_more(
         }
         LoadMoreRequest::Notifications { cursor } => {
             let page = session
-                .list_notifications_page(
-                    account_id,
-                    PageRequest {
-                        limit: 50,
-                        cursor: Some(cursor.clone()),
-                    },
-                )
+                .notifications()
+                .list_notifications_page(PageRequest {
+                    limit: 50,
+                    cursor: Some(cursor.clone()),
+                })
                 .await;
             match page {
                 Ok(page) => {
@@ -164,7 +160,7 @@ pub(crate) async fn process_load_more(
 pub(crate) async fn open_source_target(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
+    _account_id: &str,
     target: SourceTarget,
 ) -> anyhow::Result<ActionResult> {
     let focus = target.focus;
@@ -192,9 +188,7 @@ pub(crate) async fn open_source_target(
             .channel_slug
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("Source channel is unavailable"))?;
-        channel_id = session
-            .join_channel(account_id.to_string(), slug.to_string())
-            .await?;
+        channel_id = session.channels().join_channel(slug.to_string()).await?;
     }
 
     if let Some(thread_id) = target.thread_id {

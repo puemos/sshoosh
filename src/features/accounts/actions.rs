@@ -17,32 +17,33 @@ use crate::{
 pub(crate) async fn process(
     _app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
+    _account_id: &str,
     action: Action,
 ) -> anyhow::Result<ActionResult> {
+    let accounts = session.accounts();
     match action {
-        Action::CreateInvite => session
-            .create_invite(account_id.to_string())
+        Action::CreateInvite => accounts
+            .create_invite()
             .await
             .map(|code| ActionResult::message(format!("Invite code: {code}"))),
-        Action::CreateInviteWithOptions { role, ttl_hours } => session
-            .create_invite_with_options(account_id, role, ttl_hours)
+        Action::CreateInviteWithOptions { role, ttl_hours } => accounts
+            .create_invite_with_options(role, ttl_hours)
             .await
             .map(|code| ActionResult::message(format!("Invite code: {code}"))),
-        Action::CompleteOnboarding { username } => session
-            .complete_onboarding(account_id, &username)
+        Action::CompleteOnboarding { username } => accounts
+            .complete_onboarding(&username)
             .await
             .map(|_| ActionResult::message("Setup complete")),
-        Action::ListUsers => session
-            .list_accounts(account_id)
+        Action::ListUsers => accounts
+            .list_accounts()
             .await
             .map(|rows| ActionResult::List(accounts_modal(&rows))),
-        Action::SetUsername { username } => session
-            .rename_user(account_id, account_id, &username)
+        Action::SetUsername { username } => accounts
+            .rename_self(&username)
             .await
             .map(|_| ActionResult::message(format!("Username updated to @{username}"))),
-        Action::SetProfile { display_name } => session
-            .set_display_name(account_id, account_id, &display_name)
+        Action::SetProfile { display_name } => accounts
+            .set_self_display_name(&display_name)
             .await
             .map(|_| ActionResult::message("Profile updated")),
         Action::SaveAccountSettings {
@@ -59,19 +60,15 @@ pub(crate) async fn process(
             let username_changed = username != current.username;
             let display_name_changed = display_name != current.display_name;
             if username_changed {
-                session
-                    .rename_user(account_id, account_id, &username)
-                    .await?;
+                accounts.rename_self(&username).await?;
             }
             if display_name_changed {
-                session
-                    .set_display_name(account_id, account_id, &display_name)
-                    .await?;
+                accounts.set_self_display_name(&display_name).await?;
             }
             Ok(ActionResult::message("Account settings saved"))
         }
-        Action::SetUserDisabled { username, disabled } => session
-            .set_user_disabled(account_id, &username, disabled)
+        Action::SetUserDisabled { username, disabled } => accounts
+            .set_user_disabled(&username, disabled)
             .await
             .map(|_| {
                 ActionResult::message(if disabled {
@@ -80,40 +77,40 @@ pub(crate) async fn process(
                     format!("Enabled @{username}")
                 })
             }),
-        Action::SetUserRole { username, role } => session
-            .set_user_role(account_id, &username, role)
+        Action::SetUserRole { username, role } => accounts
+            .set_user_role(&username, role)
             .await
             .map(|_| ActionResult::message(format!("Set @{username} role to {}", role.as_str()))),
-        Action::ListKeys => session
-            .list_ssh_keys(account_id)
+        Action::ListKeys => accounts
+            .list_ssh_keys()
             .await
             .map(|rows| ActionResult::List(keys_modal("SSH keys", &rows))),
-        Action::ListMyKeys => session
-            .list_my_ssh_keys(account_id)
+        Action::ListMyKeys => accounts
+            .list_my_ssh_keys()
             .await
             .map(|rows| ActionResult::List(keys_modal("My SSH keys", &rows))),
-        Action::AddKey { public_key, label } => session
-            .add_ssh_key(account_id, None, &public_key, label.as_deref())
+        Action::AddKey { public_key, label } => accounts
+            .add_ssh_key(None, &public_key, label.as_deref())
             .await
             .map(|row| ActionResult::message(format!("Added key {}", row.fingerprint))),
-        Action::CreateDeviceLinkToken { label } => session
-            .create_device_link_token(account_id, label.as_deref())
+        Action::CreateDeviceLinkToken { label } => accounts
+            .create_device_link_token(label.as_deref())
             .await
             .map(|code| ActionResult::modal_message(format!("Device link token: {code}"))),
-        Action::LabelKey { key, label } => session
-            .label_ssh_key(account_id, &key, &label)
+        Action::LabelKey { key, label } => accounts
+            .label_ssh_key(&key, &label)
             .await
             .map(|_| ActionResult::message("SSH key label updated")),
-        Action::RevokeKey { key } => session
-            .revoke_ssh_key(account_id, &key)
+        Action::RevokeKey { key } => accounts
+            .revoke_ssh_key(&key)
             .await
             .map(|_| ActionResult::message("SSH key revoked")),
-        Action::ListInvites => session
-            .list_invites(account_id)
+        Action::ListInvites => accounts
+            .list_invites()
             .await
             .map(|rows| ActionResult::List(invites_modal(&rows))),
-        Action::RevokeInvite { invite_id } => session
-            .revoke_invite(account_id, &invite_id)
+        Action::RevokeInvite { invite_id } => accounts
+            .revoke_invite(&invite_id)
             .await
             .map(|_| ActionResult::message("Invite revoked")),
         _ => unreachable!("non-account action routed to accounts feature"),

@@ -20,11 +20,12 @@ pub(crate) async fn process(
     account_id: &str,
     action: Action,
 ) -> anyhow::Result<ActionResult> {
+    let feeds = session.feeds();
     match action {
         Action::Search { query } => {
             let limit = app.lock().await.reset_search_limit();
-            match session
-                .search_page_after(account_id, &query, PageRequest::first(limit))
+            match feeds
+                .search_page_after(&query, PageRequest::first(limit))
                 .await
             {
                 Ok(page) => {
@@ -42,8 +43,8 @@ pub(crate) async fn process(
         Action::OpenLabel { tag } => {
             let tag = normalize_label(&tag).ok_or_else(|| anyhow::anyhow!("Label is required"))?;
             let limit = app.lock().await.reset_label_limit();
-            match session
-                .label_feed_page_after(account_id, &tag, PageRequest::first(limit))
+            match feeds
+                .label_feed_page_after(&tag, PageRequest::first(limit))
                 .await
             {
                 Ok(page) => {
@@ -57,8 +58,8 @@ pub(crate) async fn process(
         }
         Action::ListSaved => {
             let limit = app.lock().await.reset_saved_limit();
-            match session
-                .saved_messages_page_after(account_id, PageRequest::first(limit))
+            match feeds
+                .saved_messages_page_after(PageRequest::first(limit))
                 .await
             {
                 Ok(page) => {

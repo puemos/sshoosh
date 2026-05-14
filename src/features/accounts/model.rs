@@ -50,6 +50,18 @@ pub struct AccountSummary {
     pub last_seen_at: Option<String>,
 }
 
+impl AccountSummary {
+    pub fn state_label(&self) -> &'static str {
+        if self.disabled {
+            "disabled"
+        } else if self.activated {
+            "active"
+        } else {
+            "pending"
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SshKeySummary {
     pub id: String,
@@ -59,6 +71,16 @@ pub struct SshKeySummary {
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub revoked_at: Option<String>,
+}
+
+impl SshKeySummary {
+    pub fn state_label(&self) -> &'static str {
+        if self.revoked_at.is_some() {
+            "revoked"
+        } else {
+            "active"
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +93,18 @@ pub struct InviteSummary {
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
     pub accepted_at: Option<String>,
+}
+
+impl InviteSummary {
+    pub fn state_label(&self) -> &'static str {
+        if self.accepted_at.is_some() {
+            "accepted"
+        } else if self.revoked_at.is_some() {
+            "revoked"
+        } else {
+            "open"
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

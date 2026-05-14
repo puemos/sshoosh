@@ -9,18 +9,11 @@ pub mod cli {
     pub fn format_accounts(rows: &[AccountSummary]) -> String {
         let mut out = String::from("username\trole\tstate\tlast_seen\n");
         for row in rows {
-            let state = if row.disabled {
-                "disabled"
-            } else if row.activated {
-                "active"
-            } else {
-                "pending"
-            };
             out.push_str(&format!(
                 "{}\t{}\t{}\t{}\n",
                 row.username,
                 row.role.as_str(),
-                state,
+                row.state_label(),
                 row.last_seen_at.as_deref().unwrap_or("-")
             ));
         }
@@ -35,7 +28,7 @@ pub mod cli {
                 row.id,
                 row.username,
                 row.fingerprint,
-                row.revoked_at.as_deref().unwrap_or("active")
+                row.revoked_at.as_deref().unwrap_or(row.state_label())
             ));
         }
         out
@@ -44,19 +37,12 @@ pub mod cli {
     pub fn format_invites(rows: &[InviteSummary]) -> String {
         let mut out = String::from("id\trole\tcreated_by\tstate\texpires\n");
         for row in rows {
-            let state = if row.accepted_at.is_some() {
-                "accepted"
-            } else if row.revoked_at.is_some() {
-                "revoked"
-            } else {
-                "open"
-            };
             out.push_str(&format!(
                 "{}\t{}\t{}\t{}\t{}\n",
                 row.id,
                 row.role_on_accept.as_str(),
                 row.created_by,
-                state,
+                row.state_label(),
                 row.expires_at.as_deref().unwrap_or("-")
             ));
         }
@@ -139,18 +125,11 @@ pub mod ssh {
     pub fn format_accounts(rows: &[AccountSummary]) -> String {
         let mut out = String::from("Users\n");
         for row in rows {
-            let state = if row.disabled {
-                "disabled"
-            } else if row.activated {
-                "active"
-            } else {
-                "pending"
-            };
             out.push_str(&format!(
                 "@{}  {}  {}  last_seen:{}\n",
                 row.username,
                 row.role.as_str(),
-                state,
+                row.state_label(),
                 format_optional_timestamp(row.last_seen_at.as_deref())
             ));
         }
@@ -179,19 +158,12 @@ pub mod ssh {
     pub fn format_invites(rows: &[InviteSummary]) -> String {
         let mut out = String::from("Invites\n");
         for row in rows {
-            let state = if row.accepted_at.is_some() {
-                "accepted"
-            } else if row.revoked_at.is_some() {
-                "revoked"
-            } else {
-                "open"
-            };
             out.push_str(&format!(
                 "{}  {}  by @{}  {}  expires:{}\n",
                 short_id(&row.id),
                 row.role_on_accept.as_str(),
                 row.created_by,
-                state,
+                row.state_label(),
                 format_optional_timestamp(row.expires_at.as_deref())
             ));
         }

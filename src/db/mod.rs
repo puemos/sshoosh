@@ -32,6 +32,8 @@ mod fs;
 mod lease;
 mod maintenance;
 mod migrations;
+mod mutation;
+mod query_encryption;
 mod time;
 
 pub use config::{DatabaseConfig, DatabaseKind, default_node_id};

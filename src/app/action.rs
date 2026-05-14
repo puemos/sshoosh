@@ -24,6 +24,17 @@ pub enum LoadMoreRequest {
     Notifications { cursor: String },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActionDomain {
+    App,
+    Accounts,
+    Channels,
+    Messages,
+    Notifications,
+    Audit,
+    Feeds,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     CreateInvite,
@@ -192,4 +203,86 @@ pub enum Action {
         request: Option<LoadMoreRequest>,
     },
     LoadOlder,
+}
+
+impl Action {
+    pub(crate) fn domain(&self) -> ActionDomain {
+        match self {
+            Self::OpenAccount => ActionDomain::App,
+            Self::CreateInvite
+            | Self::CreateInviteWithOptions { .. }
+            | Self::CompleteOnboarding { .. }
+            | Self::ListUsers
+            | Self::SetUsername { .. }
+            | Self::SetProfile { .. }
+            | Self::SaveAccountSettings { .. }
+            | Self::SetUserDisabled { .. }
+            | Self::SetUserRole { .. }
+            | Self::ListKeys
+            | Self::ListMyKeys
+            | Self::AddKey { .. }
+            | Self::CreateDeviceLinkToken { .. }
+            | Self::LabelKey { .. }
+            | Self::RevokeKey { .. }
+            | Self::ListInvites
+            | Self::RevokeInvite { .. } => ActionDomain::Accounts,
+            Self::CreateChannel { .. }
+            | Self::JoinChannel { .. }
+            | Self::LeaveChannel { .. }
+            | Self::ListChannels
+            | Self::RenameChannel { .. }
+            | Self::SetChannelTopic { .. }
+            | Self::SetChannelArchived { .. }
+            | Self::ListChannelMembers { .. }
+            | Self::AddChannelMember { .. }
+            | Self::RemoveChannelMember { .. } => ActionDomain::Channels,
+            Self::CreateThread { .. }
+            | Self::AddComment { .. }
+            | Self::OpenDm { .. }
+            | Self::SendDm { .. }
+            | Self::MarkThreadRead
+            | Self::MarkThreadUnread
+            | Self::MarkDmRead
+            | Self::MarkDmUnread
+            | Self::NextUnread
+            | Self::RenameThread { .. }
+            | Self::DeleteThread
+            | Self::SetThreadArchived { .. }
+            | Self::SetThreadPinned { .. }
+            | Self::SetThreadMuted { .. }
+            | Self::EditComment { .. }
+            | Self::DeleteComment { .. }
+            | Self::EditDm { .. }
+            | Self::DeleteDm { .. }
+            | Self::SetDmMuted { .. }
+            | Self::SetMessageSaved { .. }
+            | Self::React { .. }
+            | Self::Unreact { .. } => ActionDomain::Messages,
+            Self::ListMentions
+            | Self::ListNotifications
+            | Self::OpenSourceTarget { .. }
+            | Self::MarkNotificationRead { .. }
+            | Self::ArchiveNotifications
+            | Self::SetTerminalNotifications { .. }
+            | Self::ShowTerminalNotificationsStatus => ActionDomain::Notifications,
+            Self::ListAudit => ActionDomain::Audit,
+            Self::Search { .. }
+            | Self::OpenLabel { .. }
+            | Self::ListSaved
+            | Self::LoadMore { .. }
+            | Self::LoadOlder => ActionDomain::Feeds,
+        }
+    }
+
+    pub(crate) fn refreshes_after(&self) -> bool {
+        !matches!(
+            self,
+            Self::LoadMore { .. }
+                | Self::Search { .. }
+                | Self::OpenLabel { .. }
+                | Self::OpenAccount
+                | Self::ListSaved
+                | Self::ListNotifications
+        )
+    }
 }

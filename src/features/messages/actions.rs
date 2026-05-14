@@ -14,14 +14,15 @@ use crate::{
 pub(crate) async fn process(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
+    _account_id: &str,
     action: Action,
 ) -> anyhow::Result<ActionResult> {
+    let messages = session.messages();
     match action {
-        Action::CreateThread { title } => create_thread(app, session, account_id, title).await,
-        Action::AddComment { body } => add_comment(app, session, account_id, body).await,
-        Action::SendDm { body } => send_dm(app, session, account_id, body).await,
-        Action::OpenDm { target } => match session.open_dm(account_id.to_string(), target).await {
+        Action::CreateThread { title } => create_thread(app, session, title).await,
+        Action::AddComment { body } => add_comment(app, session, body).await,
+        Action::SendDm { body } => send_dm(app, session, body).await,
+        Action::OpenDm { target } => match messages.open_dm(target).await {
             Ok(conversation_id) => {
                 app.lock().await.select_conversation(conversation_id);
                 Ok(ActionResult::silent())
@@ -29,34 +30,34 @@ pub(crate) async fn process(
             Err(err) => Err(err),
         },
         Action::MarkThreadRead => match ActionSelection::current(app).await.thread_id {
-            Some(thread_id) => session
-                .mark_thread_read(account_id, &thread_id)
+            Some(thread_id) => messages
+                .mark_thread_read(&thread_id)
                 .await
                 .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkThreadUnread => match ActionSelection::current(app).await.thread_id {
-            Some(thread_id) => session
-                .mark_thread_unread(account_id, &thread_id)
+            Some(thread_id) => messages
+                .mark_thread_unread(&thread_id)
                 .await
                 .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No thread selected")),
         },
         Action::MarkDmRead => match ActionSelection::current(app).await.conversation_id {
-            Some(conversation_id) => session
-                .mark_conversation_read(account_id, &conversation_id)
+            Some(conversation_id) => messages
+                .mark_conversation_read(&conversation_id)
                 .await
                 .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
         Action::MarkDmUnread => match ActionSelection::current(app).await.conversation_id {
-            Some(conversation_id) => session
-                .mark_conversation_unread(account_id, &conversation_id)
+            Some(conversation_id) => messages
+                .mark_conversation_unread(&conversation_id)
                 .await
                 .map(|_| ActionResult::silent()),
             None => Err(anyhow::anyhow!("No DM selected")),
         },
-        Action::NextUnread => match session.next_unread(account_id).await {
+        Action::NextUnread => match messages.next_unread().await {
             Ok(Some(NextUnread::Thread {
                 channel_id,
                 thread_id,
@@ -76,8 +77,8 @@ pub(crate) async fn process(
         Action::RenameThread { title } => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .rename_thread(account_id, &thread_id, &title)
+                messages
+                    .rename_thread(&thread_id, &title)
                     .await
                     .map(|_| ActionResult::message("Thread renamed"))
             } else {
@@ -87,8 +88,8 @@ pub(crate) async fn process(
         Action::DeleteThread => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .delete_thread(account_id, &thread_id)
+                messages
+                    .delete_thread(&thread_id)
                     .await
                     .map(|_| ActionResult::message("Thread deleted"))
             } else {
@@ -98,8 +99,8 @@ pub(crate) async fn process(
         Action::SetThreadArchived { archived } => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .set_thread_archived(account_id, &thread_id, archived)
+                messages
+                    .set_thread_archived(&thread_id, archived)
                     .await
                     .map(|_| {
                         ActionResult::message(if archived {
@@ -115,8 +116,8 @@ pub(crate) async fn process(
         Action::SetThreadPinned { pinned } => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .set_thread_pinned(account_id, &thread_id, pinned)
+                messages
+                    .set_thread_pinned(&thread_id, pinned)
                     .await
                     .map(|_| {
                         ActionResult::message(if pinned {
@@ -132,13 +133,13 @@ pub(crate) async fn process(
         Action::SetThreadMuted { ttl_hours } => {
             let selection = ActionSelection::current(app).await;
             if let Some(conversation_id) = selection.conversation_id {
-                session
-                    .set_conversation_muted(account_id, &conversation_id, ttl_hours)
+                messages
+                    .set_conversation_muted(&conversation_id, ttl_hours)
                     .await
                     .map(|_| ActionResult::message(mute_message(ttl_hours, "DM")))
             } else if let Some(thread_id) = selection.thread_id {
-                session
-                    .set_thread_muted(account_id, &thread_id, ttl_hours)
+                messages
+                    .set_thread_muted(&thread_id, ttl_hours)
                     .await
                     .map(|_| ActionResult::message(mute_message(ttl_hours, "Thread")))
             } else {
@@ -148,13 +149,13 @@ pub(crate) async fn process(
         Action::SetMessageSaved { index, saved } => {
             let selection = ActionSelection::current(app).await;
             if let Some(conversation_id) = selection.conversation_id {
-                session
-                    .set_dm_message_saved(account_id, &conversation_id, index, saved)
+                messages
+                    .set_dm_message_saved(&conversation_id, index, saved)
                     .await
                     .map(|_| ActionResult::message(saved_message(saved, "Message")))
             } else if let Some(thread_id) = selection.thread_id {
-                session
-                    .set_comment_saved(account_id, &thread_id, index, saved)
+                messages
+                    .set_comment_saved(&thread_id, index, saved)
                     .await
                     .map(|_| ActionResult::message(saved_message(saved, "Message")))
             } else {
@@ -164,8 +165,8 @@ pub(crate) async fn process(
         Action::EditComment { index, body } => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .edit_comment(account_id, &thread_id, index, &body)
+                messages
+                    .edit_comment(&thread_id, index, &body)
                     .await
                     .map(|_| ActionResult::message(format!("Comment #{index} edited")))
             } else {
@@ -175,8 +176,8 @@ pub(crate) async fn process(
         Action::DeleteComment { index } => {
             let thread_id = ActionSelection::current(app).await.thread_id;
             if let Some(thread_id) = thread_id {
-                session
-                    .delete_comment(account_id, &thread_id, index)
+                messages
+                    .delete_comment(&thread_id, index)
                     .await
                     .map(|_| ActionResult::message(format!("Comment #{index} deleted")))
             } else {
@@ -186,8 +187,8 @@ pub(crate) async fn process(
         Action::EditDm { index, body } => {
             let conversation_id = ActionSelection::current(app).await.conversation_id;
             if let Some(conversation_id) = conversation_id {
-                session
-                    .edit_dm(account_id, &conversation_id, index, &body)
+                messages
+                    .edit_dm(&conversation_id, index, &body)
                     .await
                     .map(|_| ActionResult::message(format!("DM #{index} edited")))
             } else {
@@ -197,8 +198,8 @@ pub(crate) async fn process(
         Action::DeleteDm { index } => {
             let conversation_id = ActionSelection::current(app).await.conversation_id;
             if let Some(conversation_id) = conversation_id {
-                session
-                    .delete_dm(account_id, &conversation_id, index)
+                messages
+                    .delete_dm(&conversation_id, index)
                     .await
                     .map(|_| ActionResult::message(format!("DM #{index} deleted")))
             } else {
@@ -208,8 +209,8 @@ pub(crate) async fn process(
         Action::SetDmMuted { ttl_hours } => {
             let conversation_id = ActionSelection::current(app).await.conversation_id;
             if let Some(conversation_id) = conversation_id {
-                session
-                    .set_conversation_muted(account_id, &conversation_id, ttl_hours)
+                messages
+                    .set_conversation_muted(&conversation_id, ttl_hours)
                     .await
                     .map(|_| ActionResult::message(mute_message(ttl_hours, "DM")))
             } else {
@@ -220,7 +221,6 @@ pub(crate) async fn process(
             let selection = ActionSelection::current(app).await;
             react_or_unreact(
                 session,
-                account_id,
                 selection.thread_id.as_deref(),
                 selection.conversation_id.as_deref(),
                 emoji,
@@ -233,7 +233,6 @@ pub(crate) async fn process(
             let selection = ActionSelection::current(app).await;
             react_or_unreact(
                 session,
-                account_id,
                 selection.thread_id.as_deref(),
                 selection.conversation_id.as_deref(),
                 emoji,
@@ -249,7 +248,6 @@ pub(crate) async fn process(
 async fn create_thread(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
     title: String,
 ) -> anyhow::Result<ActionResult> {
     let selection = ActionSelection::current(app).await;
@@ -262,7 +260,8 @@ async fn create_thread(
     let channel_id = selection.channel_id.or(fallback_channel_id);
     if let Some(channel_id) = channel_id {
         let thread_id = session
-            .create_thread(account_id.to_string(), channel_id.clone(), title)
+            .messages()
+            .create_thread(channel_id.clone(), title)
             .await?;
         let latest = ActionSelection::current(app).await;
         let unchanged_source_agnostic_route = !had_channel_selection
@@ -282,7 +281,6 @@ async fn create_thread(
 async fn add_comment(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
     body: String,
 ) -> anyhow::Result<ActionResult> {
     let selection = ActionSelection::current(app).await;
@@ -297,7 +295,8 @@ async fn add_comment(
         None => Err(anyhow::anyhow!("No thread selected; use /thread new title"))?,
     };
     session
-        .add_comment(account_id.to_string(), thread_id.clone(), body)
+        .messages()
+        .add_comment(thread_id.clone(), body)
         .await?;
     let latest = ActionSelection::current(app).await;
     if latest.channel_id.as_deref() == Some(channel_id.as_str())
@@ -313,7 +312,6 @@ async fn add_comment(
 async fn send_dm(
     app: &Arc<Mutex<App>>,
     session: &ClientSession,
-    account_id: &str,
     body: String,
 ) -> anyhow::Result<ActionResult> {
     let selection = ActionSelection::current(app).await;
@@ -322,7 +320,8 @@ async fn send_dm(
         None => Err(anyhow::anyhow!("No DM selected; use /dm open @user"))?,
     };
     session
-        .send_dm(account_id.to_string(), conversation_id.clone(), body)
+        .messages()
+        .send_dm(conversation_id.clone(), body)
         .await?;
     let latest = ActionSelection::current(app).await;
     if latest.conversation_id.as_deref() == Some(conversation_id.as_str()) {
@@ -335,27 +334,25 @@ async fn send_dm(
 
 async fn react_or_unreact(
     session: &ClientSession,
-    account_id: &str,
     thread_id: Option<&str>,
     conversation_id: Option<&str>,
     emoji: String,
     index: Option<i64>,
     remove: bool,
 ) -> anyhow::Result<ActionResult> {
+    let messages = session.messages();
     if let Some(conversation_id) = conversation_id {
         let index = index.ok_or_else(|| anyhow::anyhow!("DM reaction requires a message index"))?;
-        session
-            .react_to_dm(account_id, conversation_id, index, &emoji, remove)
+        messages
+            .react_to_dm(conversation_id, index, &emoji, remove)
             .await?;
     } else if let Some(thread_id) = thread_id {
         if let Some(index) = index {
-            session
-                .react_to_comment(account_id, thread_id, index, &emoji, remove)
+            messages
+                .react_to_comment(thread_id, index, &emoji, remove)
                 .await?;
         } else {
-            session
-                .react_to_thread(account_id, thread_id, &emoji, remove)
-                .await?;
+            messages.react_to_thread(thread_id, &emoji, remove).await?;
         }
     } else {
         anyhow::bail!("No thread or DM selected");

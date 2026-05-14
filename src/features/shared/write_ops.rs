@@ -151,6 +151,252 @@ pub(crate) async fn join_channel(
     Ok(channel_id)
 }
 
+struct MessageWriteProjector;
+
+struct ThreadCreatedProjection<'a> {
+    actor_id: &'a str,
+    thread_id: &'a str,
+    channel_id: &'a str,
+    channel_slug: &'a str,
+    title: &'a str,
+    body: &'a str,
+    created_at: &'a str,
+}
+
+struct CommentCreatedProjection<'a> {
+    actor_id: &'a str,
+    comment_id: &'a str,
+    channel_id: &'a str,
+    channel_slug: &'a str,
+    thread_id: &'a str,
+    thread_title: &'a str,
+    obj_index: i64,
+    body: &'a str,
+    created_at: &'a str,
+}
+
+struct DmCreatedProjection<'a> {
+    actor_id: &'a str,
+    conversation_id: &'a str,
+    message_id: &'a str,
+    obj_index: i64,
+    body: &'a str,
+    created_at: &'a str,
+}
+
+impl MessageWriteProjector {
+    async fn thread_created(
+        tx: &mut DbTransaction,
+        input: ThreadCreatedProjection<'_>,
+    ) -> anyhow::Result<()> {
+        upsert_search_index_tx(
+            tx,
+            SearchIndexInput {
+                kind: "thread",
+                object_id: input.thread_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                title: input.title,
+                body: input.body,
+                context: &format!("#{}", input.channel_slug),
+            },
+        )
+        .await?;
+        create_mention_notifications_tx(
+            tx,
+            input.actor_id,
+            MentionInput {
+                source_kind: "thread",
+                source_id: input.thread_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                obj_index: None,
+                title: input.title,
+                body: input.body,
+            },
+        )
+        .await?;
+        let label_text = thread_label_text(input.title, input.body);
+        replace_labels_tx(
+            tx,
+            LabelIndexInput {
+                source_kind: "thread",
+                source_id: input.thread_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                obj_index: None,
+                text: &label_text,
+                created_at: input.created_at,
+            },
+        )
+        .await?;
+        insert_event(
+            tx,
+            Some(input.channel_id),
+            Some(input.thread_id),
+            None,
+            "thread.created",
+            serde_json::json!({
+                "thread_id": input.thread_id,
+                "channel_id": input.channel_id,
+                "title": input.title
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn comment_created(
+        tx: &mut DbTransaction,
+        input: CommentCreatedProjection<'_>,
+    ) -> anyhow::Result<()> {
+        upsert_search_index_tx(
+            tx,
+            SearchIndexInput {
+                kind: "comment",
+                object_id: input.comment_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                title: input.thread_title,
+                body: input.body,
+                context: &format!("#{}", input.channel_slug),
+            },
+        )
+        .await?;
+        create_mention_notifications_tx(
+            tx,
+            input.actor_id,
+            MentionInput {
+                source_kind: "comment",
+                source_id: input.comment_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                obj_index: Some(input.obj_index),
+                title: input.thread_title,
+                body: input.body,
+            },
+        )
+        .await?;
+        create_thread_reply_notifications_tx(
+            tx,
+            input.actor_id,
+            ReplyNotificationInput {
+                thread_id: input.thread_id,
+                channel_id: input.channel_id,
+                comment_id: input.comment_id,
+                obj_index: input.obj_index,
+                title: input.thread_title,
+                body: input.body,
+            },
+        )
+        .await?;
+        replace_labels_tx(
+            tx,
+            LabelIndexInput {
+                source_kind: "comment",
+                source_id: input.comment_id,
+                channel_id: Some(input.channel_id),
+                thread_id: Some(input.thread_id),
+                conversation_id: None,
+                obj_index: Some(input.obj_index),
+                text: input.body,
+                created_at: input.created_at,
+            },
+        )
+        .await?;
+        insert_event(
+            tx,
+            Some(input.channel_id),
+            Some(input.thread_id),
+            None,
+            "comment.created",
+            serde_json::json!({
+                "thread_id": input.thread_id,
+                "channel_id": input.channel_id,
+                "obj_index": input.obj_index
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn dm_created(
+        tx: &mut DbTransaction,
+        input: DmCreatedProjection<'_>,
+    ) -> anyhow::Result<()> {
+        upsert_search_index_tx(
+            tx,
+            SearchIndexInput {
+                kind: "dm",
+                object_id: input.message_id,
+                channel_id: None,
+                thread_id: None,
+                conversation_id: Some(input.conversation_id),
+                title: "DM",
+                body: input.body,
+                context: "DM",
+            },
+        )
+        .await?;
+        create_dm_notifications_tx(
+            tx,
+            input.actor_id,
+            input.conversation_id,
+            input.message_id,
+            input.obj_index,
+            input.body,
+        )
+        .await?;
+        create_mention_notifications_tx(
+            tx,
+            input.actor_id,
+            MentionInput {
+                source_kind: "dm",
+                source_id: input.message_id,
+                channel_id: None,
+                thread_id: None,
+                conversation_id: Some(input.conversation_id),
+                obj_index: Some(input.obj_index),
+                title: "DM",
+                body: input.body,
+            },
+        )
+        .await?;
+        replace_labels_tx(
+            tx,
+            LabelIndexInput {
+                source_kind: "dm",
+                source_id: input.message_id,
+                channel_id: None,
+                thread_id: None,
+                conversation_id: Some(input.conversation_id),
+                obj_index: Some(input.obj_index),
+                text: input.body,
+                created_at: input.created_at,
+            },
+        )
+        .await?;
+        insert_event(
+            tx,
+            None,
+            None,
+            Some(input.conversation_id),
+            "conversation.message_created",
+            serde_json::json!({
+                "conversation_id": input.conversation_id,
+                "obj_index": input.obj_index
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
 pub(crate) async fn create_thread(
     pool: &Database,
     actor_id: &str,
@@ -201,57 +447,17 @@ pub(crate) async fn create_thread(
         .bind(channel_id)
         .fetch_one(&mut tx)
         .await?;
-    upsert_search_index_tx(
+    MessageWriteProjector::thread_created(
         &mut tx,
-        SearchIndexInput {
-            kind: "thread",
-            object_id: &thread_id,
-            channel_id: Some(channel_id),
-            thread_id: Some(&thread_id),
-            conversation_id: None,
+        ThreadCreatedProjection {
+            actor_id,
+            thread_id: &thread_id,
+            channel_id,
+            channel_slug: &channel_slug,
             title,
             body,
-            context: &format!("#{channel_slug}"),
-        },
-    )
-    .await?;
-    create_mention_notifications_tx(
-        &mut tx,
-        actor_id,
-        MentionInput {
-            source_kind: "thread",
-            source_id: &thread_id,
-            channel_id: Some(channel_id),
-            thread_id: Some(&thread_id),
-            conversation_id: None,
-            obj_index: None,
-            title,
-            body,
-        },
-    )
-    .await?;
-    let label_text = thread_label_text(title, body);
-    replace_labels_tx(
-        &mut tx,
-        LabelIndexInput {
-            source_kind: "thread",
-            source_id: &thread_id,
-            channel_id: Some(channel_id),
-            thread_id: Some(&thread_id),
-            conversation_id: None,
-            obj_index: None,
-            text: &label_text,
             created_at: &now,
         },
-    )
-    .await?;
-    insert_event(
-        &mut tx,
-        Some(channel_id),
-        Some(&thread_id),
-        None,
-        "thread.created",
-        serde_json::json!({"thread_id": thread_id, "channel_id": channel_id, "title": title}),
     )
     .await?;
     tx.commit().await?;
@@ -352,69 +558,19 @@ pub(crate) async fn add_comment(
         .bind(&channel_id)
         .fetch_one(&mut tx)
         .await?;
-    upsert_search_index_tx(
+    MessageWriteProjector::comment_created(
         &mut tx,
-        SearchIndexInput {
-            kind: "comment",
-            object_id: &comment_id,
-            channel_id: Some(&channel_id),
-            thread_id: Some(thread_id),
-            conversation_id: None,
-            title: &thread_title,
-            body,
-            context: &format!("#{channel_slug}"),
-        },
-    )
-    .await?;
-    create_mention_notifications_tx(
-        &mut tx,
-        actor_id,
-        MentionInput {
-            source_kind: "comment",
-            source_id: &comment_id,
-            channel_id: Some(&channel_id),
-            thread_id: Some(thread_id),
-            conversation_id: None,
-            obj_index: Some(next_index),
-            title: &thread_title,
-            body,
-        },
-    )
-    .await?;
-    create_thread_reply_notifications_tx(
-        &mut tx,
-        actor_id,
-        ReplyNotificationInput {
-            thread_id,
-            channel_id: &channel_id,
+        CommentCreatedProjection {
+            actor_id,
             comment_id: &comment_id,
+            channel_id: &channel_id,
+            channel_slug: &channel_slug,
+            thread_id,
+            thread_title: &thread_title,
             obj_index: next_index,
-            title: &thread_title,
             body,
-        },
-    )
-    .await?;
-    replace_labels_tx(
-        &mut tx,
-        LabelIndexInput {
-            source_kind: "comment",
-            source_id: &comment_id,
-            channel_id: Some(&channel_id),
-            thread_id: Some(thread_id),
-            conversation_id: None,
-            obj_index: Some(next_index),
-            text: body,
             created_at: &now,
         },
-    )
-    .await?;
-    insert_event(
-        &mut tx,
-        Some(&channel_id),
-        Some(thread_id),
-        None,
-        "comment.created",
-        serde_json::json!({"thread_id": thread_id, "channel_id": channel_id, "obj_index": next_index}),
     )
     .await?;
     tx.commit().await?;
@@ -565,65 +721,16 @@ pub(crate) async fn send_dm(
     .bind(actor_id)
     .execute(&mut tx)
     .await?;
-    upsert_search_index_tx(
+    MessageWriteProjector::dm_created(
         &mut tx,
-        SearchIndexInput {
-            kind: "dm",
-            object_id: &message_id,
-            channel_id: None,
-            thread_id: None,
-            conversation_id: Some(conversation_id),
-            title: "DM",
+        DmCreatedProjection {
+            actor_id,
+            conversation_id,
+            message_id: &message_id,
+            obj_index: next_index,
             body,
-            context: "DM",
-        },
-    )
-    .await?;
-    create_dm_notifications_tx(
-        &mut tx,
-        actor_id,
-        conversation_id,
-        &message_id,
-        next_index,
-        body,
-    )
-    .await?;
-    create_mention_notifications_tx(
-        &mut tx,
-        actor_id,
-        MentionInput {
-            source_kind: "dm",
-            source_id: &message_id,
-            channel_id: None,
-            thread_id: None,
-            conversation_id: Some(conversation_id),
-            obj_index: Some(next_index),
-            title: "DM",
-            body,
-        },
-    )
-    .await?;
-    replace_labels_tx(
-        &mut tx,
-        LabelIndexInput {
-            source_kind: "dm",
-            source_id: &message_id,
-            channel_id: None,
-            thread_id: None,
-            conversation_id: Some(conversation_id),
-            obj_index: Some(next_index),
-            text: body,
             created_at: &now,
         },
-    )
-    .await?;
-    insert_event(
-        &mut tx,
-        None,
-        None,
-        Some(conversation_id),
-        "conversation.message_created",
-        serde_json::json!({"conversation_id": conversation_id, "obj_index": next_index}),
     )
     .await?;
     tx.commit().await?;

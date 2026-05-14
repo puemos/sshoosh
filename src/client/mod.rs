@@ -1,5 +1,11 @@
+mod accounts;
 mod action;
+mod audit;
+mod channels;
 mod command_outcome;
+mod feeds;
+mod messages;
+mod notifications;
 mod session;
 mod view_model;
 

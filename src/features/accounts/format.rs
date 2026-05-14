@@ -16,7 +16,7 @@ pub(crate) fn accounts_modal(rows: &[AccountSummary]) -> ListModal {
                 row_values([
                     format!("@{}", row.username),
                     row.role.as_str().to_string(),
-                    account_state(row).to_string(),
+                    row.state_label().to_string(),
                     format_optional_timestamp(row.last_seen_at.as_deref()),
                 ])
             })
@@ -37,7 +37,7 @@ pub(crate) fn keys_modal(title: &str, rows: &[SshKeySummary]) -> ListModal {
                     short_id(&row.id).to_string(),
                     format!("@{}", row.username),
                     row.fingerprint.clone(),
-                    key_state(row).to_string(),
+                    row.state_label().to_string(),
                 ])
             })
             .collect(),
@@ -57,41 +57,13 @@ pub(crate) fn invites_modal(rows: &[InviteSummary]) -> ListModal {
                     short_id(&row.id).to_string(),
                     row.role_on_accept.as_str().to_string(),
                     format!("@{}", row.created_by),
-                    invite_state(row).to_string(),
+                    row.state_label().to_string(),
                     format_optional_timestamp(row.expires_at.as_deref()),
                 ])
             })
             .collect(),
         row_actions: Vec::new(),
         empty: "No invites found.".to_string(),
-    }
-}
-
-fn account_state(row: &AccountSummary) -> &'static str {
-    if row.disabled {
-        "disabled"
-    } else if row.activated {
-        "active"
-    } else {
-        "pending"
-    }
-}
-
-fn key_state(row: &SshKeySummary) -> &'static str {
-    if row.revoked_at.is_some() {
-        "revoked"
-    } else {
-        "active"
-    }
-}
-
-fn invite_state(row: &InviteSummary) -> &'static str {
-    if row.accepted_at.is_some() {
-        "accepted"
-    } else if row.revoked_at.is_some() {
-        "revoked"
-    } else {
-        "open"
     }
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    app::lifecycle::fetch_refresh,
+    app::{ActionDomain, lifecycle::fetch_refresh},
     features::shared::action::ActionResult,
     features::{accounts, audit, channels, feeds, messages, notifications},
 };
@@ -28,102 +28,36 @@ pub(crate) async fn perform_refresh(app: &Arc<Mutex<App>>) -> anyhow::Result<()>
     Ok(())
 }
 
-fn refresh_after_action(action: &Action) -> bool {
-    !matches!(
-        action,
-        Action::LoadMore { .. }
-            | Action::Search { .. }
-            | Action::OpenLabel { .. }
-            | Action::OpenAccount
-            | Action::ListSaved
-            | Action::ListNotifications
-    )
-}
-
 pub(crate) async fn process_action(app: &Arc<Mutex<App>>, action: Action) -> anyhow::Result<()> {
-    let refresh_after = refresh_after_action(&action);
+    let refresh_after = action.refreshes_after();
+    let domain = action.domain();
     let (session, account_id) = {
         let app = app.lock().await;
         (app.client_session(), app.account.id.clone())
     };
 
-    let result = match action {
-        Action::OpenAccount => {
-            app.lock().await.open_account_page();
-            Ok(ActionResult::silent())
-        }
-        action @ (Action::CreateInvite
-        | Action::CreateInviteWithOptions { .. }
-        | Action::CompleteOnboarding { .. }
-        | Action::ListUsers
-        | Action::SetUsername { .. }
-        | Action::SetProfile { .. }
-        | Action::SaveAccountSettings { .. }
-        | Action::SetUserDisabled { .. }
-        | Action::SetUserRole { .. }
-        | Action::ListKeys
-        | Action::ListMyKeys
-        | Action::AddKey { .. }
-        | Action::CreateDeviceLinkToken { .. }
-        | Action::LabelKey { .. }
-        | Action::RevokeKey { .. }
-        | Action::ListInvites
-        | Action::RevokeInvite { .. }) => {
+    let result = match domain {
+        ActionDomain::App => match action {
+            Action::OpenAccount => {
+                app.lock().await.open_account_page();
+                Ok(ActionResult::silent())
+            }
+            _ => unreachable!("app action domain contained non-app action"),
+        },
+        ActionDomain::Accounts => {
             accounts::actions::process(app, &session, &account_id, action).await
         }
-        action @ (Action::CreateChannel { .. }
-        | Action::JoinChannel { .. }
-        | Action::LeaveChannel { .. }
-        | Action::ListChannels
-        | Action::RenameChannel { .. }
-        | Action::SetChannelTopic { .. }
-        | Action::SetChannelArchived { .. }
-        | Action::ListChannelMembers { .. }
-        | Action::AddChannelMember { .. }
-        | Action::RemoveChannelMember { .. }) => {
+        ActionDomain::Channels => {
             channels::actions::process(app, &session, &account_id, action).await
         }
-        action @ (Action::CreateThread { .. }
-        | Action::AddComment { .. }
-        | Action::SendDm { .. }
-        | Action::OpenDm { .. }
-        | Action::MarkThreadRead
-        | Action::MarkThreadUnread
-        | Action::MarkDmRead
-        | Action::MarkDmUnread
-        | Action::NextUnread
-        | Action::RenameThread { .. }
-        | Action::DeleteThread
-        | Action::SetThreadArchived { .. }
-        | Action::SetThreadPinned { .. }
-        | Action::SetThreadMuted { .. }
-        | Action::SetMessageSaved { .. }
-        | Action::EditComment { .. }
-        | Action::DeleteComment { .. }
-        | Action::EditDm { .. }
-        | Action::DeleteDm { .. }
-        | Action::SetDmMuted { .. }
-        | Action::React { .. }
-        | Action::Unreact { .. }) => {
+        ActionDomain::Messages => {
             messages::actions::process(app, &session, &account_id, action).await
         }
-        action @ (Action::ListMentions
-        | Action::ListNotifications
-        | Action::OpenSourceTarget { .. }
-        | Action::MarkNotificationRead { .. }
-        | Action::ArchiveNotifications
-        | Action::SetTerminalNotifications { .. }
-        | Action::ShowTerminalNotificationsStatus) => {
+        ActionDomain::Notifications => {
             notifications::actions::process(app, &session, &account_id, action).await
         }
-        action @ Action::ListAudit => {
-            audit::actions::process(app, &session, &account_id, action).await
-        }
-        action @ (Action::Search { .. }
-        | Action::OpenLabel { .. }
-        | Action::ListSaved
-        | Action::LoadMore { .. }
-        | Action::LoadOlder) => feeds::actions::process(app, &session, &account_id, action).await,
+        ActionDomain::Audit => audit::actions::process(app, &session, &account_id, action).await,
+        ActionDomain::Feeds => feeds::actions::process(app, &session, &account_id, action).await,
     };
 
     {

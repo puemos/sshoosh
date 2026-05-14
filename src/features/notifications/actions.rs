@@ -18,14 +18,15 @@ pub(crate) async fn process(
     account_id: &str,
     action: Action,
 ) -> anyhow::Result<ActionResult> {
+    let notifications = session.notifications();
     match action {
-        Action::ListMentions => session
-            .list_mentions(account_id, 50)
+        Action::ListMentions => notifications
+            .list_mentions(50)
             .await
             .map(|rows| ActionResult::List(mentions_modal(&rows))),
         Action::ListNotifications => {
-            match session
-                .list_notifications_page(account_id, PageRequest::first(50))
+            match notifications
+                .list_notifications_page(PageRequest::first(50))
                 .await
             {
                 Ok(page) => {
@@ -41,14 +42,14 @@ pub(crate) async fn process(
             open_source_target(app, session, account_id, target).await
         }
         Action::MarkNotificationRead { notification_id } => {
-            match session
-                .mark_notification_read(account_id, notification_id.as_deref())
+            match notifications
+                .mark_notification_read(notification_id.as_deref())
                 .await
             {
                 Ok(()) => {
                     if app.lock().await.notifications_active() {
-                        let page = session
-                            .list_notifications_page(account_id, PageRequest::first(50))
+                        let page = notifications
+                            .list_notifications_page(PageRequest::first(50))
                             .await?;
                         app.lock()
                             .await
@@ -59,11 +60,11 @@ pub(crate) async fn process(
                 Err(err) => Err(err),
             }
         }
-        Action::ArchiveNotifications => match session.archive_notifications(account_id).await {
+        Action::ArchiveNotifications => match notifications.archive_notifications().await {
             Ok(()) => {
                 if app.lock().await.notifications_active() {
-                    let page = session
-                        .list_notifications_page(account_id, PageRequest::first(50))
+                    let page = notifications
+                        .list_notifications_page(PageRequest::first(50))
                         .await?;
                     app.lock()
                         .await
@@ -73,8 +74,8 @@ pub(crate) async fn process(
             }
             Err(err) => Err(err),
         },
-        Action::SetTerminalNotifications { enabled } => session
-            .set_terminal_notifications(account_id, enabled)
+        Action::SetTerminalNotifications { enabled } => notifications
+            .set_terminal_notifications(enabled)
             .await
             .map(|_| {
                 if enabled {
@@ -83,8 +84,8 @@ pub(crate) async fn process(
                     ActionResult::message("Terminal notifications disabled")
                 }
             }),
-        Action::ShowTerminalNotificationsStatus => session
-            .terminal_notifications_enabled(account_id)
+        Action::ShowTerminalNotificationsStatus => notifications
+            .terminal_notifications_enabled()
             .await
             .map(|enabled| {
                 if enabled {

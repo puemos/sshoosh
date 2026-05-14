@@ -18,6 +18,14 @@ impl ClientSession {
         &self.account
     }
 
+    pub fn actor_id(&self) -> &str {
+        &self.account.id
+    }
+
+    pub(crate) fn state(&self) -> &ServerState {
+        &self.state
+    }
+
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<LiveEvent> {
         self.state.subscribe()
     }

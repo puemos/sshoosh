@@ -42,7 +42,10 @@ pub(crate) async fn fetch_refresh(
             inputs.history_limit,
         )
         .await?;
-    let terminal_notifications_enabled = client.terminal_notifications_enabled(&account.id).await?;
+    let terminal_notifications_enabled = client
+        .notifications()
+        .terminal_notifications_enabled()
+        .await?;
     Ok(RefreshFetched {
         account,
         snapshot,

@@ -1,4 +1,5 @@
-use super::executor::{QueryMutation, normalize_sql, query_mutation, value_as_str};
+use super::executor::value_as_str;
+use super::mutation::{QueryMutation, normalize_sql, query_mutation};
 use super::*;
 
 pub(super) const ENVELOPE_PREFIX: &str = "sshoosh:v1:xchacha20poly1305:";

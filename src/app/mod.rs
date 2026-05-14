@@ -4,6 +4,7 @@ mod input;
 mod render;
 mod state;
 mod theme;
+pub(crate) use action::ActionDomain;
 pub use action::{Action, LoadMoreRequest, SourceFocus, SourceTarget};
 
 use std::{
